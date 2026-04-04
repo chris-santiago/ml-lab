@@ -19,9 +19,11 @@ We created 20 synthetic ML scenarios with *known correct answers* — cases like
 
 Each case had a planted flaw (or deliberate absence of one), a ground-truth correct verdict, and specific issues the evaluation had to find.
 
-We then ran two conditions against every case:
+We ran three conditions against every case:
 
 **Debate condition:** Two AI agents receive the same scenario with no shared context. One plays Critic, one plays Defender. Each produces an independent assessment. A Judge adjudicates and assigns a typed verdict: *critique wins*, *defense wins*, or *run an empirical test*.
+
+**Compute-matched ensemble:** Three independent assessors plus a synthesizer — same total compute as the debate, but no role differentiation. Everyone sees the same scenario; no one is assigned to argue a position.
 
 **Baseline condition:** One AI agent, one pass, no debate structure.
 
@@ -82,6 +84,7 @@ Debate adds something single-pass cannot: an independent second opinion with no 
 ## The Setup in Brief
 
 - **20 benchmark cases**, 6 categories (broken baselines, metric mismatches, hidden confounders, scope misunderstandings, false-positive traps, real-world deployment framing)
+- **Three conditions**: debate protocol, compute-matched ensemble, single-pass baseline
 - **Scoring rubric** defined before running the experiment: issue discovery, defense calibration, verdict quality, empirical test design, final verdict correctness
 - **Full context isolation** between agents — no shared outputs before independent assessments
 - **Known ground truth** for every case, so "better" has a definite answer
