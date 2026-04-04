@@ -5,19 +5,23 @@ Tests whether the debate protocol's high IDR scores reflect genuine issue
 detection or same-model self-consistency bias (the scorer is the same model
 family that generated the transcripts).
 
-REQUIRES: An external model API key (OpenAI or Google). Set one of:
-    export OPENAI_API_KEY=...        # uses gpt-4o
-    export GOOGLE_API_KEY=...        # uses gemini-1.5-pro
+SCORER MODEL: claude-haiku-4-5-20251001
+Rationale: Uses a different capability tier of the Anthropic model family
+(Haiku vs. Sonnet) to reduce — but not eliminate — same-company bias.
+This is a pragmatic choice to avoid external API costs. The remaining
+limitation (same company/pretraining) is acknowledged explicitly in results.
 
-The scorer is given each case's debate transcript (Critic + Defender outputs)
-and the task prompt, but NOT the must_find labels. It must independently
-identify which issues were found and score IDR.
+True cross-vendor validation (GPT-4o or Gemini) would require OPENAI_API_KEY
+or GOOGLE_API_KEY; the original cross_model_scorer.py supported those paths.
+This version uses the authenticated Claude Code session's Anthropic API key.
 
-Outputs: cross_model_scores.json
+REQUIRES: ANTHROPIC_API_KEY in environment (automatically set in Claude Code).
 
 Usage:
     cd self_debate_experiment_v2/
-    OPENAI_API_KEY=sk-... python cross_model_scorer.py
+    python cross_model_scorer.py
+
+Outputs: cross_model_scores.json
 """
 
 import json
@@ -28,8 +32,12 @@ import sys
 # Configuration
 # ---------------------------------------------------------------------------
 
-OPENAI_MODEL = "gpt-4o"
-GEMINI_MODEL = "gemini-1.5-pro"
+SCORER_MODEL = "claude-haiku-4-5-20251001"
+SCORER_FAMILY_NOTE = (
+    "claude-haiku-4-5 (Anthropic) — same company as transcript-generating model "
+    "(claude-sonnet-4-6), different capability tier. Scores same-company bias only "
+    "partially; cross-vendor validation (GPT-4o / Gemini) would be stronger."
+)
 
 SCORER_PROMPT_TEMPLATE = """You are an objective rubric scorer evaluating an ML hypothesis investigation.
 
@@ -61,57 +69,47 @@ Respond in JSON format:
 """
 
 # ---------------------------------------------------------------------------
-# API clients (lazy import — only the one that's configured)
+# Anthropic client
 # ---------------------------------------------------------------------------
 
-def get_openai_score(prompt):
+def get_haiku_score(prompt):
     try:
-        import openai
+        import anthropic
     except ImportError:
-        print("ERROR: openai package not installed. Run: pip install openai")
+        print("ERROR: anthropic package not installed. Run: pip install anthropic")
         sys.exit(1)
-    client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    response = client.chat.completions.create(
-        model=OPENAI_MODEL,
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        print("ERROR: ANTHROPIC_API_KEY not set. This script must be run from within "
+              "an authenticated Claude Code session or with the key exported.")
+        sys.exit(1)
+    client = anthropic.Anthropic(api_key=api_key)
+    response = client.messages.create(
+        model=SCORER_MODEL,
+        max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-        temperature=0,
     )
-    return json.loads(response.choices[0].message.content)
-
-
-def get_gemini_score(prompt):
-    try:
-        import google.generativeai as genai
-    except ImportError:
-        print("ERROR: google-generativeai package not installed. Run: pip install google-generativeai")
-        sys.exit(1)
-    genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
-    model = genai.GenerativeModel(GEMINI_MODEL)
-    response = model.generate_content(prompt)
-    return json.loads(response.text)
-
-
-def get_score(prompt):
-    if os.environ.get("OPENAI_API_KEY"):
-        return get_openai_score(prompt), OPENAI_MODEL
-    elif os.environ.get("GOOGLE_API_KEY"):
-        return get_gemini_score(prompt), GEMINI_MODEL
-    else:
-        print("ERROR: Set OPENAI_API_KEY or GOOGLE_API_KEY before running.")
-        sys.exit(1)
+    # Extract JSON from response text
+    text = response.content[0].text.strip()
+    # Handle markdown code fences if present
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text = "\n".join(lines[1:-1]) if lines[-1].strip() == "```" else "\n".join(lines[1:])
+    return json.loads(text)
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
+def load_json(path):
+    with open(path) as f:
+        return json.load(f)
+
+
 def main():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     data = load_json(os.path.join(base_dir, "self_debate_results.json"))
-    benchmark_prompts = load_json(os.path.join(base_dir, "benchmark_prompts.json")) \
-        if os.path.exists(os.path.join(base_dir, "benchmark_prompts.json")) \
-        else None
 
     # Non-defense_wins cases only (IDR applies)
     cases = [c for c in data["cases"] if c["correct_position"] != "defense"]
@@ -124,11 +122,12 @@ def main():
         case_id = case["case_id"]
         print(f"Scoring {case_id}...")
 
-        # Get transcript text from the results JSON
-        critic_output = case.get("transcripts", {}).get("critic", "[Transcript not available — re-run agents]")
-        defender_output = case.get("transcripts", {}).get("defender", "[Transcript not available — re-run agents]")
-
-        # Task prompt: try benchmark_prompts.json, else use case description
+        critic_output = case.get("transcripts", {}).get(
+            "critic", "[Transcript not available — re-run agents]"
+        )
+        defender_output = case.get("transcripts", {}).get(
+            "defender", "[Transcript not available — re-run agents]"
+        )
         task_prompt = case.get("task_prompt", f"[See BENCHMARK_PROMPTS.md for {case_id}]")
 
         prompt = SCORER_PROMPT_TEMPLATE.format(
@@ -137,7 +136,7 @@ def main():
             defender_output=defender_output,
         )
 
-        score_result, model_used = get_score(prompt)
+        score_result = get_haiku_score(prompt)
         cross_model_idr = score_result.get("IDR", None)
         original_idr = case["debate_scores"].get("IDR")
 
@@ -145,10 +144,14 @@ def main():
             "case_id": case_id,
             "original_IDR": original_idr,
             "cross_model_IDR": cross_model_idr,
-            "delta": round(cross_model_idr - original_idr, 4) if cross_model_idr is not None and original_idr is not None else None,
+            "delta": (
+                round(cross_model_idr - original_idr, 4)
+                if cross_model_idr is not None and original_idr is not None
+                else None
+            ),
             "issues_found": score_result.get("issues_found", []),
             "reasoning": score_result.get("reasoning", ""),
-            "scorer_model": model_used,
+            "scorer_model": SCORER_MODEL,
         })
 
         if original_idr is not None:
@@ -156,23 +159,41 @@ def main():
         if cross_model_idr is not None:
             cross_model_idr_scores.append(cross_model_idr)
 
-    # Aggregate
     n = len([r for r in results if r["delta"] is not None])
-    mean_original = sum(original_idr_scores) / len(original_idr_scores) if original_idr_scores else None
-    mean_cross = sum(cross_model_idr_scores) / len(cross_model_idr_scores) if cross_model_idr_scores else None
-    mean_delta = (mean_cross - mean_original) if (mean_original and mean_cross) else None
+    mean_original = (
+        sum(original_idr_scores) / len(original_idr_scores) if original_idr_scores else None
+    )
+    mean_cross = (
+        sum(cross_model_idr_scores) / len(cross_model_idr_scores)
+        if cross_model_idr_scores
+        else None
+    )
+    mean_delta = (mean_cross - mean_original) if (mean_original is not None and mean_cross is not None) else None
 
     output = {
-        "scorer_model": results[0]["scorer_model"] if results else None,
+        "scorer_model": SCORER_MODEL,
+        "scorer_family_note": SCORER_FAMILY_NOTE,
+        "limitation": (
+            "Scorer is from the same company (Anthropic) as the transcript-generating model. "
+            "Same-company pretraining may produce correlated responses independent of content. "
+            "Haiku vs. Sonnet capability difference provides partial but not full cross-model isolation. "
+            "A GPT-4o or Gemini scorer would provide stronger external validation."
+        ),
         "n_cases": n,
-        "original_mean_IDR": round(mean_original, 4) if mean_original else None,
-        "cross_model_mean_IDR": round(mean_cross, 4) if mean_cross else None,
-        "mean_delta": round(mean_delta, 4) if mean_delta else None,
+        "original_mean_IDR": round(mean_original, 4) if mean_original is not None else None,
+        "cross_model_mean_IDR": round(mean_cross, 4) if mean_cross is not None else None,
+        "mean_delta": round(mean_delta, 4) if mean_delta is not None else None,
         "bias_material": abs(mean_delta) > 0.1 if mean_delta is not None else None,
         "interpretation": (
-            f"IDR shifted by {mean_delta:+.4f}. "
-            + ("Self-scoring bias is MATERIAL (|delta| > 0.1)." if abs(mean_delta) > 0.1 else "Self-scoring bias is NOT material (|delta| <= 0.1).")
-        ) if mean_delta is not None else "Could not compute — check transcripts",
+            f"IDR shifted by {mean_delta:+.4f} (Haiku vs. Sonnet scorer). "
+            + (
+                "Same-company bias is MATERIAL (|delta| > 0.1) — warrants cross-vendor replication."
+                if abs(mean_delta) > 0.1
+                else "Same-company bias is NOT material (|delta| <= 0.1) — scores converge across Anthropic capability tiers."
+            )
+        )
+        if mean_delta is not None
+        else "Could not compute — check transcripts",
         "cases": results,
     }
 
@@ -180,17 +201,13 @@ def main():
     with open(out_path, "w") as f:
         json.dump(output, f, indent=2)
 
-    print(f"\n=== Cross-Model Scorer Results ===")
-    print(f"Original IDR mean:     {mean_original:.4f}")
+    print(f"\n=== Cross-Model Scorer Results (claude-haiku-4-5) ===")
+    print(f"Original IDR mean:     {mean_original:.4f}" if mean_original else "N/A")
     print(f"Cross-model IDR mean:  {mean_cross:.4f}" if mean_cross else "N/A")
-    print(f"Delta:                 {mean_delta:+.4f}" if mean_delta else "N/A")
+    print(f"Delta:                 {mean_delta:+.4f}" if mean_delta is not None else "N/A")
     print(f"Bias material:         {output['bias_material']}")
-    print(f"\nSaved to {out_path}")
-
-
-def load_json(path):
-    with open(path) as f:
-        return json.load(f)
+    print(f"\nNOTE: Same-company scorer (Anthropic Haiku). Partial cross-model isolation only.")
+    print(f"Saved to {out_path}")
 
 
 if __name__ == "__main__":

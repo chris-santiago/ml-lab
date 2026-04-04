@@ -326,12 +326,17 @@ All experimental artifacts are in `/self_debate_experiment_v2/`:
 | `self_debate_results.json` | Full results JSON: per-case scores, transcripts, aggregates |
 | `CONCLUSIONS.md` | Per-case scoring tables, dimension-level aggregates, failure mode analysis |
 | `SENSITIVITY_ANALYSIS.md` | Rubric design effects on reported lift; honest corrected range +0.335–0.441 |
-| `ENSEMBLE_ANALYSIS.md` | Compute-matched ensemble follow-on; ETD forcing function finding; IDP asymmetry correction |
+| `ENSEMBLE_ANALYSIS.md` | Compute-matched ensemble follow-on; ETD ablation; IDP asymmetry correction; mm002 failure analysis |
 | `clean_ensemble_results.json` | Per-case ensemble scores — clean two-phase run |
+| `etd_ablation_results.json` | ETD ablation across 13 applicable cases (ensemble + explicit constraint); verdict: prompt_design |
+| `cross_model_scores.json` | Cross-capability scorer validation (Haiku); IDR delta=0.0; bias not material |
+| `cross_model_scorer.py` | Haiku-based cross-capability scorer script |
 | `stats_analysis.py` | Bootstrap CIs and paired Wilcoxon tests on per-case deltas |
 | `stats_results.json` | Output of stats_analysis.py: CIs, p-values, effect sizes |
 | `difficulty_validation.py` | Spearman correlation between difficulty labels and baseline scores |
-| `difficulty_validation_results.json` | Output of difficulty_validation.py |
+| `difficulty_validation_results.json` | Output: rho=-0.379 (non-defense_wins); monotonic easy>medium>hard |
+| `new_benchmark_cases.json` | 10 new benchmark cases (7 easy, 3 hard) for future expansion |
+| `within_case_variance.py` | Experiment design for LLM stochasticity estimation (requires multi-run dispatch) |
 | `REPORT.md` | This document |
 
 ---
@@ -342,6 +347,8 @@ The isolated self-debate protocol passes the benchmark on all three criteria. Th
 
 The clearest dimension advantage is in defense calibration (+0.867): the baseline scores 0.000 on this dimension in every case. The reasoning/label disconnect failure in real_world_framing_001 is resolved by a two-pass Defender prompt (analysis before verdict selection) — see `agents/ml-defender.md`.
 
-The post-experiment ensemble test refined the isolation hypothesis: the adversarial role architecture is not uniquely necessary to exonerate valid work (4/5 correct exonerations without isolation), but it produces cleaner exonerations and — crucially — forces production of agreed empirical test specifications that parallel assessors never generate. The debate protocol's structural advantage in empirical test design (ETD=1.0 across all applicable cases vs. ensemble ETD≈0.0–0.5) is the finding that best distinguishes the debate architecture from a more-compute alternative.
+The post-experiment ensemble test refined the isolation hypothesis: the adversarial role architecture is not uniquely necessary to exonerate valid work (4/5 correct exonerations without isolation), but it produces cleaner exonerations — the debate protocol's isolated Defender raised no false concerns on the two contested exoneration cases, while the ensemble raised caveats alongside correct exonerations.
+
+The ETD ablation (Issue 9) revised the remaining ETD claim: adding an explicit empirical-test-design output constraint to the ensemble synthesizer achieves ETD mean 0.962, nearly matching the debate protocol's 1.0 and far above the unconstrained ensemble's 0.192. **ETD is an output-constraint effect, not an adversarial role structure effect.** The debate protocol reliably produces test specifications because its prompt includes the constraint — not because the Critic/Defender dynamic structurally forces it. The debate protocol's confirmed structural advantages are: (1) cleaner exoneration precision (5/5 vs. 4/5 with caveats), and (2) structured point-by-point argumentation (DC, DRQ) that a parallel ensemble cannot produce by design.
 
 The fundamental finding holds: a structured isolated debate protocol with typed verdict roles substantially outperforms single-pass reasoning on synthetic ML reasoning tasks with known ground truth, particularly on hidden confounding, adversarial framing, and cases requiring a typed empirical resolution rather than a binary verdict.

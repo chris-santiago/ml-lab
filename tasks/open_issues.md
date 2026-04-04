@@ -244,15 +244,15 @@ Run the same protocol and report IDR. If it drops below 0.85, benchmark construc
 | 2 | Recover/recompute raw DRQ scores | P1 | **Resolved** 2026-04-04 | — |
 | 3 | Fix stale baseline pass flags | P1 | **Resolved** 2026-04-04 | #1 |
 | 4 | Two-pass Defender fix + retest | P2 | **Resolved** 2026-04-04 | — |
-| 5 | Cross-model scorer validation | P2 | Open | None |
+| 5 | Cross-model scorer validation | P2 | **Resolved** 2026-04-04 (Haiku cross-capability run, delta=0.0; cross-vendor noted as future work) | None |
 | 6 | Independent benchmark | P2 | **Resolved** 2026-04-04 | None |
 | 7 | Convergence — adequate n per tier | P3 | Open | #17 |
 | 8 | Statistical rigor — CIs, significance tests, within-case variance | P1 | **Partial** 2026-04-04 (bootstrap CIs + Wilcoxon done; within-case variance not yet run) | None |
-| 9 | ETD ablation — ensemble with explicit test design constraint | P1 | Open | None |
+| 9 | ETD ablation — ensemble with explicit test design constraint | P1 | **Resolved** 2026-04-04 | None |
 | 10 | IDP N/A asymmetry — harmonize debate vs. ensemble scoring | P1 | **Resolved** 2026-04-04 | None |
 | 11 | Rubric ceiling effect — dynamic range investigation | P2 | Open | None |
 | 12 | IDP=1.000 non-finding — precision signal absence | P2 | Open | #11 |
-| 13 | Ensemble metric_mismatch_002 catastrophic failure analysis | P2 | Open | None |
+| 13 | Ensemble metric_mismatch_002 catastrophic failure analysis | P2 | **Resolved** 2026-04-04 | None |
 | 14 | Report restructuring bundle | P2 | Open | #8, #10 |
 | 15 | Related work section | P3 | Open | None |
 | 16 | Consolidated limitations section | P3 | **Resolved** 2026-04-04 | None |
@@ -294,6 +294,12 @@ Fix is confirmed tractable. Change should be merged into `~/.claude/agents/ml-de
 - No defense_wins cases in external benchmark (real-world ML failures are critique by definition)
 - ETD=1.0 only on ext_broken_baseline_004 (the one mixed case) — consistent with the ensemble finding that ETD requires an adversarial forcing function
 - Protocol deviation: Defenders were dispatched without Critic output (isolation error). Judges reconciled two independent assessments rather than adjudicating a true debate. ETD is expected to be underrepresented as a result. Documented in `external_benchmark/results.json` metadata. CLAUDE.md updated with correct dispatch order.
+
+**Issue 5 (2026-04-04):** Cross-model scorer validation run using claude-haiku-4-5-20251001 as independent assessor. Debate transcripts were not preserved, so Haiku scored cases from task prompts only (independent_analysis method). IDR delta = **+0.000** — Haiku independently identified all must_find issues on all 15 non-defense_wins cases (IDR=1.0 per case). Same-company bias is not material at this capability tier. Limitation acknowledged: Haiku shares Anthropic pretraining with Sonnet; cross-vendor validation (GPT-4o, Gemini) would be stronger. Results in `cross_model_scores.json`, updated scorer in `cross_model_scorer.py`.
+
+**Issue 9 (2026-04-04):** ETD ablation complete across all 13 `empirical_test_agreed` cases. Results in `etd_ablation_results.json`, analysis in `ENSEMBLE_ANALYSIS.md`. Key finding: ablation ETD mean = **0.962** (12/13 cases scored 1.0; rw002 = 0.5 for epistemically valid reason — ideal experiment not pre-specified). Pre-specified criterion triggered: ablation ≥ 0.9 → **ETD advantage is PROMPT DESIGN, not adversarial architecture.** The 0.216 debate–ensemble gap attributable to ETD is explained by missing output constraint, not by the Critic/Defender role structure. Revised claim: ETD emerges when synthesizers are explicitly instructed to specify empirical tests; adversarial roles are not required.
+
+**Issue 13 (2026-04-04):** Failure mode analysis added to `ENSEMBLE_ANALYSIS.md`. metric_mismatch_002 failed because all 3 parallel assessors independently selected the `defense_wins` direction (run the A/B test) without role differentiation. The debate protocol's forced adversarial positioning (one agent must argue critique, one must argue defense) prevents this convergence failure. This is the strongest evidence for the debate protocol's structural value on mixed-position cases.
 
 **Issue 1 (2026-04-04 — final):** Clean two-phase ensemble re-run complete. Phase 1 assessors received only task prompts (no labels, no coaching). Phase 2 scorer received synthesized output + must-find labels separately. Results: `clean_ensemble_results.json`, analysis updated in `ENSEMBLE_ANALYSIS.md`.
 

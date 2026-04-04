@@ -262,10 +262,57 @@ The qualitative claim survives in a weaker form: the ensemble *did* raise caveat
 
 ---
 
+## ETD Ablation — Ensemble with Explicit Test-Design Constraint (Issue 9)
+
+**Date:** 2026-04-04
+**Raw results:** `etd_ablation_results.json`
+
+### Question
+
+The debate protocol achieves ETD=1.0 across all `empirical_test_agreed` cases. The ensemble achieves ETD=0.192 on the same 13 cases. The standing claim was that the debate's adversarial forcing function (Critic and Defender must agree on a specific empirical test when they reach `empirical_test_agreed`) produces ETD that a parallel ensemble cannot. But the ensemble's synthesizer was never given an explicit ETD output constraint. The simpler explanation — it was never asked — was not ruled out.
+
+**Ablation:** Re-run the ensemble on the 13 `empirical_test_agreed` cases with the synthesizer explicitly instructed: *"If the issues identified are genuine but empirically resolvable, specify the empirical test that would resolve them: (1) what to measure, (2) pre-specified success criterion, (3) pre-specified failure criterion."*
+
+### Results
+
+| Metric | Value |
+|--------|-------|
+| Ablation ETD mean (ensemble + constraint) | **0.962** |
+| Original ensemble ETD mean (no constraint) | 0.192 |
+| Debate protocol ETD mean | 1.0 |
+| Pre-specified verdict threshold (≥0.9 → prompt design) | **TRIGGERED** |
+
+**Case-level scores:** 12/13 cases scored ETD=1.0. The single exception, `real_world_framing_002`, scored 0.5 — epistemically appropriate because the ideal experiment (a randomized holdout) was not pre-specified before deployment and cannot be fully reconstructed retrospectively. The synthesizer correctly identified this constraint and produced a partial rather than full test specification.
+
+### Verdict: **ETD advantage is PROMPT DESIGN, not adversarial architecture**
+
+The pre-specified criterion was triggered (ablation mean 0.962 ≥ 0.9). The debate protocol's ETD advantage over the original ensemble does not arise from the adversarial Critic/Defender role structure — it arises from the presence of an explicit output constraint instructing the synthesizer to specify empirical tests.
+
+### Implications
+
+1. **The ETD advantage claim must be revised.** The prior claim — that "the debate protocol's adversarial forcing function produces empirical test designs (ETD) that ensembles cannot" — is falsified. A parallel ensemble with the same output instruction achieves 0.962, within 0.038 of the debate protocol's 1.0.
+
+2. **The 0.216 debate–ensemble gap is now fully explained.** The gap was attributed to ETD and DRQ degradation from the missing test-design forcing function. We now know the ETD component of that gap is entirely explained by the missing output constraint, not by adversarial architecture.
+
+3. **What the debate protocol actually provides:** Role differentiation (Critic/Defender positions) and structured argument exchange. These *reliably elicit* the ETD output constraint in practice because the debate prompt specifies what output is required. But the constraint is portable — it can be added to any ensemble synthesizer.
+
+4. **Residual debate advantage:** If ETD is controlled (both conditions receive the explicit constraint), the remaining gap reflects only role structure effects on IDR, IDP, DC, DRQ, and FVC. The ensemble achieves ceiling on those dimensions already (non-defense_wins mean: 1.000), so the net residual advantage on critique cases is near zero. The isolation architecture for defense_wins cases remains the only uncontested structural advantage.
+
+### Revised Summary of Protocol Advantages
+
+| Claim | Status after ablation |
+|-------|----------------------|
+| ETD advantage from adversarial forcing | **Falsified** — output constraint sufficient |
+| Issue detection (IDR/IDP) advantage | **Confirmed absent** — ensemble matches at ceiling |
+| Defense_wins exoneration via isolation | **Unconfirmed** — isolation not uniquely necessary (4/5 ensemble DC≥0.5) |
+| Structured argumentation (DC, DRQ) | **Confirmed** — debate produces point-by-point rebuttals; ensemble does not |
+
+---
+
 ## Prompt Design Lessons
 
 For future ensemble experiments:
 1. Run assessors and scorer as separate agent invocations. Assessors receive only the task prompt. The scorer receives assessor outputs + the must-find labels separately.
 2. For defense_wins cases, omit all coaching from assessor prompts. The whole point is to test whether unguided assessors independently recognize valid work.
 3. Log which information was visible to which agent role for auditability.
-4. If the goal is empirical test design (not just issue detection), add an explicit output constraint to the synthesizer: "If the issues identified are real but resolvable empirically, specify the test that would resolve them."
+4. ETD is an output-constraint effect, not an architectural one. If empirical test design is the desired output, add an explicit constraint to the synthesizer in any multi-agent configuration — debate or ensemble.
