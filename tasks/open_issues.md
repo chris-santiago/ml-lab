@@ -89,6 +89,95 @@ Run the same protocol and report IDR. If it drops below 0.85, benchmark construc
 
 ---
 
+## Priority 1 (continued) — Peer Review Additions
+
+### 8. Statistical Rigor — Bootstrap CIs, Significance Tests, Within-Case Variance
+
+**Issue:** Every result is a single-run point estimate with no measure of variability. LLMs are stochastic; the reported means (0.970, 0.384) are samples from a distribution treated as fixed quantities. The convergence analysis is particularly underpowered (easy stratum n=3). Two peer reviewers flagged this as a blocking issue for any workshop submission.
+
+**Fix:**
+1. Bootstrap confidence intervals (10,000 resamples over the 20 cases) for benchmark mean, lift, and per-category means
+2. Paired Wilcoxon signed-rank test on per-case deltas (debate minus baseline; debate minus ensemble) — report p-values and effect sizes
+3. Re-run the full debate protocol 3–5 times on a subset of cases (e.g., 5 representative cases) to estimate within-case variance from LLM stochasticity
+
+**Effort:** (1) and (2) are pure statistics on existing JSON data — low effort, scriptable in ~50 lines. (3) requires ~100 additional API calls.
+
+---
+
+### 9. ETD Ablation — Ensemble with Explicit Test Design Output Constraint
+
+**Issue:** The report's central surviving claim is that the debate's adversarial forcing function produces empirical test designs (ETD) that ensembles cannot. But the ensemble was never asked to produce ETD — it had no output constraint requiring test proposals. The simpler explanation (the debate prompt asks for ETD; the ensemble prompt does not) is not ruled out. Until an ensemble with an explicit test-design instruction is run, the ETD finding is confounded with prompt design, not architecture.
+
+**Test:** Re-run the clean ensemble on the `empirical_test_agreed` cases (13 cases) with the synthesizer explicitly instructed: "If the issues identified are genuine but empirically resolvable, specify the empirical test that would resolve them with pre-specified success/failure criteria." Compare ETD scores to the debate protocol.
+
+**Verdict criteria:**
+- If ensemble ETD rises to match debate → ETD advantage is prompt design, not adversarial architecture
+- If ensemble ETD remains 0.0 or substantially below debate → adversarial forcing function is the mechanism
+
+**Effort:** ~55 API calls (4 per case × 13 cases + overhead). Modify existing ensemble script.
+
+---
+
+### 10. IDP N/A Asymmetry — Harmonize Debate vs. Ensemble Scoring for Defense_Wins Cases
+
+**Issue:** For the debate protocol, IDP is scored N/A on all 5 defense_wins cases. For the clean ensemble, IDP *is* scored on defense_wins cases (defense_wins_001 and _002 receive IDP=0.5 in `clean_ensemble_results.json`). This means defense_wins case means are computed over 3 dimensions (DC, DRQ, FVC) for debate and 4 dimensions (IDP, DC, DRQ, FVC) for ensemble. When the ensemble raises minor caveats on an exonerated case (IDP=0.5), it is penalized in a way the debate protocol cannot be. The "debate achieves cleaner exonerations" claim is partly an artifact of this asymmetric N/A treatment.
+
+**Fix:** Recompute ensemble defense_wins means excluding IDP (to match the debate condition). Report both the original and harmonized ensemble means. If the "cleaner exonerations" claim weakens, revise accordingly.
+
+**Effort:** Arithmetic fix on `clean_ensemble_results.json` + one paragraph update in `ENSEMBLE_ANALYSIS.md`.
+
+---
+
+## Priority 2 — Addresses Rubric and Report Validity
+
+### 11. Rubric Ceiling Effect — Dynamic Range Investigation
+
+**Issue:** The debate protocol scores 1.000 on 14 of 20 cases and never falls below 0.833. Four of six rubric dimensions (IDR, IDP, DRQ, FVC) are at perfect 1.000 aggregate. The report's "where the protocol adds value" analysis (§6) relies entirely on variation in *baseline* scores, not debate scores — the debate's own scores carry zero discriminative information. A rubric that cannot distinguish "protocol worked perfectly on an easy case" from "protocol worked perfectly on a hard case" is below its resolution for the treatment condition.
+
+**Fix:** One or more of:
+- Add harder benchmark cases that stress the protocol below 0.9
+- Increase rubric granularity from 0.0/0.5/1.0 to a finer scale for IDR (fraction of must-find issues, weighted by severity)
+- Audit why 14/20 cases hit ceiling — are the tasks too easy for the protocol, or is the scoring too lenient?
+
+**Effort:** Audit is low effort (read transcripts for ceiling cases). Rubric revision or new case addition is moderate.
+
+---
+
+### 12. IDP=1.000 Non-Finding — Precision Signal Absence
+
+**Issue:** Issue Discovery Precision is 1.000 for both debate and baseline across all 15 non-defense_wins cases. Neither system raised a single spurious issue. This is diagnostically empty — IDP provides zero signal for any comparison. The Critic is structurally incentivized to find issues; a rubric that never catches it raising invalid ones either measures the wrong construct or the benchmark cases are too clean to elicit hallucinated critiques.
+
+**Fix:** Investigate whether IDP=1.000 reflects: (a) genuinely high precision by both systems, (b) benchmark cases that lack plausible-but-wrong critique directions, or (c) scoring leniency that treats all raised issues as valid. Add at least 3–5 benchmark cases designed to elicit spurious critiques (e.g., valid work with superficially suspicious features). Report whether IDP falls below 1.0.
+
+**Effort:** Requires new benchmark case authoring (3–5 cases). Pairs with Issue 11 (harder cases).
+
+---
+
+### 13. Ensemble metric_mismatch_002 Catastrophic Failure — Unexplained
+
+**Issue:** In `clean_ensemble_results.json`, metric_mismatch_002 scores 0.0 on every dimension — the only non-defense_wins case where the ensemble produced a completely wrong verdict. This single case substantially affects the ensemble's 0.754 mean, but the failure is never analyzed in `ENSEMBLE_ANALYSIS.md` or the main report. Was it a synthesis failure? Did all three assessors agree on defense_wins? This is the ensemble's equivalent of real_world_framing_001 and deserves the same treatment.
+
+**Fix:** Read the ensemble transcript for metric_mismatch_002 (or re-run if not preserved). Determine whether the failure was at the assessor level (all 3 agreed on the wrong verdict) or synthesis level (assessors diverged but synthesizer chose wrong). Add a failure mode note to `ENSEMBLE_ANALYSIS.md`.
+
+**Effort:** Low if transcripts are preserved; ~4 API calls to re-run if not.
+
+---
+
+### 14. Report Restructuring Bundle
+
+**Issue:** Several presentation problems identified by both peer reviewers that require coordinated changes to `REPORT.md`:
+
+1. **Ensemble as primary comparison** — The report leads with debate vs. single-pass baseline (+0.586). The correct primary comparison is debate vs. clean ensemble (+0.216), with single-pass as a reference floor.
+2. **Corrected headline as primary number** — Section 2.1 and abstract lead with +0.586; the corrected range (+0.335–0.441) should be the primary figure, with the original number retained for reference.
+3. **Dimension-stratified reporting** — Add a table separating "fair comparison dimensions" (IDR, IDP, ETD, FVC — both systems have agency) from "protocol-diagnostic dimensions" (DC, DRQ — baseline is structurally disadvantaged).
+4. **Formal corrected pass/fail table** — Add a second benchmark criteria table using corrected baseline scores (DC=0.5, DRQ uncapped). State explicitly which numbers the formal verdict is based on.
+5. **Section 3.2 numbering fix** — The defense_wins secondary hypothesis between Sections 3.1 and 3.3 is unnumbered. Label it 3.2 and update the abstract reference.
+6. **Baseline pass inconsistency** — Section 2.1 still shows "10% (2/20)"; should be "0/20" after DC=0.0 enforcement.
+
+**Effort:** Document editing, no new experiments required. Can be done in one pass.
+
+---
+
 ## Priority 3 — Statistical Rigor
 
 ### 7. Convergence Hypothesis — Adequate Sample Sizes
@@ -101,17 +190,74 @@ Run the same protocol and report IDR. If it drops below 0.85, benchmark construc
 
 ---
 
+### 15. Related Work Section
+
+**Issue:** The report cites no prior work on LLM debate protocols, multi-agent evaluation, or structured argument generation. Absence of related work makes it impossible to assess novelty or position the contribution for any external audience.
+
+**Fix:** Add a related work section covering at minimum:
+- Irving et al. (2018) — AI safety via debate
+- Du et al. (2023) — multi-agent debate for LLM reasoning
+- Liang et al. (2023) — encouraging divergent thinking in LLM debates
+- Khan et al. (2024) — debate as verification
+- Zheng et al. (2023) — MT-Bench / LLM-as-judge pitfalls
+- ChatEval, MAD (multi-agent debate frameworks)
+
+**Effort:** Literature review + ~500 word section. No new experiments.
+
+---
+
+### 16. Consolidated Limitations Section
+
+**Issue:** The report's limitations are scattered across the abstract addendum, Section 3 hypothesis verdicts, Section 4, `SENSITIVITY_ANALYSIS.md`, and `ENSEMBLE_ANALYSIS.md`. An outside reader has no single place to see the full picture. Both peer reviewers flagged this.
+
+**Fix:** Add a dedicated limitations section to `REPORT.md` consolidating: (a) closed-loop benchmark design, (b) single-run results / no variance estimation, (c) rubric-inflated headline lift, (d) strawman primary comparison, (e) same-model scoring confound, (f) N=20 sample size, (g) unvalidated difficulty labels, (h) no external defense_wins cases.
+
+**Effort:** Writing only — all content already exists, just needs consolidation.
+
+---
+
+### 17. Convergence Operationalization — Formally Define or Drop
+
+**Issue:** The convergence metric appears in the per-case table and the convergence-by-difficulty analysis but is never formally defined. From context, it appears to measure whether Critic and Defender reached the same verdict type, but this is never stated. The values are binary (0.5 or 1.0) and are not derivable from the JSON results without knowing the mapping. Without a formal definition, the metric is unreproducible.
+
+**Fix:** Either (a) add a formal definition to Section 1 — specify the computation, input data, and what 0.5 vs. 1.0 means — or (b) remove the metric entirely and replace the convergence-by-difficulty analysis with a simpler "verdict agreement" indicator. The convergence sample-size issue (#7) may make (b) the right choice.
+
+**Effort:** One paragraph addition or deletion.
+
+---
+
+### 18. Difficulty Label Validation
+
+**Issue:** Easy/medium/hard labels are author-assigned with no independent calibration. The convergence analysis and Section 4.4 interpretation depend on these labels, but a case labeled "hard" may not be harder for the protocol than a case labeled "easy." If the labels are miscalibrated, the convergence-by-difficulty interpretation is meaningless.
+
+**Fix:** Either (a) validate labels against an independent criterion (e.g., single-pass baseline score as a proxy for difficulty, or human rater agreement), or (b) report difficulty labels as "intended difficulty" and caveat all difficulty-stratified analyses accordingly.
+
+**Effort:** Low — can use existing single-pass baseline scores as a difficulty proxy and check correlation with labels.
+
+---
+
 ## Status Tracking
 
 | # | Issue | Priority | Status | Blocking |
 |---|-------|----------|--------|---------|
-| 1 | Budget-matched ensemble baseline | P1 | **Resolved** 2026-04-04 (clean re-run complete; defense_wins isolation hypothesis definitively tested) | Core lift claim |
+| 1 | Budget-matched ensemble baseline | P1 | **Resolved** 2026-04-04 | Core lift claim |
 | 2 | Recover/recompute raw DRQ scores | P1 | **Resolved** 2026-04-04 | — |
-| 3 | Fix stale baseline pass flags | P1 | **Resolved** 2026-04-04 (noted in CONCLUSIONS.md; full JSON rerun pending #1) | #1 |
+| 3 | Fix stale baseline pass flags | P1 | **Resolved** 2026-04-04 | #1 |
 | 4 | Two-pass Defender fix + retest | P2 | **Resolved** 2026-04-04 | — |
 | 5 | Cross-model scorer validation | P2 | Open | None |
 | 6 | Independent benchmark | P2 | **Resolved** 2026-04-04 | None |
-| 7 | Convergence — adequate n per tier | P3 | Open | None |
+| 7 | Convergence — adequate n per tier | P3 | Open | #17 |
+| 8 | Statistical rigor — CIs, significance tests, within-case variance | P1 | Open | None |
+| 9 | ETD ablation — ensemble with explicit test design constraint | P1 | Open | None |
+| 10 | IDP N/A asymmetry — harmonize debate vs. ensemble scoring | P1 | Open | None |
+| 11 | Rubric ceiling effect — dynamic range investigation | P2 | Open | None |
+| 12 | IDP=1.000 non-finding — precision signal absence | P2 | Open | #11 |
+| 13 | Ensemble metric_mismatch_002 catastrophic failure analysis | P2 | Open | None |
+| 14 | Report restructuring bundle | P2 | Open | #8, #10 |
+| 15 | Related work section | P3 | Open | None |
+| 16 | Consolidated limitations section | P3 | Open | None |
+| 17 | Convergence operationalization — define or drop | P3 | Open | None |
+| 18 | Difficulty label validation | P3 | Open | None |
 
 ## Resolution Notes
 
