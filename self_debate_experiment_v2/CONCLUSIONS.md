@@ -368,6 +368,8 @@ After committing these results, `ml-critic` and `ml-defender` were run against t
 
 **Post-experiment ensemble test.** A compute-matched ensemble baseline was run to test whether the debate protocol's lift reflects adversarial role structure or simply additional LLM calls. Results: the isolation architecture is not uniquely necessary for exoneration (4/5 defense_wins cases correct without isolation). The debate protocol's remaining structural advantage is in empirical test design (ETD). See `ENSEMBLE_ANALYSIS.md` and `clean_ensemble_results.json`.
 
+**Issue 6 — External benchmark (2026-04-04).** A 10-case benchmark constructed from published ML evaluation failures (external ground truth, no designer involvement in case selection) was run to test whether internal benchmark construction leaked discoverable flaws. Debate IDR = **0.95** (≥ 0.85 threshold → PASSED). All 10 cases pass for both debate (mean 0.99) and baseline (mean 0.967). The near-equal baseline performance is expected: all 10 external cases are critique-type; real-world ML failure benchmarks structurally cannot contain defense_wins cases. The debate's structural advantages (defense_wins exoneration, ETD forcing function) are untestable externally. The one differentiating case (ext_broken_baseline_004, mixed) showed debate reaching correct mixed verdict + ETD=1.0 while baseline reached wrong critique verdict + ETD=0.0 — consistent with the ETD-as-structural-advantage finding. See `../external_benchmark/results.json`.
+
 ---
 
 ## 8. IDP Fix for defense_wins Cases

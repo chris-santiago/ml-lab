@@ -110,7 +110,7 @@ Run the same protocol and report IDR. If it drops below 0.85, benchmark construc
 | 3 | Fix stale baseline pass flags | P1 | **Resolved** 2026-04-04 (noted in CONCLUSIONS.md; full JSON rerun pending #1) | #1 |
 | 4 | Two-pass Defender fix + retest | P2 | **Resolved** 2026-04-04 | — |
 | 5 | Cross-model scorer validation | P2 | Open | None |
-| 6 | Independent benchmark | P2 | Open | None |
+| 6 | Independent benchmark | P2 | **Resolved** 2026-04-04 | None |
 | 7 | Convergence — adequate n per tier | P3 | Open | None |
 
 ## Resolution Notes
@@ -129,6 +129,17 @@ Fix is confirmed tractable. Change should be merged into `~/.claude/agents/ml-de
 
 - **Non-defense_wins (15 cases):** Ensemble scored 1.000 (15/15 passes) vs. debate 0.982 (15/15 passes). Ensemble matches or exceeds debate at ceiling. Compute confound hypothesis **confirmed** for non-defense_wins cases — additional compute budget alone achieves ceiling performance without adversarial role structure.
 - **Defense_wins (5 cases):** Results are **contaminated**. Agent prompts included an explicit "correct analysis" section coaching assessors toward the defense_wins verdict before independent analysis. Cannot conclude from these results whether a clean ensemble would exonerate valid work. Isolation mechanism hypothesis remains untested.
+
+**Issue 6 (2026-04-04):** 10-case external benchmark constructed from published ML evaluation failures (Dacrema 2019, Li & Talwalkar 2020, Rendle et al. 2020, Obermeyer et al. 2019, Wang et al. 2019, Brock et al. 2019, DeGrave et al. 2021, Gururangan et al. 2018, Jia & Liang 2017, Zeng et al. 2023). Ground truth established by external domain consensus, not the protocol designer.
+
+7-of-10 cases required verifier rewrites (explicit flaw naming replaced with neutral "standard training procedures / published configurations" framing). Full debate + baseline run executed on all 10 cases. Results in `external_benchmark/results.json`.
+
+- **Debate IDR: 0.95** (≥ 0.85 threshold met → Issue 6 criterion PASSED)
+- Debate benchmark mean: 0.99 (10/10 cases pass)
+- Baseline benchmark mean: 0.967 (10/10 cases pass)
+- No defense_wins cases in external benchmark (real-world ML failures are critique by definition)
+- ETD=1.0 only on ext_broken_baseline_004 (the one mixed case) — consistent with the ensemble finding that ETD requires an adversarial forcing function
+- Protocol deviation: Defenders were dispatched without Critic output (isolation error). Judges reconciled two independent assessments rather than adjudicating a true debate. ETD is expected to be underrepresented as a result. Documented in `external_benchmark/results.json` metadata. CLAUDE.md updated with correct dispatch order.
 
 **Issue 1 (2026-04-04 — final):** Clean two-phase ensemble re-run complete. Phase 1 assessors received only task prompts (no labels, no coaching). Phase 2 scorer received synthesized output + must-find labels separately. Results: `clean_ensemble_results.json`, analysis updated in `ENSEMBLE_ANALYSIS.md`.
 

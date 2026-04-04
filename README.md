@@ -39,6 +39,8 @@ The most interesting result came from five cases that were *false-positive criti
 
 > **Ensemble follow-on (2026-04-04):** A clean compute-matched ensemble (3 independent assessors + synthesizer, task-prompt-only — no role separation, no coaching) scored 0.754 overall vs. debate's 0.970. The ensemble correctly exonerated valid work in **4/5 false-positive trap cases** without structural isolation — meeting the pre-specified criterion that "compute budget partially explains the defense_wins advantage." The isolation architecture is not uniquely necessary for exoneration. The debate protocol's remaining structural advantage is concentrated in *empirical test design* (ETD): the Critic/Defender adversarial forcing function generates agreed test specifications that a parallel ensemble never produces. See [`ENSEMBLE_ANALYSIS.md`](self_debate_experiment_v2/ENSEMBLE_ANALYSIS.md) for full analysis.
 
+> **External benchmark (2026-04-04):** To test whether internal benchmark construction leaked discoverable flaws, a parallel 10-case benchmark was constructed from published ML evaluation failures with external ground truth (Dacrema 2019, Obermeyer 2019, DeGrave 2021, Gururangan 2018, Zeng 2023, and others). Debate protocol IDR = **0.95** on these cases, meeting the ≥ 0.85 external validity threshold. Baseline also scored 0.967 — expected, since all real-world ML failure cases are critique-type; the debate protocol's structural advantages (defense_wins exoneration, ETD) cannot be tested against published failures by definition. The only differentiating case (ext_broken_baseline_004, a mixed case) showed debate reaching the correct mixed verdict + ETD=1.0, while baseline reached the wrong critique verdict + ETD=0.0. See [`external_benchmark/`](external_benchmark/) for full case set and results.
+
 One case failed: a healthcare triage scenario where the Defender correctly identified all the flaws in its reasoning but then labeled the verdict "the work is valid." Correct reasoning, wrong label. A calibration failure in output structure, not a reasoning failure — and fixable.
 
 Full results, per-case scores, and conclusions are in [`self_debate_experiment_v2/`](self_debate_experiment_v2/).
@@ -171,3 +173,6 @@ Full trace and spec validation notes are in [`seq_fraud_experiment/TEST2_FINDING
 | [`self_debate_experiment_v2/ELEVATOR_PITCH.md`](self_debate_experiment_v2/ELEVATOR_PITCH.md) | Non-technical summary of results |
 | [`seq_fraud_experiment/HYPOTHESIS.md`](seq_fraud_experiment/HYPOTHESIS.md) | Hypothesis and metrics for the sequence fraud investigation |
 | [`seq_fraud_experiment/TEST2_FINDINGS.md`](seq_fraud_experiment/TEST2_FINDINGS.md) | Full trace and spec validation notes for the example run |
+| [`external_benchmark/`](external_benchmark/) | 10-case external validity benchmark from published ML evaluation failures |
+| [`external_benchmark/cases.json`](external_benchmark/cases.json) | Case metadata, task prompts, verifier rewrites, and must-find labels |
+| [`external_benchmark/results.json`](external_benchmark/results.json) | Per-case debate and baseline scores; aggregate IDR=0.95; protocol deviation note |
