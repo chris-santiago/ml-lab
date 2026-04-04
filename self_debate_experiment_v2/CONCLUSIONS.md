@@ -382,6 +382,15 @@ After committing these results, `ml-critic` and `ml-defender` were run against t
 
 *IDP non-finding (Issue 12):* 4 IDP-stress cases (valid ML work with superficially suspicious features) were authored and run. IDP fell below 1.0 on **4/4 cases** (IDP=0.5 on all). The Critic reliably raised 4–5 concerns per case; 1–2 per case had genuine methodological substance even though none were fatal. No case reached IDP=0.0 (no valid project was wrongly derailed). The original benchmark's IDP=1.000 reflects that all 15 critique cases contained unambiguous, clearly disqualifying flaws — not that the Critic is precision-perfect. When presented with valid work that has suspicious-looking features, the Critic consistently triggers IDP < 1.0. See `idp_stress_results.json`.
 
+**Peer review round — presentation and claim calibration (2026-04-04).** Three peer reviews identified issues requiring claim recalibration and presentation restructuring. Key changes applied:
+
+- **Exoneration precision reframed.** "5/5 clean vs. 4/5 with caveats" is now reported as a directional observation on n=5, not a confirmed structural advantage. The mean-score advantage disappears under harmonized IDP scoring (IDP excluded for both conditions on defense_wins cases; harmonized ensemble mean 0.767 vs. reported 0.754). Qualitative observation preserved: debate Defender raised no concerns on 3/5 cases vs. ensemble raised caveats on 2/4 correct exonerations.
+- **Baseline pass count corrected.** Table in §2 corrected from 2/20 to 0/20; §3 criterion table corrected from "10% (2/20)" to "0% (0/20)".
+- **Fair-comparison lift computed (A1).** On IDR/IDP/ETD/FVC, debate vs. unconstrained ensemble = +0.269; debate vs. ETD-constrained ensemble = **+0.076** (near zero, driven primarily by `metric_mismatch_002` catastrophic failure).
+- **Dimension-weighted aggregate added (A2).** Debate 0.978, baseline 0.510, ensemble 0.738 — confirms case-weighted figures are not materially distorted.
+- **Abstract restructured** to lead with corrected lift (+0.335–0.441) and ensemble gap (+0.216) as primary numbers.
+- **Statistical caveat added** wherever bootstrap CIs appear: these reflect cross-case sampling variance, not within-case LLM stochasticity.
+
 ---
 
 ## 8. IDP Fix for defense_wins Cases
