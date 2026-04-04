@@ -295,8 +295,10 @@ Both independently identified sku_mix_confound and year_over_year_comparison_wit
 Debate mean = 0.970 vs. baseline mean = 0.384. Lift = **+0.586** — exceeds the +0.10 threshold by a factor of 5.86.
 
 ### Secondary hypothesis: isolated protocol enables defense_wins verdicts
-**VERDICT: SUPPORTED**
+**VERDICT: SUPPORTED (with qualification — see post-experiment follow-on below)**
 All 5 defense_wins cases reached correct `defense_wins` verdict. Baseline scored 0.000 on all 5 defense_wins cases (DRQ=0.0, FVC=0.0 across the board — baseline completely fails to exonerate valid work under false attack).
+
+> **Post-experiment qualification (2026-04-04):** A clean compute-matched ensemble (3 independent assessors + synthesizer, task-prompt-only, no role separation) correctly exonerated valid work in **4/5 defense_wins cases** without structural isolation. The pre-specified criterion for "compute budget partially explains defense_wins advantage" was triggered (DC≥0.5 on ≥3/5). The isolation architecture is **not uniquely necessary** for exoneration — multiple independent parallel views can achieve similar results, though with lower IDP (assessors raised caveats alongside correct verdicts in 2/4 exonerated cases). The debate protocol still outperforms the ensemble overall (0.970 vs. 0.754) primarily because the adversarial forcing function generates empirical test specifications (ETD=1.0) that parallel assessors never produce. See `ENSEMBLE_ANALYSIS.md`.
 
 ### Secondary hypothesis: agent_convergence_rate higher for easy/medium cases vs. hard
 **VERDICT: NOT SUPPORTED (unexpected)**
@@ -344,7 +346,7 @@ Convergence by difficulty: easy=0.833, medium=0.944, hard=0.938. Hard cases actu
 
 ## 6. When Isolated Protocol Adds Value
 
-**Highest value (defense_wins cases):** The isolated protocol is the only design capable of producing `defense_wins` verdicts. Baseline scores 0.000 on all 5 defense_wins cases — it accepts false critiques as valid without challenge. The protocol's value here is not marginal; it is the difference between exonerating and condemning valid work.
+**Highest value (defense_wins cases):** The isolated protocol reliably produces correct `defense_wins` verdicts. Baseline scores 0.000 on all 5 defense_wins cases — it accepts false critiques as valid without challenge. The protocol's value here is not marginal. *(Note: the clean ensemble follow-on showed 4/5 correct exonerations without structural isolation — see §4 qualification above. The debate protocol achieves higher IDP on exonerated cases: the isolated Defender says "no issues" in 3/5 cases, while the ensemble raised caveats in 2/4 exonerated cases. Structural isolation produces cleaner exonerations, not just correct verdicts.)*
 
 **High value (hard confounding cases):** hidden_confounding_002 and hidden_confounding_003 show IDR=0.0 for the baseline (it failed to find the must_find issues entirely). The isolated protocol achieved IDR=1.0 on both, independently from both directions.
 
@@ -354,7 +356,21 @@ Convergence by difficulty: easy=0.833, medium=0.944, hard=0.938. Hard cases actu
 
 ---
 
-## 7. IDP Fix for defense_wins Cases
+## 7. Post-Experiment Adversarial Review (2026-04-04)
+
+After committing these results, `ml-critic` and `ml-defender` were run against the experiment's own findings. Three issues were found and resolved:
+
+**Issue A — DC hardcoded to 0.0 for all baseline cases (structural override).** The reported +0.586 lift is partly a rubric design effect, not purely a protocol reasoning advantage. Sensitivity analysis: with DC=0.5 and DRQ uncapped, the honest lift range is **+0.335 to +0.441** — still 3–4× the pre-registered threshold. See `SENSITIVITY_ANALYSIS.md`.
+
+**Issue B — Two-pass Defender fix.** The real_world_framing_001 failure (reasoning/label disconnect, DC=0.0) is remediated. A two-pass structure was added to the `ml-defender` prompt: analysis pass first, then verdict pass with explicit instruction not to label `defense_wins` if the analysis identifies critical unaddressed flaws. Retest: real_world_framing_001 flips to `critique_wins` (correct). defense_wins_003 and defense_wins_005 held at `defense_wins` (correct). Fix is merged into `agents/ml-defender.md`.
+
+**Issue C — Stale baseline pass flags.** The two cases marked `baseline_pass: true` (`broken_baseline_001`, `metric_mismatch_002`) are incorrect. With DC=0.0 consistently applied, the correct baseline pass count is **0/20**, not 2/20. The per-case tables above reflect original scores; the correction is noted in §3.
+
+**Post-experiment ensemble test.** A compute-matched ensemble baseline was run to test whether the debate protocol's lift reflects adversarial role structure or simply additional LLM calls. Results: the isolation architecture is not uniquely necessary for exoneration (4/5 defense_wins cases correct without isolation). The debate protocol's remaining structural advantage is in empirical test design (ETD). See `ENSEMBLE_ANALYSIS.md` and `clean_ensemble_results.json`.
+
+---
+
+## 8. IDP Fix for defense_wins Cases
 
 **Resolution applied:** For defense_wins cases (correct_position = "defense"), IDR and IDP are scored N/A. Rationale: the Critique agent structurally produces claims on every case regardless of whether the claims are valid. Scoring IDP on a defense_wins case would mechanically penalize a protocol that is working correctly by challenging valid work. The relevant signal is DRQ (correct verdict) and FVC (correct conclusion).
 

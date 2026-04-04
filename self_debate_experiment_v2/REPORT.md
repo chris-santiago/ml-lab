@@ -11,7 +11,9 @@
 
 This report evaluates the isolated self-debate protocol on a 20-case benchmark of synthetic ML reasoning tasks with known ground truth. The protocol produces two independent agent outputs per case — one adversarial (Critic) and one defensive (Defender) — which are adjudicated by a Judge. A single-pass baseline provides the comparison condition.
 
-The debate protocol achieves a benchmark aggregate mean of **0.970**, compared to **0.384** for the single-pass baseline, a lift of **+0.586**. Nineteen of twenty cases pass the per-case threshold (mean ≥ 0.65, no rubric dimension below 0.5). All three benchmark pass criteria are met. The primary hypothesis is supported. The baseline fails on 18 of 20 cases and scores 0.000 on all five false-positive critique traps, confirming that single-pass reasoning cannot exonerate valid work under adversarial pressure.
+The debate protocol achieves a benchmark aggregate mean of **0.970**, compared to **0.384** for the single-pass baseline, a lift of **+0.586**. Nineteen of twenty cases pass the per-case threshold (mean ≥ 0.65, no rubric dimension below 0.5). All three benchmark pass criteria are met. The primary hypothesis is supported. The baseline fails on 18 of 20 cases and scores 0.000 on all five false-positive critique traps.
+
+> **Post-experiment findings (2026-04-04):** After committing these results, adversarial review by `ml-critic` and `ml-defender` identified rubric design effects that inflate the reported lift. With corrections applied, the honest lift range is **+0.335 to +0.441** (still 3–4× the pre-registered threshold). A two-pass Defender fix resolves the sole case failure. A clean compute-matched ensemble test found that the isolation architecture is not uniquely necessary for exonerating valid work — but that the debate protocol's structural advantage in *empirical test design* is real and not replicable by parallel assessors. The §3.2 "isolation is the only mechanism" finding is qualified accordingly. See `SENSITIVITY_ANALYSIS.md` and `ENSEMBLE_ANALYSIS.md` for full post-experiment analysis.
 
 ---
 
@@ -140,7 +142,9 @@ Convergence does not decrease with difficulty. See §4.4 for interpretation.
 
 > The isolated context architecture produces correct defense_wins verdicts on false-positive critique trap cases.
 
-**SUPPORTED.** All 5 defense_wins cases reach the correct `defense_wins` verdict. Baseline scores 0.000 on all 5 (DC=0.0, DRQ=0.0, FVC=0.0). The protocol is not merely better; it is the only condition capable of exonerating valid work under adversarial pressure.
+**SUPPORTED (with post-experiment qualification).** All 5 defense_wins cases reach the correct `defense_wins` verdict. Baseline scores 0.000 on all 5 (DC=0.0, DRQ=0.0, FVC=0.0).
+
+> **Qualification (2026-04-04):** A clean compute-matched ensemble (3 independent assessors, task-prompt-only) correctly exonerated valid work in 4/5 defense_wins cases without structural isolation, triggering the pre-specified criterion that "compute budget partially explains the defense_wins advantage." The isolation architecture is not uniquely necessary — multiple independent parallel views can achieve similar exonerations. However, the debate protocol's isolated Defender produces cleaner exonerations: 3/5 cases with no claims raised (IDP=1.0) vs. ensemble raising caveats in 2/4 correct exonerations (IDP=0.5). The debate protocol's remaining structural advantage over the ensemble is concentrated in empirical test design (ETD), not in exoneration per se. See `ENSEMBLE_ANALYSIS.md`.
 
 ### 3.3 Secondary hypothesis: convergence decreases with difficulty
 
@@ -154,7 +158,7 @@ Convergence does not decrease with difficulty. See §4.4 for interpretation.
 
 ### 4.1 Where the protocol adds the most value
 
-**Defense_wins cases (delta = +1.000 on three of five).** This is the clearest finding. The isolated protocol is the only design capable of producing `defense_wins` verdicts on false-positive critique traps. The single-pass baseline has no mechanism to challenge an adversarial framing — it inherits the critique's premise and scores accordingly. Delta = +1.000 on defense_wins_001, _002, and _004 represents the full possible benefit.
+**Defense_wins cases (delta = +1.000 on three of five).** The isolated protocol produces correct `defense_wins` verdicts on all 5 false-positive critique traps. The single-pass baseline has no mechanism to challenge an adversarial framing — it inherits the critique's premise and scores 0.000. Delta = +1.000 on defense_wins_001, _002, and _004 represents the full possible benefit. *(Note: the clean ensemble follow-on showed 4/5 correct exonerations without structural isolation — the isolation architecture is not uniquely necessary for the exoneration result, though it produces higher-precision exonerations. See §3.2 qualification.)*
 
 **Hard confounding cases (delta = +0.583 to +0.667).** hidden_confounding_002 and hidden_confounding_003 show IDR=0.0 for the baseline — it accepted the team's interpretation at face value and failed to identify the planted confounds (holiday season timing, document-level data leakage). The protocol found both confounds independently from both directions and proposed diagnostically sound experiments.
 
@@ -248,8 +252,10 @@ All experimental artifacts are in `/self_debate_experiment_v2/`:
 
 ## 8. Conclusion
 
-The isolated self-debate protocol passes the benchmark on all three criteria. The +0.586 lift over the single-pass baseline is large, stable, and driven by genuine protocol advantages — not benchmark artifacts. The clearest advantage is in defense calibration: the baseline scores 0.000 on this dimension in every case. On the defense_wins cases that test exoneration of valid work, the protocol achieves correct verdicts while the baseline scores 0.000 across the board.
+The isolated self-debate protocol passes the benchmark on all three criteria. The +0.586 headline lift is partially attributable to rubric design choices (DC=0.0 structural override, DRQ cap); the honest corrected lift range is **+0.335 to +0.441**, still 3–4× the pre-registered threshold. The protocol's advantage is real.
 
-The experiment identifies one case failure (real_world_framing_001) caused by a new failure mode — reasoning/label disconnect in the Defender — and two partial failures (defense_wins_003, defense_wins_005) caused by Defender under-confidence. Both failure modes are tractable: they are prompt-level calibration failures, not architectural limitations of the isolated protocol.
+The clearest dimension advantage is in defense calibration (+0.867): the baseline scores 0.000 on this dimension in every case. The reasoning/label disconnect failure in real_world_framing_001 is resolved by a two-pass Defender prompt (analysis before verdict selection) — see `agents/ml-defender.md`.
 
-The fundamental finding holds: a structured isolated debate protocol with typed verdict roles substantially outperforms single-pass reasoning on synthetic ML reasoning tasks with known ground truth, particularly on cases involving hidden confounding, valid work under adversarial framing, and scope/intent misalignment.
+The post-experiment ensemble test refined the isolation hypothesis: the adversarial role architecture is not uniquely necessary to exonerate valid work (4/5 correct exonerations without isolation), but it produces cleaner exonerations and — crucially — forces production of agreed empirical test specifications that parallel assessors never generate. The debate protocol's structural advantage in empirical test design (ETD=1.0 across all applicable cases vs. ensemble ETD≈0.0–0.5) is the finding that best distinguishes the debate architecture from a more-compute alternative.
+
+The fundamental finding holds: a structured isolated debate protocol with typed verdict roles substantially outperforms single-pass reasoning on synthetic ML reasoning tasks with known ground truth, particularly on hidden confounding, adversarial framing, and cases requiring a typed empirical resolution rather than a binary verdict.
