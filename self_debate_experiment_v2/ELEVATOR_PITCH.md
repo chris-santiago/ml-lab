@@ -103,7 +103,7 @@ Post-experiment ablations refined what the +0.22 advantage over the ensemble act
 
 **From debate:**
 - *Point-by-point argumentation.* The Critic/Defender structure forces every claim to be conceded, rebutted, or flagged as empirically open — with IDs. A synthesizing ensemble can't produce this by design.
-- *Cleaner exonerations* *(directional).* When the Defender never sees the Critique, its defense of valid work is structurally independent — not a reaction to the Critic's framing. This produces more confident "no issues" verdicts. Three of five exonerations in the debate condition were clean; the ensemble hedged on two of its four correct ones. Confirmed externally (see below).
+- *Cleaner exonerations* *(directional, internal only).* When the Defender never sees the Critique, its defense of valid work is structurally independent — not a reaction to the Critic's framing. This produces more confident "no issues" verdicts. Three of five exonerations in the debate condition were clean; the ensemble hedged on two of its four correct ones. Note: the external benchmark confirms that debate *passes* exoneration cases (3/3), but does not confirm the clean/hedged distinction — critics raised plausible-but-wrong concerns (IDP=0.5) on all 3 external cases, the same pattern as internal IDP-stress cases.
 
 ---
 
@@ -121,6 +121,6 @@ The synthetic benchmark could have been too easy or too tailored. We checked.
 
 When AI agents debate with genuinely isolated context, the result is substantially better than a single-pass assessment — not because debate sounds more thorough, but because it produces measurably more correct verdicts on cases where we already know the right answer.
 
-The honest version: most of the lift comes from more compute and more perspectives. The adversarial structure specifically adds point-by-point argumentation and a tendency toward cleaner exonerations. The empirical test design output is a bonus that's portable to simpler configurations via a single prompt instruction.
+The honest version: most of the lift comes from more compute and more perspectives. The adversarial structure specifically adds point-by-point argumentation and — on the internal benchmark — a tendency toward cleaner exonerations (not confirmed in the external benchmark). The empirical test design output is a bonus that's portable to simpler configurations via a single prompt instruction.
 
 The biggest gains are exactly where you'd want them: catching hidden confounders, refusing to condemn valid work, and forcing contested claims into the right kind of empirical resolution rather than a confident-sounding guess.
