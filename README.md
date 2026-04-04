@@ -37,7 +37,7 @@ The threshold we set in advance to call the experiment a success was +0.10. We e
 
 The most interesting result came from five cases that were *false-positive critique traps* — valid work, correctly designed, presented under adversarial framing. The baseline scored **0.000** on all five. It accepted the adversarial premise and condemned work that was actually fine. The debate protocol got all five correct.
 
-A single AI reasoning pass has no mechanism to push back on a loaded framing. It inherits the premise. An independent Defender — one that never saw the Critic's output — is the only structural way to exonerate valid work.
+> **Ensemble follow-on (2026-04-04):** A clean compute-matched ensemble (3 independent assessors + synthesizer, task-prompt-only — no role separation, no coaching) scored 0.754 overall vs. debate's 0.970. The ensemble correctly exonerated valid work in **4/5 false-positive trap cases** without structural isolation — meeting the pre-specified criterion that "compute budget partially explains the defense_wins advantage." The isolation architecture is not uniquely necessary for exoneration. The debate protocol's remaining structural advantage is concentrated in *empirical test design* (ETD): the Critic/Defender adversarial forcing function generates agreed test specifications that a parallel ensemble never produces. See [`ENSEMBLE_ANALYSIS.md`](self_debate_experiment_v2/ENSEMBLE_ANALYSIS.md) for full analysis.
 
 One case failed: a healthcare triage scenario where the Defender correctly identified all the flaws in its reasoning but then labeled the verdict "the work is valid." Correct reasoning, wrong label. A calibration failure in output structure, not a reasoning failure — and fixable.
 
@@ -86,7 +86,7 @@ The standard approach to AI evaluation is single-pass: give a model some work, a
 - The work is actually valid but sounds questionable  
 - The correct answer is "we need to run an empirical test first" rather than a binary yes/no
 
-Debate adds something single-pass cannot. The clearest illustration is the false-positive trap cases: the baseline had no way to recover from an adversarially framed premise. The isolated Defender did, precisely because it never received that framing.
+Debate adds something single-pass cannot. The clearest illustration is the false-positive trap cases: the single-pass baseline scored 0.000 on all five exoneration cases, inheriting the adversarial framing entirely. The clean ensemble follow-on (4 independent assessors in parallel, no roles) correctly exonerated 4/5 cases — suggesting that multiple independent views can also counter framing bias, though with lower precision than the structurally isolated Defender. The debate protocol's clearest structural advantage is not exoneration per se, but *forcing specification of empirical tests* when positions diverge: the adversarial dynamic between Critic and Defender requires both to agree on what experiment would resolve the question, which parallel assessors never need to do.
 
 ---
 
@@ -165,8 +165,9 @@ Full trace and spec validation notes are in [`seq_fraud_experiment/TEST2_FINDING
 | [`self_debate_experiment_v2/CONCLUSIONS.md`](self_debate_experiment_v2/CONCLUSIONS.md) | Per-case scores and findings |
 | [`self_debate_experiment_v2/REPORT.md`](self_debate_experiment_v2/REPORT.md) | Full technical report |
 | [`self_debate_experiment_v2/SENSITIVITY_ANALYSIS.md`](self_debate_experiment_v2/SENSITIVITY_ANALYSIS.md) | Post-experiment adversarial review: rubric design effects on reported lift |
-| [`self_debate_experiment_v2/ENSEMBLE_ANALYSIS.md`](self_debate_experiment_v2/ENSEMBLE_ANALYSIS.md) | Compute-matched ensemble baseline results: compute confound test, design flaw disclosure, open questions |
-| [`self_debate_experiment_v2/ensemble_results.json`](self_debate_experiment_v2/ensemble_results.json) | Per-case ensemble baseline scores (20 cases, with contamination flags) |
+| [`self_debate_experiment_v2/ENSEMBLE_ANALYSIS.md`](self_debate_experiment_v2/ENSEMBLE_ANALYSIS.md) | Compute-matched ensemble baseline results: flawed run, clean re-run, defense_wins isolation test resolution |
+| [`self_debate_experiment_v2/ensemble_results.json`](self_debate_experiment_v2/ensemble_results.json) | Per-case ensemble scores — contaminated run (coaching artifacts; see contamination_flag fields) |
+| [`self_debate_experiment_v2/clean_ensemble_results.json`](self_debate_experiment_v2/clean_ensemble_results.json) | Per-case ensemble scores — clean two-phase run (no coaching; Phase 1 task-prompt-only) |
 | [`self_debate_experiment_v2/ELEVATOR_PITCH.md`](self_debate_experiment_v2/ELEVATOR_PITCH.md) | Non-technical summary of results |
 | [`seq_fraud_experiment/HYPOTHESIS.md`](seq_fraud_experiment/HYPOTHESIS.md) | Hypothesis and metrics for the sequence fraud investigation |
 | [`seq_fraud_experiment/TEST2_FINDINGS.md`](seq_fraud_experiment/TEST2_FINDINGS.md) | Full trace and spec validation notes for the example run |

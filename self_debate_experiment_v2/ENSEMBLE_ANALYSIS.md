@@ -137,32 +137,80 @@ For defense_wins cases: **the isolation architecture remains the only establishe
 
 ---
 
-## Required Follow-On: Clean Defense_Wins Test
+## Clean Re-Run Results (2026-04-04)
 
-To properly test the isolation hypothesis, re-run the 5 defense_wins cases with:
-- No "correct analysis" section in the prompt
-- Must-find issue labels removed from assessor-facing prompt (pass them only to the scorer in a separate step)
-- Assessors receive only the task prompt (identical conditions to the original single-pass baseline)
+The clean two-phase ensemble was executed for all 20 cases. Full per-case scores in `clean_ensemble_results.json`.
 
-**Pre-specified verdict criteria:**
-- If ensemble scores ≥ DC=0.5 on ≥ 3/5 defense_wins cases → compute budget partially explains defense_wins advantage; isolation mechanism is not uniquely necessary
-- If ensemble scores DC=0.0 on all 5 defense_wins cases → isolation mechanism is load-bearing; adversarial role structure is the causal explanation
+**Design:** Phase 1 — 3 independent assessors + synthesizer receive only the task prompt (no must-find labels, no correct analysis). Phase 2 — scorer receives synthesized output + must-find labels in a separate invocation.
 
-This test would be the definitive resolution of Issue 1.
+### Overall Results
+
+| Metric | Clean Ensemble | Debate Protocol | Corrected Single-Pass Baseline |
+|--------|---------------|-----------------|-------------------------------|
+| Benchmark mean | **0.754** | 0.970 | 0.529 |
+| Pass count | **11/20 (55%)** | 19/20 (95%) | — |
+| Non-defense_wins mean | 0.756 | 0.982 | ~0.650 |
+| Defense_wins DC≥0.5 | **4/5** | 5/5 | 0/5 |
+
+### Pre-Specified Verdict: TRIGGERED
+
+> If ensemble scores ≥ DC=0.5 on ≥ 3/5 defense_wins cases → compute budget partially explains defense_wins advantage; isolation mechanism is not uniquely necessary.
+
+**Result: DC≥0.5 on 4/5 defense_wins cases.** The criterion is met. Compute budget (3 independent views + synthesis) partially explains the defense_wins advantage. The isolation architecture is not uniquely necessary to exonerate valid work.
+
+Defense_wins per-case DC:
+| Case | Ensemble Verdict | DC | Notes |
+|------|-----------------|-----|-------|
+| defense_wins_001 | defense_wins ✓ | 1.0 | Correctly exonerated; raised minor caveats (IDP=0.5) |
+| defense_wins_002 | defense_wins ✓ | 1.0 | Correctly exonerated; raised minor caveats (IDP=0.5) |
+| defense_wins_003 | defense_wins ✓ | 1.0 | Perfect — "none identified" |
+| defense_wins_004 | critique_wins ✗ | 0.0 | Failed — narrow baseline comparison flagged as insufficient for SOTA claim |
+| defense_wins_005 | defense_wins ✓ | 1.0 | Perfect — "none identified" |
+
+The 1 failure (defense_wins_004) is the hardest case in the benchmark: a neural architecture claiming SOTA on 7 benchmarks against 3 baselines. All three assessors independently concluded the comparison set was too narrow to sustain a SOTA claim. This is a reasonable methodological concern — the debate protocol also had partial failures on similar edge cases.
+
+### Why the Ensemble Benchmark Mean (0.754) Falls Below Debate (0.970)
+
+The clean ensemble is not at ceiling for non-defense_wins cases, unlike the contaminated first run. The gap is almost entirely explained by a single structural pattern:
+
+**ETD = 0.0 for 9 of 20 cases.**
+
+The ensemble correctly identifies issues (IDR≈1.0) and reaches the correct verdict direction (DC≈1.0 on non-failures), but it does not propose a specific empirical test. Cases where `ideal_resolution = empirical_test_agreed` receive DRQ=0.5 (verdict = critique_wins, not empirical_test_agreed) and ETD=0.0 (no test proposed), which fails the per-dimension floor check (all applicable dims ≥ 0.5 required to pass).
+
+The debate protocol's adversarial forcing function (Critic challenges → Defender responds → Judge resolves → both must agree on a test when positions diverge) is what generates the empirical test proposal. Parallel assessors reasoning independently have no forcing function to produce that output — they stop at "the critique is correct" rather than "here is the test that would resolve it."
+
+This is not a reasoning quality failure. It's a missing output constraint.
+
+**Per-category ETD pattern:**
+
+| Category | ETD scores | Interpretation |
+|----------|-----------|----------------|
+| broken_baseline (001-004) | 0.5 | Test implied (statistical test clear) but not formally specified |
+| metric_mismatch_001, 003 | null / 0.5 | critique_wins ideal or test underspecified |
+| hidden_confounding (001-004) | 0.0 | Issues identified, no test proposed at all |
+| scope_intent_002 | 0.0 | No intervention study proposed |
+| real_world_framing (001-002) | 0.0 | No prospective validation designed |
+
+### Revised Compute Economics (User Insight)
+
+The user identified the structural difference:
+
+- **Ensemble = same task × N agents (parallel):** All assessors see the same adversarial framing. Independent views can cancel out framing bias but produce no forcing function for test design.
+- **Debate = different tasks × agents (iterative):** Critic and Defender have incompatible mandates. The disagreement structure forces specification of what would resolve the disagreement.
+
+Compute efficiency: Ensemble uses ~4 calls at parallel latency. Debate uses ~4+ calls at sequential latency. For cases where `ideal_resolution = empirical_test_agreed`, the sequential structure earns ~+0.5 ETD and +0.5 DRQ that the parallel structure cannot produce without explicit output constraints. The debate protocol is more expensive in wall-clock time but purchases a structurally different output.
 
 ---
 
-## Conclusion
+## Conclusion (Updated 2026-04-04)
 
 **What is established:**
-- For non-defense_wins cases: compute budget alone achieves ceiling performance on the 15-case benchmark. The debate protocol's lift on those cases is better attributed to additional computation than to adversarial role differentiation.
-- The structural scoring overrides (DC=0.0, DRQ cap) account for a measurable share of the headline lift separately from any role structure effect.
+1. **Compute budget + parallel views** can partially replace the isolation mechanism for defense_wins cases. 4/5 valid work cases were correctly exonerated without structural isolation or coaching. The original finding that "isolation architecture is uniquely necessary" is revised to "isolation architecture is not uniquely necessary, but parallel views achieve imperfect exoneration (IDP=0.5 vs 1.0 for cases that raised caveats)."
+2. **ETD is the debate protocol's structural advantage over ensembles.** For cases where the ideal resolution is an agreed empirical test, the debate's adversarial forcing function is what generates the test. A compute-matched ensemble with no output constraints produces correct issue identification and verdict direction but stops short of test design.
+3. **The contaminated first ensemble run (all 1.0) was entirely artifact.** The clean run scores 0.754, not 1.0. The coaching effect was total.
+4. **The debate protocol still outperforms** the clean ensemble substantially (0.970 vs 0.754), with better pass rates (95% vs 55%). The advantage is real — but the mechanism is test-design forcing, not issue detection or verdict calibration.
 
-**What is not established:**
-- Whether a compute-matched ensemble can exonerate valid work in defense_wins cases without the isolation mechanism.
-- Whether the "isolation architecture is load-bearing" claim from the original experiment holds against a clean ensemble test.
-
-**Recommended status for Issue 1:** Partially resolved. Non-defense_wins compute confound is established. Defense_wins isolation test remains open pending a clean re-run.
+**Recommended status for Issue 1:** Resolved. Defense_wins isolation hypothesis definitively tested and partially refuted: compute budget + parallel views suffices for exoneration in 4/5 cases. ETD is the structural mechanism that explains debate's remaining advantage.
 
 ---
 
@@ -172,3 +220,4 @@ For future ensemble experiments:
 1. Run assessors and scorer as separate agent invocations. Assessors receive only the task prompt. The scorer receives assessor outputs + the must-find labels separately.
 2. For defense_wins cases, omit all coaching from assessor prompts. The whole point is to test whether unguided assessors independently recognize valid work.
 3. Log which information was visible to which agent role for auditability.
+4. If the goal is empirical test design (not just issue detection), add an explicit output constraint to the synthesizer: "If the issues identified are real but resolvable empirically, specify the test that would resolve them."
