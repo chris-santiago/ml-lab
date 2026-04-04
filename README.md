@@ -210,6 +210,7 @@ Full trace and spec validation notes are in [`seq_fraud_experiment/TEST2_FINDING
 
 | Location | Contents |
 |----------|----------|
+| [`TECHNICAL_REPORT.md`](TECHNICAL_REPORT.md) | **Definitive technical report** — all findings, decomposition, external validation, limitations |
 | [`agents/`](agents/) | Reference copies of ml-lab, ml-critic, and ml-defender agent definitions |
 | [`agents/README.md`](agents/README.md) | Installation instructions and agent interaction diagram |
 | [`multi-agent-prompt.md`](multi-agent-prompt.md) | Bootstrap prompt for the full multi-agent harness |
