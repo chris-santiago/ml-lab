@@ -247,16 +247,16 @@ Run the same protocol and report IDR. If it drops below 0.85, benchmark construc
 | 5 | Cross-model scorer validation | P2 | Open | None |
 | 6 | Independent benchmark | P2 | **Resolved** 2026-04-04 | None |
 | 7 | Convergence — adequate n per tier | P3 | Open | #17 |
-| 8 | Statistical rigor — CIs, significance tests, within-case variance | P1 | Open | None |
+| 8 | Statistical rigor — CIs, significance tests, within-case variance | P1 | **Partial** 2026-04-04 (bootstrap CIs + Wilcoxon done; within-case variance not yet run) | None |
 | 9 | ETD ablation — ensemble with explicit test design constraint | P1 | Open | None |
-| 10 | IDP N/A asymmetry — harmonize debate vs. ensemble scoring | P1 | Open | None |
+| 10 | IDP N/A asymmetry — harmonize debate vs. ensemble scoring | P1 | **Resolved** 2026-04-04 | None |
 | 11 | Rubric ceiling effect — dynamic range investigation | P2 | Open | None |
 | 12 | IDP=1.000 non-finding — precision signal absence | P2 | Open | #11 |
 | 13 | Ensemble metric_mismatch_002 catastrophic failure analysis | P2 | Open | None |
 | 14 | Report restructuring bundle | P2 | Open | #8, #10 |
 | 15 | Related work section | P3 | Open | None |
-| 16 | Consolidated limitations section | P3 | Open | None |
-| 17 | Convergence operationalization — define or drop | P3 | Open | None |
+| 16 | Consolidated limitations section | P3 | **Resolved** 2026-04-04 | None |
+| 17 | Convergence operationalization — define or drop | P3 | **Resolved** 2026-04-04 (defined in REPORT.md §1.2) | None |
 | 18 | Difficulty label validation | P3 | Open | None |
 
 ## Resolution Notes
@@ -275,6 +275,14 @@ Fix is confirmed tractable. Change should be merged into `~/.claude/agents/ml-de
 
 - **Non-defense_wins (15 cases):** Ensemble scored 1.000 (15/15 passes) vs. debate 0.982 (15/15 passes). Ensemble matches or exceeds debate at ceiling. Compute confound hypothesis **confirmed** for non-defense_wins cases — additional compute budget alone achieves ceiling performance without adversarial role structure.
 - **Defense_wins (5 cases):** Results are **contaminated**. Agent prompts included an explicit "correct analysis" section coaching assessors toward the defense_wins verdict before independent analysis. Cannot conclude from these results whether a clean ensemble would exonerate valid work. Isolation mechanism hypothesis remains untested.
+
+**Issue 17 (2026-04-04):** Convergence formally defined in `REPORT.md` §1.2: 1.0 = Critic and Defender independently reached the same verdict type; 0.5 = they diverged. Values sourced from `critic_verdict` / `defender_verdict` fields in `self_debate_results.json`.
+
+**Issue 16 (2026-04-04):** Consolidated limitations section added to `REPORT.md` as §7 (Artifacts shifted to §8, Conclusion to §9). Eight limitations documented: closed-loop design, single-run results, rubric-inflated lift, strawman baseline, same-model scorer, N=20, unvalidated difficulty labels, rubric ceiling for treatment condition.
+
+**Issue 10 (2026-04-04):** IDP asymmetry between debate and ensemble for defense_wins cases identified and corrected. defense_wins_001 and _002 harmonized means: 0.875 → 1.000 (IDP=0.5 dropped to match debate's N/A treatment). Harmonized ensemble benchmark mean: 0.754 → 0.767. Debate–ensemble gap narrows from 0.216 → 0.203. "Cleaner exonerations" claim revised: mean-score advantage was an artifact; qualitative caveat observation preserved. Analysis added to `ENSEMBLE_ANALYSIS.md`.
+
+**Issue 8 (2026-04-04 — partial):** Bootstrap CIs (10,000 resamples) and paired Wilcoxon signed-rank tests computed. Results in `stats_results.json`, script in `stats_analysis.py`. Key findings: debate vs. baseline lift +0.586 [0.486, 0.691], p=0.000082, r=1.0 (maximum effect). Debate vs. ensemble lift +0.216 [0.098, 0.352], p=0.004, r=0.758 (large effect). Both statistically significant. Within-case variance from LLM stochasticity (requires multi-run reruns) remains open.
 
 **Issue 6 (2026-04-04):** 10-case external benchmark constructed from published ML evaluation failures (Dacrema 2019, Li & Talwalkar 2020, Rendle et al. 2020, Obermeyer et al. 2019, Wang et al. 2019, Brock et al. 2019, DeGrave et al. 2021, Gururangan et al. 2018, Jia & Liang 2017, Zeng et al. 2023). Ground truth established by external domain consensus, not the protocol designer.
 

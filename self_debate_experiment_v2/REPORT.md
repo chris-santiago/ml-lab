@@ -48,6 +48,8 @@ Six rubric dimensions are scored per case on a 0.0–1.0 scale:
 
 **IDP/IDR on defense_wins cases:** Scored N/A. Scoring IDP on a case where the Critic's claims are structurally invalid would mechanically penalize a correctly-functioning protocol. The relevant signal in defense_wins cases is DC (did the Defender correctly identify the sound aspects and reach defense_wins?) and FVC.
 
+**Agent convergence rate:** A per-case binary metric measuring whether the Critic and Defender independently reached the same verdict type before Judge adjudication. Computed from the `critic_verdict` and `defender_verdict` fields in `self_debate_results.json`. Values: 1.0 = both agents output the same verdict type (e.g., both `critique_wins`); 0.5 = agents diverged on verdict type. The 0.5 value is used rather than 0.0 to avoid conflating "no agreement" with "maximal disagreement" — convergence measures agreement, not correctness. Cases where divergence is the expected behavior (mixed correct_position) are not treated as failures.
+
 ### 1.3 Benchmark Cases
 
 Twenty synthetic ML reasoning cases across six categories:
@@ -76,6 +78,18 @@ Defense_wins cases are false-positive critique traps: methodologically sound wor
 | Lift | ≥ +0.10 | **+0.586** ✓ | — |
 
 **Benchmark verdict: PASSES.**
+
+**Statistical tests** (bootstrap CIs and paired Wilcoxon signed-rank — see `stats_analysis.py` and `stats_results.json`):
+
+| Comparison | Point estimate | 95% Bootstrap CI | Wilcoxon p | Effect size (r) |
+|------------|---------------|------------------|-----------|-----------------|
+| Debate mean | 0.970 | [0.942, 0.992] | — | — |
+| Baseline mean | 0.384 | [0.275, 0.486] | — | — |
+| Ensemble mean | 0.754 | [0.627, 0.856] | — | — |
+| Lift: debate vs. baseline | +0.586 | [+0.486, +0.691] | p = 0.000082 | r = 1.000 |
+| Lift: debate vs. ensemble | +0.216 | [+0.098, +0.352] | p = 0.003528 | r = 0.758 |
+
+Both lifts are statistically significant at α = 0.05. The debate vs. baseline lift has the maximum possible rank-biserial r (1.0) — the debate protocol outperforms the baseline on every one of the 20 cases. The debate vs. ensemble lift (r = 0.758) is a large effect. Bootstrap CIs were computed with 10,000 case-level resamples; Wilcoxon uses normal approximation with continuity correction.
 
 ### 2.2 Per-Case Results
 
@@ -236,7 +250,29 @@ The primary addition in v2 is the two new case categories (real_world_framing) a
 
 ---
 
-## 7. Artifacts
+## 7. Limitations
+
+The following limitations are documented in full across `SENSITIVITY_ANALYSIS.md`, `ENSEMBLE_ANALYSIS.md`, and the post-experiment sections of this report. They are consolidated here for clarity.
+
+**L1 — Closed-loop benchmark design.** The benchmark cases, ground truth labels (`must_find`, `correct_position`, `ideal_resolution`), rubric dimensions, scoring code, agent prompts, and scoring judgments all originate from the same entity. The benchmark may be unconsciously calibrated to the protocol's strengths. The 14/20 debate ceiling scores (1.000) are consistent with this effect, though they are also consistent with the tasks being genuinely tractable for the protocol. An independent external benchmark was run as a partial mitigant (10 cases from published ML evaluation failures, IDR=0.95 — see `../external_benchmark/`), but external defense_wins cases do not exist in published failure literature, so the protocol's most distinctive advantage (exoneration of valid work) cannot be externally validated.
+
+**L2 — Single run per case; no variance estimation.** Every result is a point estimate from a single execution. LLMs are stochastic; re-running the same protocol on the same case would produce a distribution of scores. The reported means (0.970, 0.384) have no confidence intervals and no significance tests. A bootstrap analysis and paired Wilcoxon test are documented in `stats_results.json` (see `stats_analysis.py`), but within-case variance from LLM stochasticity has not been estimated.
+
+**L3 — Rubric-inflated headline lift.** The reported +0.586 lift reflects two structural scoring choices: DC=0.0 hardcoded for all baseline cases (the baseline has no defense role), and DRQ capped at 0.5 for all baseline cases (a single-pass system cannot produce a "debate resolution"). Both overrides were identified and quantified by post-experiment adversarial review. The honest corrected lift range is **+0.335 to +0.441** — 3–4× the pre-registered threshold under all rubric scenarios. See `SENSITIVITY_ANALYSIS.md`.
+
+**L4 — Strawman primary comparison.** The single-pass baseline runs with 3–4× fewer LLM calls and no structural role prompting. A compute-matched ensemble (3 independent assessors + synthesizer, no role differentiation) scored 0.754 overall vs. debate's 0.970. The debate–ensemble gap (+0.216) is a more honest measure of what adversarial role structure specifically contributes. See `ENSEMBLE_ANALYSIS.md`.
+
+**L5 — Same-model scoring confound.** The Scorer agent is claude-sonnet-4-6 — the same model family as the Critic, Defender, Judge, and Baseline. A model scoring its own outputs may exhibit self-consistency bias. IDR=1.000 across 15 applicable debate cases and IDP=1.000 for both systems are consistent with this effect. Cross-model scorer validation (Issue 5 in `tasks/open_issues.md`) has not been executed.
+
+**L6 — N=20 sample size.** The benchmark contains 20 cases across 6 categories. The convergence-by-difficulty analysis has n=3 for the easy stratum (one data point drives the easy=0.833 estimate). Category-level conclusions (e.g., "protocol adds limited value on easy cases") are based on 2–5 cases per category and should be treated as directional rather than definitive.
+
+**L7 — Unvalidated difficulty labels.** Easy/medium/hard labels are author-assigned with no independent calibration or inter-rater agreement. The convergence analysis and §4.4 interpretation depend on these labels.
+
+**L8 — Rubric ceiling for the treatment condition.** Fourteen of 20 debate cases score 1.000 across all applicable dimensions. The rubric has no discriminative power for the treatment condition — it cannot distinguish degrees of protocol performance across cases. Analysis of "where the protocol adds value" (§4.1–4.2) relies entirely on variation in baseline scores. See Issue 11 in `tasks/open_issues.md`.
+
+---
+
+## 8. Artifacts (previously §7)
 
 All experimental artifacts are in `/self_debate_experiment_v2/`:
 
@@ -246,11 +282,16 @@ All experimental artifacts are in `/self_debate_experiment_v2/`:
 | `self_debate_poc.py` | Benchmark case metadata and scoring logic |
 | `self_debate_results.json` | Full results JSON: per-case scores, transcripts, aggregates |
 | `CONCLUSIONS.md` | Per-case scoring tables, dimension-level aggregates, failure mode analysis |
+| `SENSITIVITY_ANALYSIS.md` | Rubric design effects on reported lift; honest corrected range +0.335–0.441 |
+| `ENSEMBLE_ANALYSIS.md` | Compute-matched ensemble follow-on; ETD forcing function finding; IDP asymmetry correction |
+| `clean_ensemble_results.json` | Per-case ensemble scores — clean two-phase run |
+| `stats_analysis.py` | Bootstrap CIs and paired Wilcoxon tests on per-case deltas |
+| `stats_results.json` | Output of stats_analysis.py: CIs, p-values, effect sizes |
 | `REPORT.md` | This document |
 
 ---
 
-## 8. Conclusion
+## 9. Conclusion
 
 The isolated self-debate protocol passes the benchmark on all three criteria. The +0.586 headline lift is partially attributable to rubric design choices (DC=0.0 structural override, DRQ cap); the honest corrected lift range is **+0.335 to +0.441**, still 3–4× the pre-registered threshold. The protocol's advantage is real.
 

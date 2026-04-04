@@ -214,6 +214,36 @@ Compute efficiency: Ensemble uses ~4 calls at parallel latency. Debate uses ~4+ 
 
 ---
 
+## IDP N/A Asymmetry — Harmonized Scoring (Issue 10)
+
+**Problem:** For the debate protocol, IDP is scored N/A on all 5 defense_wins cases (the Critic's claims are structurally invalid on these cases, so precision cannot be meaningfully scored). For the clean ensemble, IDP *was* scored on defense_wins cases in the original results: defense_wins_001 and defense_wins_002 received IDP=0.5 because the ensemble raised minor caveats alongside correct exonerations. This asymmetric N/A treatment penalizes the ensemble in a way the debate protocol cannot be penalized.
+
+**Harmonized recomputation:** Dropping IDP from ensemble defense_wins case means (to match the debate condition):
+
+| Case | Original ensemble mean | Harmonized ensemble mean | Change |
+|------|----------------------|--------------------------|--------|
+| defense_wins_001 | 0.875 (IDP=0.5, DC=1.0, DRQ=1.0, FVC=1.0) | **1.000** (DC=1.0, DRQ=1.0, FVC=1.0) | +0.125 |
+| defense_wins_002 | 0.875 (IDP=0.5, DC=1.0, DRQ=1.0, FVC=1.0) | **1.000** (DC=1.0, DRQ=1.0, FVC=1.0) | +0.125 |
+| defense_wins_003 | 1.000 | 1.000 | — |
+| defense_wins_004 | 0.000 | 0.000 | — |
+| defense_wins_005 | 1.000 | 1.000 | — |
+
+**Revised aggregates:**
+
+| Metric | Original | Harmonized |
+|--------|----------|------------|
+| Defense_wins mean (ensemble) | 0.750 | **0.800** |
+| Overall benchmark mean (ensemble) | 0.754 | **0.767** |
+| Debate–ensemble gap | 0.216 | **0.203** |
+
+**Impact on "cleaner exonerations" claim:** The original finding that "structural isolation produces cleaner exonerations — debate achieves 1.0 on defense_wins_001/002 while ensemble achieves 0.875" is an artifact of the IDP asymmetry. Under harmonized scoring, both the debate (1.000) and the ensemble (1.000) achieve the same mean on those cases.
+
+The qualitative claim survives in a weaker form: the ensemble *did* raise caveats on defense_wins_001 and defense_wins_002 (IDP=0.5), indicating less confident exoneration. The debate protocol's isolated Defender, receiving only the task prompt with no adversarial framing, produced clean "no issues" outputs on those cases (IDP=N/A, no false concerns raised). This distinction is real but should be reported as a qualitative observation, not as a mean-score advantage.
+
+**Revised §3 qualification language:** "The debate protocol produces structurally cleaner exonerations — its isolated Defender raised no concerns on defense_wins_001 and defense_wins_002, while the ensemble raised minor caveats (IDP=0.5) alongside correct exonerations. Under harmonized scoring (IDP excluded for both conditions on defense_wins cases), the mean-score advantage disappears: both systems score 1.0 on DC, DRQ, and FVC for those cases."
+
+---
+
 ## Prompt Design Lessons
 
 For future ensemble experiments:
