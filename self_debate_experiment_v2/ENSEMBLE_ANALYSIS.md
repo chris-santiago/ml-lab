@@ -206,11 +206,11 @@ Compute efficiency: Ensemble uses ~4 calls at parallel latency. Debate uses ~4+ 
 
 **What is established:**
 1. **Compute budget + parallel views** can partially replace the isolation mechanism for defense_wins cases. 4/5 valid work cases were correctly exonerated without structural isolation or coaching. The original finding that "isolation architecture is uniquely necessary" is revised to "isolation architecture is not uniquely necessary, but parallel views achieve imperfect exoneration (IDP=0.5 vs 1.0 for cases that raised caveats)."
-2. **ETD is the debate protocol's structural advantage over ensembles.** For cases where the ideal resolution is an agreed empirical test, the debate's adversarial forcing function is what generates the test. A compute-matched ensemble with no output constraints produces correct issue identification and verdict direction but stops short of test design.
+2. **ETD gap over ensembles is a prompt design effect, not an adversarial architecture effect.** For cases where the ideal resolution is an agreed empirical test, the unconstrained ensemble stops short of test design. However, the ETD ablation (see §ETD Ablation below) showed that adding an explicit test-design output constraint to the ensemble synthesizer achieves ETD mean 0.962 — within 0.038 of the debate protocol's 1.0. The ETD advantage is portable: it follows the instruction, not the role structure.
 3. **The contaminated first ensemble run (all 1.0) was entirely artifact.** The clean run scores 0.754, not 1.0. The coaching effect was total.
-4. **The debate protocol still outperforms** the clean ensemble substantially (0.970 vs 0.754), with better pass rates (95% vs 55%). The advantage is real — but the mechanism is test-design forcing, not issue detection or verdict calibration.
+4. **The debate protocol still outperforms** the clean ensemble substantially (0.970 vs 0.754), with better pass rates (95% vs 55%). The advantage is real — but it is explained by the missing ETD output constraint and DRQ degradation, not by issue detection or verdict calibration failure. The confirmed structural advantages are exoneration precision (5/5 clean vs. 4/5 with caveats) and point-by-point argumentation (DC, DRQ).
 
-**Recommended status for Issue 1:** Resolved. Defense_wins isolation hypothesis definitively tested and partially refuted: compute budget + parallel views suffices for exoneration in 4/5 cases. ETD is the structural mechanism that explains debate's remaining advantage.
+**Recommended status for Issue 1:** Resolved. Defense_wins isolation hypothesis definitively tested and partially refuted: compute budget + parallel views suffices for exoneration in 4/5 cases. The ETD gap is an output-constraint effect confirmed by the ETD ablation (Issue 9) — the debate protocol produces ETD because its prompt includes the constraint, not because of adversarial role structure.
 
 ---
 
