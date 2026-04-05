@@ -35,6 +35,8 @@ Once installed, Claude Code will make `ml-lab` available as a spawnable agent. I
 - **`/ml-lab`** — explicit slash command entry point
 - **Natural language** — describe an ML hypothesis and Claude Code routes to ml-lab automatically via its description
 
+> Have a question? Check the [FAQ](#faq) at the bottom of this page.
+
 ---
 
 ### What ml-lab Does
@@ -203,6 +205,8 @@ Full trace and spec validation notes are in [`seq_fraud_experiment/TEST2_FINDING
 
 ## Part 2: The Experiment Behind ml-lab
 
+> Have a question about the methodology or results? Check the [FAQ](#faq) at the bottom of this page.
+
 This project asks a simple question: **when an AI evaluates a piece of work, does it actually catch real problems?**
 
 The context is ML research — model results, statistical claims, deployment decisions. These are exactly the situations where evaluation matters most and where confident-sounding-but-wrong answers are most dangerous.
@@ -346,6 +350,9 @@ Then paste the contents of `multi-agent-prompt.md` as your first message.
 
 ## FAQ
 
+<details>
+<summary>Show all questions</summary>
+
 ### Installation & Setup
 
 **Do I need Claude Code installed before I can use ml-lab?**
@@ -445,6 +452,8 @@ A compute-matched ensemble — three independent assessors plus a synthesizer, n
 **Use an ensemble when** you need a verdict on whether something is broken and don't need a test specification. Simpler, faster, and empirically nearly as good for straightforward fault detection.
 
 **Honest caveats:** The structural advantage evidence is primarily from synthetic benchmarks. An external exoneration benchmark was subsequently run: 3 defense_wins-type cases from peer-reviewed ML work (BERT/SQuAD 1.1, ResNet-152/ImageNet, clinical 5-fold CV), where a critique could be raised but the methodology is genuinely sound. Debate protocol passed all 3 (mean 0.875); baseline passed 0/3 on rubric (DC=0.0 structural rule) but reached correct verdict label in all 3. The exoneration pattern holds on externally grounded cases. The ETD advantage is confirmed as an output-constraint prompt effect (not an architecture effect) by ablation. See [`external_exoneration_results.json`](self_debate_experiment_v2/external_exoneration_results.json).
+
+</details>
 
 ---
 
