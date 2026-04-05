@@ -52,7 +52,12 @@ flowchart TD
     S11 --> S12GATE
 
     S12GATE{"full_report or<br/>TECHNICAL_REPORT<br/>produced?"}
-    S12GATE -- "No" --> DONE
+    S12GATE -- "No" --> S13GATE
     S12GATE -- "Yes" --> S12["Step 12 — Artifact Coherence Audit<br/>6 cross-doc consistency checks<br/>Fix any inconsistency before exit"]
-    S12 --> DONE(["✓ Final Output to Caller"])
+    S12 --> S13GATE
+
+    S13GATE[/"❓ README readability review?<br/>User confirmation required"/]
+    S13GATE -- "No" --> DONE
+    S13GATE -- "Yes" --> S13["Step 13 — README Rewrite<br/>readme-rewriter · outside reader<br/>diagnose → outline → rewrite"]
+    S13 --> DONE(["✓ Final Output to Caller"])
 ```
