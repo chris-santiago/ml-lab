@@ -1,14 +1,21 @@
-# claude-ml-lab — npm Plugin Plan
+# claude-ml-lab — Plugin Distribution Plan
 
-**Package name:** `claude-ml-lab`
-**Scope:** ml-lab trio (ml-lab, ml-critic, ml-defender) — `research-reviewer` and `research-reviewer-lite` live in `agents/` but are excluded from the v1 package; candidate for a separate `claude-research-reviewer` package or v2 expansion
-**Design:** self-contained agent files, memory system kept as-is
+**Plugin name:** `claude-ml-lab`
+**Marketplace name:** `ml-debate-lab`
+**Scope:** ml-lab trio (ml-lab, ml-critic, ml-defender) — `research-reviewer` and `research-reviewer-lite` live in `agents/` but are excluded from v1; candidate for a separate plugin or v2 expansion
+**Distribution:** Claude Code native plugin system via `marketplace.json` hosted in this GitHub repo
 
 ---
 
-## What this produces
+## How it works
 
-After `npx claude-ml-lab install`, users have:
+Claude Code has a built-in plugin system. A **marketplace** is a git repo containing a `.claude-plugin/marketplace.json` catalog. Users add your marketplace once, then install individual plugins from it. Claude Code handles all file management natively — no custom install scripts needed.
+
+This repo is both the plugin source and the marketplace.
+
+---
+
+## What users get after install
 
 ```
 ~/.claude/agents/
@@ -17,7 +24,7 @@ After `npx claude-ml-lab install`, users have:
   ml-defender.md
 
 ~/.claude/agent-memory/ml-lab/
-  MEMORY.md   (empty index, created on first install)
+  MEMORY.md   (created by ml-lab on first investigation run)
 ```
 
 Claude Code picks up the agents automatically. Users invoke the workflow by describing an ML hypothesis — Claude Code routes to `ml-lab` via the description field.
@@ -26,251 +33,143 @@ Claude Code picks up the agents automatically. Users invoke the workflow by desc
 
 ## Repository layout (new files only)
 
-All plugin-related files live under `plugin/`. Experiment work stays under `agents/`, `self_debate_experiment_v2/`, etc. — untouched.
-
 ```
 ml-debate-lab/
 ├── agents/
-│   ├── ml-lab.md          (no changes)
-│   ├── ml-critic.md       (no changes)
-│   ├── ml-defender.md     (no changes)
-│   ├── README.md          (add npx install as primary path)
-│   └── PLUGIN_PLAN.md     (this file)
-└── plugin/
-    ├── package.json        (npm package metadata)
-    ├── README.md           (user-facing install + usage docs)
-    └── bin/
-        └── claude-ml-lab.js  (CLI entry point)
+│   ├── ml-lab.md
+│   ├── ml-critic.md
+│   ├── ml-defender.md
+│   ├── research-reviewer.md     (out of v1 scope)
+│   ├── research-reviewer-lite.md (out of v1 scope)
+│   └── ...
+└── .claude-plugin/
+    ├── plugin.json              (plugin manifest)
+    └── marketplace.json         (marketplace catalog)
 ```
 
-The `plugin/` directory is the npm package root — `npm publish` is run from there. The agent `.md` files are referenced from `../agents/` at install time and copied into the published package via the `files` field in `package.json`.
-
-**ml-lab.md has changed since the plan was written.** Step 10 (Peer Review Loop) was added, references updated from 9-step to 10-step, and `research-reviewer`/`research-reviewer-lite` added to the delegation list. This is a minor version bump: `1.0.0 → 1.1.0`. ml-critic.md and ml-defender.md are unchanged.
+No `plugin/` directory. No Node.js. No npm publish step. The repo itself is the distribution artifact.
 
 ---
 
-## Step 1 — `plugin/package.json`
+## Step 1 — `.claude-plugin/plugin.json`
+
+The plugin manifest declares what gets installed.
 
 ```json
 {
   "name": "claude-ml-lab",
-  "version": "1.0.0",
-  "description": "ML hypothesis investigation agents for Claude Code — critic, defender, and orchestrator.",
-  "keywords": ["claude", "claude-code", "ml", "agents", "hypothesis-testing"],
+  "description": "Structured 10-step ML hypothesis investigation for Claude Code — critic, defender, orchestrator, and peer review.",
+  "version": "1.1.0",
   "license": "MIT",
-  "bin": {
-    "claude-ml-lab": "./bin/claude-ml-lab.js"
+  "agents": [
+    "./agents/ml-lab.md",
+    "./agents/ml-critic.md",
+    "./agents/ml-defender.md"
+  ]
+}
+```
+
+The `agents` paths are relative to the plugin root (the repo root, which is also where `.claude-plugin/` lives). Claude Code copies these files to `~/.claude/agents/` on install.
+
+---
+
+## Step 2 — `.claude-plugin/marketplace.json`
+
+The marketplace catalog lists the plugin and where to find it. Since the plugin lives in the same repo as the marketplace, `source` is `"./"`.
+
+```json
+{
+  "name": "ml-debate-lab",
+  "owner": {
+    "name": "chris-santiago"
   },
-  "files": [
-    "agents/ml-lab.md",
-    "agents/ml-critic.md",
-    "agents/ml-defender.md",
-    "bin/claude-ml-lab.js",
-    "README.md"
-  ],
-  "engines": {
-    "node": ">=18"
-  }
-}
-```
-
-`files` whitelist is critical — it keeps experiment data, reports, and analysis out of the published package. Paths are relative to `plugin/`, so `agents/` here means `plugin/agents/` (the copied agent files, not the source in the repo root).
-
----
-
-## Step 2 — `plugin/bin/claude-ml-lab.js`
-
-Single-file Node.js CLI. No dependencies. Supports two commands: `install` and `uninstall`.
-
-When installed via npm/npx, the package root is `plugin/`. The agent files are copied into `plugin/agents/` at publish time (see Step 3), so `SOURCE_DIR` resolves to `plugin/agents/` at runtime.
-
-```javascript
-#!/usr/bin/env node
-
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
-
-const AGENTS = ["ml-lab.md", "ml-critic.md", "ml-defender.md"];
-const AGENTS_DIR = path.join(os.homedir(), ".claude", "agents");
-const MEMORY_DIR = path.join(os.homedir(), ".claude", "agent-memory", "ml-lab");
-const SOURCE_DIR = path.join(__dirname, "..", "agents"); // plugin/agents/
-
-const MEMORY_INDEX = `# ml-lab Agent Memory\n\n<!-- Populated by ml-lab as investigations run -->\n`;
-
-function install() {
-  // Create ~/.claude/agents/ if needed
-  fs.mkdirSync(AGENTS_DIR, { recursive: true });
-
-  // Copy agent files
-  for (const file of AGENTS) {
-    const src = path.join(SOURCE_DIR, file);
-    const dest = path.join(AGENTS_DIR, file);
-    fs.copyFileSync(src, dest);
-    console.log(`  ✓ installed ${file}`);
-  }
-
-  // Create memory directory and empty index if not present
-  fs.mkdirSync(MEMORY_DIR, { recursive: true });
-  const memIndex = path.join(MEMORY_DIR, "MEMORY.md");
-  if (!fs.existsSync(memIndex)) {
-    fs.writeFileSync(memIndex, MEMORY_INDEX);
-    console.log(`  ✓ created agent memory at ${MEMORY_DIR}`);
-  } else {
-    console.log(`  · agent memory already exists — skipping`);
-  }
-
-  console.log("\nclaude-ml-lab installed.");
-  console.log("Describe an ML hypothesis to Claude Code to start an investigation.\n");
-}
-
-function uninstall() {
-  let removed = 0;
-  for (const file of AGENTS) {
-    const dest = path.join(AGENTS_DIR, file);
-    if (fs.existsSync(dest)) {
-      fs.rmSync(dest);
-      console.log(`  ✓ removed ${file}`);
-      removed++;
+  "metadata": {
+    "description": "ML hypothesis investigation agents for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "claude-ml-lab",
+      "source": "./",
+      "description": "Structured 10-step ML hypothesis investigation — critic, defender, orchestrator, and peer review.",
+      "version": "1.1.0",
+      "license": "MIT",
+      "keywords": ["ml", "hypothesis-testing", "agents", "research"]
     }
-  }
-  if (removed === 0) {
-    console.log("  · no agents found — nothing to remove");
-  }
-  console.log("\nAgent memory at ~/.claude/agent-memory/ml-lab/ was NOT removed.");
-  console.log("Delete it manually if you want to clear investigation history.\n");
-}
-
-const cmd = process.argv[2];
-if (cmd === "install") {
-  install();
-} else if (cmd === "uninstall") {
-  uninstall();
-} else {
-  console.log("Usage:");
-  console.log("  npx claude-ml-lab install     Install agents to ~/.claude/agents/");
-  console.log("  npx claude-ml-lab uninstall   Remove agents from ~/.claude/agents/");
+  ]
 }
 ```
 
 ---
 
-## Step 3 — Update `agents/README.md`
+## Step 3 — User install
 
-Add the npm install as the primary path. Current manual `cp` stays as fallback.
-
-**New opening section:**
-
-```markdown
-## Install
-
-```bash
-npx claude-ml-lab install
+```shell
+# In Claude Code:
+/plugin marketplace add chris-santiago/ml-debate-lab
+/plugin install claude-ml-lab@ml-debate-lab
 ```
 
-This copies the three agent files to `~/.claude/agents/` and creates
-`~/.claude/agent-memory/ml-lab/` for persistent investigation memory.
-
-To remove:
+Or from the CLI:
 
 ```bash
-npx claude-ml-lab uninstall
-```
-
-**Alternative — manual install:**
-
-```bash
-cp agents/ml-lab.md ~/.claude/agents/
-cp agents/ml-critic.md ~/.claude/agents/
-cp agents/ml-defender.md ~/.claude/agents/
-```
+claude plugin marketplace add chris-santiago/ml-debate-lab
+claude plugin install claude-ml-lab@ml-debate-lab
 ```
 
 ---
 
-## Step 3 — Copy agent files into `plugin/agents/`
+## Step 4 — Uninstall
 
-The npm package is published from `plugin/`. The agent source files live in `agents/` (repo root). Before publishing, copy them into `plugin/agents/` so the `files` whitelist can bundle them.
-
-```bash
-mkdir -p plugin/agents
-cp agents/ml-lab.md plugin/agents/
-cp agents/ml-critic.md plugin/agents/
-cp agents/ml-defender.md plugin/agents/
+```shell
+/plugin uninstall claude-ml-lab@ml-debate-lab
 ```
 
-Add `plugin/agents/` to `.gitignore` — these are copies, not the source of truth.
-
-```
-# .gitignore addition
-plugin/agents/
-```
-
-On future agent updates: re-copy and re-publish with a bumped version.
-
----
-
-## Step 4 — Publish to npm
-
-Prerequisites: npm account created at npmjs.com, logged in locally via `npm login`.
-
-```bash
-# Copy agent files into the package (see Step 3)
-mkdir -p plugin/agents
-cp agents/ml-lab.md agents/ml-critic.md agents/ml-defender.md plugin/agents/
-
-# Publish from the plugin directory
-cd plugin
-npm login                    # one-time, prompts for credentials
-npm publish --access public  # publishes claude-ml-lab@1.0.0
-```
-
-After publish, users install with:
-
-```bash
-npx claude-ml-lab install
-```
-
-Or as a persistent global CLI:
-
-```bash
-npm install -g claude-ml-lab
-claude-ml-lab install
-```
+Agent memory at `~/.claude/agent-memory/ml-lab/` is NOT removed. Delete it manually to clear investigation history.
 
 ---
 
 ## Step 5 — Version management
 
-When agent files change (prompt updates, new modes, bug fixes):
+When agent files change:
 
-1. Update the relevant `.md` file(s) in `agents/` (the source of truth)
-2. Re-copy into `plugin/agents/`
-3. Bump version in `plugin/package.json` (semver: patch for prompt tweaks, minor for new modes or new steps, major for protocol changes — e.g., adding Step 10 = minor bump)
-4. `cd plugin && npm publish`
+1. Update the relevant `.md` file(s) in `agents/` (source of truth)
+2. Bump version in `.claude-plugin/plugin.json` (semver: patch for prompt tweaks, minor for new modes or new steps, major for protocol changes — e.g., Step 10 addition = 1.0.0 → 1.1.0)
+3. Push to GitHub
 
-Users update by re-running `npx claude-ml-lab install` — it overwrites the agent files in `~/.claude/agents/` with the latest version. Memory is never touched on updates.
+Users update by running:
+
+```shell
+/plugin marketplace update ml-debate-lab
+/plugin install claude-ml-lab@ml-debate-lab
+```
+
+No publish step. No npm. The git push is the release.
+
+---
+
+## A note on npm
+
+npm is supported as a plugin *source type* within a marketplace entry (alongside `github`, `url`, `git-subdir`). It is NOT a replacement for the marketplace mechanism — the user-facing install is always `/plugin install`, regardless of the underlying source. Publishing to npm could be useful for private registries or enterprise deployments, but adds no benefit for a public GitHub-hosted plugin. The git-based approach here is simpler and gets automatic update propagation via `/plugin marketplace update`.
 
 ---
 
 ## Pre-publish checklist
 
-- [ ] npm account created at npmjs.com
-- [ ] `npm login` run locally (from `plugin/` directory)
-- [ ] Verify `claude-ml-lab` is available on npm (check npmjs.com/package/claude-ml-lab)
-- [ ] Agent files copied into `plugin/agents/`
-- [ ] `plugin/agents/` added to `.gitignore`
-- [ ] `node plugin/bin/claude-ml-lab.js install` tested locally end-to-end
-- [ ] `node plugin/bin/claude-ml-lab.js uninstall` tested
-- [ ] `npx claude-ml-lab install` tested from a clean directory (simulates how users will run it)
-- [ ] Verify agents appear in Claude Code after install (restart Claude Code if needed)
-- [ ] `cd plugin && npm publish --dry-run` — inspect file list matches `files` whitelist
+- [ ] `.claude-plugin/plugin.json` created with correct paths and version
+- [ ] `.claude-plugin/marketplace.json` created with correct plugin entry
+- [ ] `claude plugin validate .` run from repo root — no errors
+- [ ] Add marketplace locally and install to test: `/plugin marketplace add ./` then `/plugin install claude-ml-lab@ml-debate-lab`
+- [ ] Verify all three agent files appear in `~/.claude/agents/` after install
+- [ ] Verify Claude Code picks up ml-lab (describe an ML hypothesis)
+- [ ] Push to GitHub
+- [ ] Test from a clean machine: `/plugin marketplace add chris-santiago/ml-debate-lab` then `/plugin install claude-ml-lab@ml-debate-lab`
+- [ ] Update `agents/README.md` with the plugin install as the primary path
 
 ---
 
 ## What does NOT change
 
-- Agent file contents — all three `.md` files are published as-is
-- Memory system spec inside `ml-lab.md` — kept fully embedded
+- Agent file contents — all three `.md` files are used as-is
+- Memory system spec inside `ml-lab.md` — kept fully embedded; ml-lab creates `~/.claude/agent-memory/ml-lab/MEMORY.md` on first investigation run
 - Subagent dispatch design — ml-critic and ml-defender remain internal; only ml-lab is user-facing
-- Experiment artifacts, reports, and analysis — excluded by `files` whitelist
+- Experiment artifacts, reports, and analysis — not referenced by plugin.json, not installed
