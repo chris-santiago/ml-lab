@@ -14,6 +14,17 @@ After completing Steps 1–9 in full-report mode, ml-lab should ask the user whe
 
 ---
 
+## Update "An Example Run" in README after ml-lab edits are finalized
+
+Once all changes to `agents/ml-lab.md` are complete, revisit the "An Example Run" section in the root README and update it to reflect the current workflow. Specifically check:
+- Step count and naming (currently 9-step; ml-lab is now 10-step)
+- Whether the fraud detection walkthrough accurately reflects the current agent behavior, prompts, and escalation logic
+- Any new steps or behavioral changes (report mode selection, peer review loop, final synthesis report) that would change how the example run reads
+
+The walkthrough is the primary "does this actually work?" demonstration for new users — it should always reflect the live agent, not an earlier version.
+
+---
+
 ## README reorganization (post-plugin publish)
 
 Once the ml-lab plugin is published, reorganize the root README into two distinct parts:
@@ -32,7 +43,7 @@ The motivation: right now the README leads with the experiment, which buries the
 
 ---
 
-## ml-lab: Final synthesis report in "results mode"
+## ~~ml-lab: Final synthesis report in "results mode"~~ ✓ DONE
 
 After all steps complete, ml-lab should ask the user if they want a final technical report that synthesizes all conclusions, findings, and interim artifacts.
 
