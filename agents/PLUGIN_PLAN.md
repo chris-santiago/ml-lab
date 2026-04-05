@@ -2,7 +2,7 @@
 
 **Plugin name:** `claude-ml-lab`
 **Marketplace name:** `ml-debate-lab`
-**Scope:** ml-lab trio (ml-lab, ml-critic, ml-defender) — `research-reviewer` and `research-reviewer-lite` live in `agents/` but are excluded from v1; candidate for a separate plugin or v2 expansion
+**Scope:** All six agents — ml-lab, ml-critic, ml-defender, research-reviewer, research-reviewer-lite, readme-rewriter. All six are runtime dependencies of ml-lab (Steps 3–5, 10, 13) and must be installed together.
 **Distribution:** Claude Code native plugin system via `marketplace.json` hosted in this GitHub repo
 
 ---
@@ -39,8 +39,9 @@ ml-debate-lab/
 │   ├── ml-lab.md
 │   ├── ml-critic.md
 │   ├── ml-defender.md
-│   ├── research-reviewer.md     (out of v1 scope)
-│   ├── research-reviewer-lite.md (out of v1 scope)
+│   ├── research-reviewer.md
+│   ├── research-reviewer-lite.md
+│   ├── readme-rewriter.md
 │   └── ...
 └── .claude-plugin/
     ├── plugin.json              (plugin manifest)
@@ -58,13 +59,16 @@ The plugin manifest declares what gets installed.
 ```json
 {
   "name": "claude-ml-lab",
-  "description": "Structured 10-step ML hypothesis investigation for Claude Code — critic, defender, orchestrator, and peer review.",
-  "version": "1.1.0",
+  "description": "Structured ML hypothesis investigation for Claude Code — adversarial critique, empirical testing, peer review, coherence audit, and README rewrite.",
+  "version": "1.4.0",
   "license": "MIT",
   "agents": [
     "./agents/ml-lab.md",
     "./agents/ml-critic.md",
-    "./agents/ml-defender.md"
+    "./agents/ml-defender.md",
+    "./agents/research-reviewer.md",
+    "./agents/research-reviewer-lite.md",
+    "./agents/readme-rewriter.md"
   ]
 }
 ```
@@ -90,8 +94,8 @@ The marketplace catalog lists the plugin and where to find it. Since the plugin 
     {
       "name": "claude-ml-lab",
       "source": "./",
-      "description": "Structured 10-step ML hypothesis investigation — critic, defender, orchestrator, and peer review.",
-      "version": "1.1.0",
+      "description": "Structured ML hypothesis investigation — adversarial critique, empirical testing, peer review, coherence audit, and README rewrite.",
+      "version": "1.4.0",
       "license": "MIT",
       "keywords": ["ml", "hypothesis-testing", "agents", "research"]
     }
@@ -133,7 +137,7 @@ Agent memory at `~/.claude/agent-memory/ml-lab/` is NOT removed. Delete it manua
 When agent files change:
 
 1. Update the relevant `.md` file(s) in `agents/` (source of truth)
-2. Bump version in `.claude-plugin/plugin.json` (semver: patch for prompt tweaks, minor for new modes or new steps, major for protocol changes — e.g., Step 10 addition = 1.0.0 → 1.1.0)
+2. Bump version in `.claude-plugin/plugin.json` (semver: patch for prompt tweaks, minor for new modes, new steps, or new agents, major for protocol changes — e.g., adding a new step = minor bump)
 3. Push to GitHub
 
 Users update by running:
@@ -159,17 +163,18 @@ npm is supported as a plugin *source type* within a marketplace entry (alongside
 - [ ] `.claude-plugin/marketplace.json` created with correct plugin entry
 - [ ] `claude plugin validate .` run from repo root — no errors
 - [ ] Add marketplace locally and install to test: `/plugin marketplace add ./` then `/plugin install claude-ml-lab@ml-debate-lab`
-- [ ] Verify all three agent files appear in `~/.claude/agents/` after install
-- [ ] Verify Claude Code picks up ml-lab (describe an ML hypothesis)
+- [ ] Verify all six agent files appear in `~/.claude/agents/` after install: ml-lab, ml-critic, ml-defender, research-reviewer, research-reviewer-lite, readme-rewriter
+- [ ] Verify Claude Code picks up ml-lab (describe an ML hypothesis — it should ask to sharpen the claim)
+- [ ] Verify subagent dispatch: confirm ml-lab can invoke ml-critic and ml-defender (Steps 3–5), research-reviewer (Step 10 Round 1), research-reviewer-lite (Step 10 Rounds 2–3), readme-rewriter (Step 13)
 - [ ] Push to GitHub
 - [ ] Test from a clean machine: `/plugin marketplace add chris-santiago/ml-debate-lab` then `/plugin install claude-ml-lab@ml-debate-lab`
-- [ ] Update `agents/README.md` with the plugin install as the primary path
+- [ ] Confirm `agents/README.md` shows plugin install as the primary path (already done)
 
 ---
 
 ## What does NOT change
 
-- Agent file contents — all three `.md` files are used as-is
+- Agent file contents — all six `.md` files are used as-is
 - Memory system spec inside `ml-lab.md` — kept fully embedded; ml-lab creates `~/.claude/agent-memory/ml-lab/MEMORY.md` on first investigation run
-- Subagent dispatch design — ml-critic and ml-defender remain internal; only ml-lab is user-facing
+- Subagent dispatch design — all agents except ml-lab are internal subagents; only ml-lab is user-facing
 - Experiment artifacts, reports, and analysis — not referenced by plugin.json, not installed
