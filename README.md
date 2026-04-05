@@ -201,30 +201,6 @@ Full trace and spec validation notes are in [`seq_fraud_experiment/TEST2_FINDING
 
 ---
 
-### Should I Use ml-lab or Just Run an Ensemble?
-
-**It depends on what output you need.**
-
-A compute-matched ensemble — three independent assessors plus a synthesizer, no role differentiation — scores 0.754 vs. ml-lab's 0.970 on the same benchmark (p=0.004, r=0.758). For detecting whether something is broken, an ensemble gets you most of the way there at lower complexity and latency.
-
-**ml-lab has two structural properties that ensembles cannot replicate, and one portable one:**
-
-1. **Resolving genuinely two-sided disagreements** *(confirmed).* When both positions in an evaluation are defensible, parallel assessors converge on the intuitive answer — they don't argue. The debate's Critic/Defender assignment forces engagement with both sides. The clearest example: a case where an offline NDCG improvement was challenged by a reviewer's concern about offline-online correlation validity. The ensemble scored 0.000 (all three assessors ignored the reviewer's concern and agreed to run an A/B test). The debate correctly identified that a calibration study was needed first. This failure mode is structural to parallel ensemble design and cannot be fixed by adding more assessors.
-
-2. **Exoneration of valid work** *(5/5 correct, directional vs. ensemble 4/5).* ml-lab correctly exonerated valid work in all 5 false-positive trap cases; the ensemble exonerated 4 of 5. The 5/5 vs. 4/5 gap is below statistical threshold at n=5, and the mean-score advantage disappears under harmonized scoring. Treat the count advantage as directional, not confirmed.
-
-3. **Empirical test design** *(replicable with output constraint)*. The debate reliably produces well-specified empirical tests; an unconstrained ensemble almost never does. But an ETD ablation showed that adding one explicit instruction to the ensemble synthesizer achieves ETD mean 0.962. ml-lab produces ETD because its prompt requires it, not because of adversarial role structure. You can get the same output from an ensemble by adding the same constraint.
-
-**Use ml-lab when** the output you need is *what experiment to run next*, or when you're evaluating work that might be valid and you need a dissenting voice that argues for it, not just against it.
-
-**Use an ensemble when** you need a verdict on whether something is broken and don't need a test specification. Simpler, faster, and empirically nearly as good for straightforward fault detection.
-
-**Honest caveats:** The structural advantage evidence is primarily from synthetic benchmarks. An external exoneration benchmark was subsequently run: 3 defense_wins-type cases from peer-reviewed ML work (BERT/SQuAD 1.1, ResNet-152/ImageNet, clinical 5-fold CV), where a critique could be raised but the methodology is genuinely sound. Debate protocol passed all 3 (mean 0.875); baseline passed 0/3 on rubric (DC=0.0 structural rule) but reached correct verdict label in all 3. The exoneration pattern holds on externally grounded cases. The ETD advantage is confirmed as an output-constraint prompt effect (not an architecture effect) by ablation — adding the same instruction to an ensemble synthesizer achieves ETD mean 0.962. See [`external_exoneration_results.json`](self_debate_experiment_v2/external_exoneration_results.json).
-
-For the full experimental methodology and results, see Part 2 below.
-
----
-
 ## Part 2: The Experiment Behind ml-lab
 
 This project asks a simple question: **when an AI evaluates a piece of work, does it actually catch real problems?**
@@ -365,6 +341,28 @@ claude --teammate-mode in-process
 ```
 
 Then paste the contents of `multi-agent-prompt.md` as your first message.
+
+---
+
+### Should I Use ml-lab or Just Run an Ensemble?
+
+**It depends on what output you need.**
+
+A compute-matched ensemble — three independent assessors plus a synthesizer, no role differentiation — scores 0.754 vs. ml-lab's 0.970 on the same benchmark (p=0.004, r=0.758). For detecting whether something is broken, an ensemble gets you most of the way there at lower complexity and latency.
+
+**ml-lab has two structural properties that ensembles cannot replicate, and one portable one:**
+
+1. **Resolving genuinely two-sided disagreements** *(confirmed).* When both positions in an evaluation are defensible, parallel assessors converge on the intuitive answer — they don't argue. The debate's Critic/Defender assignment forces engagement with both sides. The clearest example: a case where an offline NDCG improvement was challenged by a reviewer's concern about offline-online correlation validity. The ensemble scored 0.000 (all three assessors ignored the reviewer's concern and agreed to run an A/B test). The debate correctly identified that a calibration study was needed first. This failure mode is structural to parallel ensemble design and cannot be fixed by adding more assessors.
+
+2. **Exoneration of valid work** *(5/5 correct, directional vs. ensemble 4/5).* ml-lab correctly exonerated valid work in all 5 false-positive trap cases; the ensemble exonerated 4 of 5. The 5/5 vs. 4/5 gap is below statistical threshold at n=5, and the mean-score advantage disappears under harmonized scoring. Treat the count advantage as directional, not confirmed.
+
+3. **Empirical test design** *(replicable with output constraint)*. The debate reliably produces well-specified empirical tests; an unconstrained ensemble almost never does. But an ETD ablation showed that adding one explicit instruction to the ensemble synthesizer achieves ETD mean 0.962. ml-lab produces ETD because its prompt requires it, not because of adversarial role structure. You can get the same output from an ensemble by adding the same constraint.
+
+**Use ml-lab when** the output you need is *what experiment to run next*, or when you're evaluating work that might be valid and you need a dissenting voice that argues for it, not just against it.
+
+**Use an ensemble when** you need a verdict on whether something is broken and don't need a test specification. Simpler, faster, and empirically nearly as good for straightforward fault detection.
+
+**Honest caveats:** The structural advantage evidence is primarily from synthetic benchmarks. An external exoneration benchmark was subsequently run: 3 defense_wins-type cases from peer-reviewed ML work (BERT/SQuAD 1.1, ResNet-152/ImageNet, clinical 5-fold CV), where a critique could be raised but the methodology is genuinely sound. Debate protocol passed all 3 (mean 0.875); baseline passed 0/3 on rubric (DC=0.0 structural rule) but reached correct verdict label in all 3. The exoneration pattern holds on externally grounded cases. The ETD advantage is confirmed as an output-constraint prompt effect (not an architecture effect) by ablation — adding the same instruction to an ensemble synthesizer achieves ETD mean 0.962. See [`external_exoneration_results.json`](self_debate_experiment_v2/external_exoneration_results.json).
 
 ---
 
