@@ -68,6 +68,8 @@ If the hypothesis is revised during a macro-iteration, append a new section (`##
 - The agreed primary metric(s), computed on the synthetic evaluation set
 - At least one visualization showing the mechanism, not just the score
 
+**Before writing any code:** Identify any reference implementation this PoC must match. If one exists, record its configuration explicitly. Framework and library defaults are never a safe assumption — they are the most common source of silent divergence from a reference. Any parameter not explicitly set is a potential source of failure.
+
 **Rules:**
 - No production code. No database connections. No external APIs.
 - Use PEP 723 inline script metadata (`# /// script`) for dependency management so the script runs with `uv run script.py` without setup.
@@ -174,6 +176,8 @@ Present this plan to the user. **Do not begin Step 6 until the user approves.**
 
 **Baseline verification rule:** Inspect the baseline scoring function line by line before reporting results. Common failure modes: silent API misuse that makes every input score identically, a default argument that bypasses intended behavior, or a trivially satisfied evaluation condition.
 - If any condition produces near-perfect metrics (AP > 0.99, AUC > 0.999), investigate before reporting — this usually means the task is trivially easy or there is a data leak, not that the model is excellent
+
+**Precondition verification rule:** Before interpreting any result, verify that the model satisfies the preconditions the hypothesis depends on. If the hypothesis claims a model is sensitive to a particular signal, confirm the model actually encodes that signal before treating outcome metrics as meaningful. A model can look healthy on aggregate metrics while being completely blind to the specific discriminative requirement the hypothesis targets. Failed preconditions halt result interpretation — do not report verdicts from an unverified model.
 
 **Artifact:** A runnable Python script (`[domain]_experiment2.py`) implementing all agreed tests.
 

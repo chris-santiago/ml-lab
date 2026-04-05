@@ -36,6 +36,8 @@ Organize by root cause, not severity. State foundational choices explicitly. Gro
 - Signal leakage between train and evaluation sets
 - Failure modes under distribution shift
 - Metric choice limitations
+- **Silent misconfiguration:** Whether the implementation could be misconfigured in a way that produces plausible-looking results on easy cases while failing on the specific cases the hypothesis targets. Aggregate metrics passing is not evidence the model is functional for the hypothesis's hardest requirement. Look for configurations — including framework defaults — that would cause the model to degrade silently on the targeted signal without producing obvious errors or metric collapse.
+- **Prerequisite assumptions:** Any property the model must have for the hypothesis's mechanism to operate. These are not evaluation metrics — they are preconditions. If a precondition is not verified before the experiment runs, the experiment cannot produce an interpretable verdict.
 
 **What NOT to critique:**
 - Code style, naming conventions, or engineering quality — this is a PoC
