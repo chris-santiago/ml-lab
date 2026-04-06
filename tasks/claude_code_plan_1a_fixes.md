@@ -41,6 +41,8 @@ grep -c "Note on Context Isolation" agents/README.md
 
 ## Fix 1 — Correct self_debate_results.json Baseline Pass Flags
 
+> **Status: COMPLETED — 2026-04-05**
+
 **What:** Two cases (`broken_baseline_001`, `metric_mismatch_002`) have `baseline_pass: true` but DC=0.0 fails the per-dimension floor. Fix the JSON in place.
 
 ```python
@@ -90,6 +92,8 @@ print('Correction note present:', 'correction_note' in d)
 
 ## Fix 2 — Update REPORT.md §2.4 Convergence Table
 
+> **Status: COMPLETED — 2026-04-05**
+
 **What:** §2.4 table shows original n=3/10/7 and values 0.833/0.944/0.938. Data from new_benchmark_results.json already exists — just update the table.
 
 ```python
@@ -126,6 +130,8 @@ grep -A 12 "Convergence by Difficulty" self_debate_experiment_v2/REPORT.md
 ---
 
 ## Fix 3 — Document DC Scoring Inconsistency in External Benchmark
+
+> **Status: COMPLETED — 2026-04-05**
 
 **What:** External benchmark gives baseline DC=1.0 naturally; internal benchmark hardcodes DC=0.0. Add metadata note and a paragraph to REPORT.md §7.1.
 
@@ -185,6 +191,8 @@ python3 fix_external_benchmark_dc_note.py
 
 ## Fix 4 — Add Protocol Deviation Note to REPORT.md §7.1
 
+> **Status: COMPLETED — 2026-04-05**
+
 **What:** External fault-detection benchmark ran Defenders without Critic output. REPORT.md §7.1 doesn't mention this deviation.
 
 ```python
@@ -222,6 +230,8 @@ python3 fix_external_protocol_deviation_note.py
 ---
 
 ## Fix 5 — Update TECHNICAL_REPORT.md (Root Level)
+
+> **Status: COMPLETED — 2026-04-05**
 
 **What:** Adds a document status notice clarifying that the Judge is the orchestrator, and that Defender isolation is a benchmark-specific choice not a permanent property.
 
@@ -267,6 +277,8 @@ head -20 TECHNICAL_REPORT.md
 ---
 
 ## Fix 6 — Fix Stale Isolation Description in Agent Files
+
+> **Status: NOT APPLIED — 2026-04-05.** Agent `.md` files are dispatched as system prompts; adding meta-documentation to them becomes context window noise during agent execution. The isolation distinction is documented in `TECHNICAL_REPORT.md` (Fix 5) instead. The isolation confusion at the source is addressed by the document status notice, not by modifying agent files.
 
 **What:** Adds a permanent "Benchmark vs. Production Context" section to ml-defender.md and agents/README.md. This kills the recurring isolation description confusion at the source.
 
@@ -347,6 +359,8 @@ python3 fix_isolation_description.py
 ---
 
 ## Fix 7 — Add Judge Clarification to REPORT.md §1.1
+
+> **Status: COMPLETED — 2026-04-05**
 
 **What:** REPORT.md §1.1 implies the Judge is a separate subagent. Add one sentence clarifying it is the ml-lab orchestrator.
 

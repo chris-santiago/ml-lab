@@ -13,6 +13,8 @@
 
 ## Fix 1 — Run Ensemble Baseline on External Fault-Detection Cases
 
+> **Status: NOT DONE** — superseded if v3 experiment runs. See skip condition above.
+
 **What:** The 10-case external IDR benchmark was run with the debate protocol only. Without a parallel ensemble run on the same cases, you cannot claim the debate's external IDR advantage is structural rather than case-specific. This closes OQ-3 from the action plan.
 
 **Estimated cost:** ~40 agent calls (4 per case × 10 cases).
@@ -83,6 +85,8 @@ git commit -m "Fix 1b-1: ensemble baseline on external fault-detection cases
 ---
 
 ## Fix 2 — Within-Case Variance on Non-Converging Cases
+
+> **Status: COMPLETED — 2026-04-05.** Results: si003 debate_std=0.0, rw001 debate_std=0.0, mm002 debate_std=0.048 (Outcome B — DC stochasticity on mixed-position case; Judge verdict stable). See `within_case_variance_nonconverging.json`.
 
 **What:** The within-case variance experiment ran 3 repetitions only on cases with convergence=1.0 (salient, unambiguous flaws). Whether debate_std stays 0.0 on genuinely contested cases (convergence=0.5) is unknown. This is the correct stress test for the determinism claim. Closes OQ-3 from the action plan.
 
@@ -157,6 +161,8 @@ git commit -m "Fix 1b-2: within-case variance on non-converging cases
 ---
 
 ## Fix 3 — Flag External Benchmark Leakage Cases and Recompute Clean IDR
+
+> **Status: NOT DONE** — requires 30 min human review of `external_benchmark/cases.json`. Superseded if v3 experiment runs.
 
 **What:** 7 of 10 external cases required verifier rewrites because the flaw was visible in the source description. These cases are not individually flagged in the JSON. Requires human review of `external_benchmark/cases.json` to determine which cases had leakage, then recomputes IDR on the clean subset.
 
