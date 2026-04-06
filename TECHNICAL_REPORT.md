@@ -263,7 +263,9 @@ Debate: 3/3 pass (mean 0.875). Baseline: 0/3 rubric pass (DC=0.0 structural rule
 
 ### 8.1 Within-Case Variance
 
-The benchmark scores are point estimates from single protocol runs. Within-case LLM stochasticity — run-to-run variation from re-running the identical protocol on the same case — was estimated by executing 3 independent runs on 5 representative cases: `broken_baseline_001`, `metric_mismatch_003`, `hidden_confounding_002`, `defense_wins_001`, `real_world_framing_002`.
+The benchmark scores are point estimates from single protocol runs. Within-case LLM stochasticity — run-to-run variation from re-running the identical protocol on the same case — was estimated across two phases: 5 convergence=1.0 cases (salient, unambiguous flaws) and 3 convergence=0.5 cases (the correct stress test: genuine Critic/Defender verdict divergence in the original run).
+
+**Phase 1 — convergence=1.0 cases** (`within_case_variance_results.json`):
 
 | Case | Debate std | Debate mean | Baseline std | Baseline mean |
 |------|------------|-------------|--------------|---------------|
@@ -273,7 +275,17 @@ The benchmark scores are point estimates from single protocol runs. Within-case 
 | defense_wins_001 | 0.0 | 0.875 | 0.0 | 0.625 |
 | real_world_framing_002 | 0.0 | 1.000 | 0.0 | 0.750 |
 
-Debate_std = 0.0 across all 5 convergence=1.0 cases. A subsequent stress test on the 3 convergence=0.5 cases found debate_std=0.0 for `scope_intent_003` and `real_world_framing_001`, and debate_std=0.048 for `metric_mismatch_002` (the mixed-position case). The variance on mm002 is localized to DC in 1/3 runs when the Defender stochastically reaches defense_wins; Judge verdict stability is unaffected. The protocol is effectively deterministic for cases with identifiable correct positions; variance of ≈0.05 appears on genuinely two-sided cases. See `within_case_variance_nonconverging.json`. The bootstrap CIs in §6 reflect cross-case sampling variance, not within-case stochasticity.
+**Phase 2 — convergence=0.5 cases** (`within_case_variance_nonconverging.json`):
+
+| Case | Debate std | Debate mean | Baseline std | Baseline mean | Note |
+|------|------------|-------------|--------------|---------------|------|
+| scope_intent_003 | 0.0 | 1.000 | 0.0 | 0.700 | Deterministic despite convergence=0.5 |
+| real_world_framing_001 | 0.0 | 0.917 | 0.0 | 0.583 | Run 1 Defender verdict differed (emp_test vs critique_wins); score unchanged |
+| **metric_mismatch_002** | **0.048** | **0.889** | 0.192 | 0.472 | DC stochasticity: Defender tipped to defense_wins in 1/3 runs |
+
+Debate_std = 0.0 for 7/8 cases. **The one exception is `metric_mismatch_002`** (correct_position=mixed, ideal_resolution=empirical_test_agreed): the Defender stochastically reached defense_wins in 1 of 3 runs, reducing DC from 1.0 to 0.5 and the run mean from 0.917 to 0.833. The variance is confined to DC — IDR, FVC, and Judge verdict were identical across all 3 runs (judge_verdict=empirical_test_agreed in all 3). The Judge successfully overrode the Defender error every time.
+
+The protocol is effectively deterministic for cases with an identifiable correct position. Non-zero variance (≈0.05) appears specifically when the Defender faces a genuinely two-sided case where defense_wins is a locally plausible verdict. The bootstrap CIs in §6 reflect cross-case sampling variance, not within-case stochasticity.
 
 **Baseline replication note:** Baseline means in these replications are systematically higher than the original benchmark run for 4 of 5 cases. This reflects ETD volatility: in the original run, baseline ETD was 0.0 or 0.5 on these cases; in replications, the baseline spontaneously produced well-specified test designs (ETD=1.0), consistent with ETD being prompt-sensitive for the unconstrained baseline. This confirms that the debate protocol's ETD stability (ETD=1.0 reliably, due to explicit Judge instruction) is a prompt-design advantage over an unconstrained baseline — but not an irreducible architectural advantage.
 
