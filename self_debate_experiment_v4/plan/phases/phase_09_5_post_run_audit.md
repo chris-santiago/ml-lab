@@ -8,7 +8,7 @@
 > Automated anomaly detection to supplement manual post-mortem. Issue 8 remediation.
 
 ```bash
-uv run log_entry.py --step 9.5 --cat workflow --action step_start --detail "Phase 10.5: post-run audit agent — anomaly detection on raw outputs and scoring"
+uv run log_entry.py --step 9.5 --cat workflow --action step_start --detail "Phase 9.5: post-run audit agent — anomaly detection on raw outputs and scoring"
 ```
 
 **Agent prompt:**
