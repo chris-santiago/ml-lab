@@ -4,20 +4,25 @@
 flowchart TD
     START(["▶ Start"]) --> PRE["Ask: hypothesis · metrics · report_mode<br/>Write HYPOTHESIS.md"]
 
-    PRE ~~~ LOG["📋 INVESTIGATION_LOG.jsonl<br/>written throughout all steps"]
+    PRE ~~~ LOG["📋 INVESTIGATION_LOG.jsonl<br/>uv run log_entry.py throughout all steps"]
     style LOG fill:#f9f3e0,stroke:#c9a227,stroke-dasharray: 5 5
 
     PRE --> S1["Step 1 — Build PoC<br/>Reference check · Explicit params"]
     S1 --> S2["Step 2 — Clarify Intent<br/>Write README.md"]
 
     S2 --> S3["Step 3 — ml-critic<br/>CRITIQUE.md"]
-    S3 --> S4["Step 4 — ml-defender<br/>DEFENSE.md"]
+    S3 --> S4["Step 4 — ml-defender<br/>DEFENSE.md · log verdict"]
     S4 --> DROUND["Debate Round N<br/>Critic ↔ Defender"]
     DROUND --> DRES{"All points<br/>resolved?"}
     DRES -- "No · rounds left" --> DROUND
-    DRES -- "Yes or max 4 reached" --> G1
+    DRES -- "Yes or max 4 reached" --> PREFLIGHT
 
-    G1[/"✋ Gate 1 — Experiment Plan<br/>User approval required"/]
+    PREFLIGHT["Parse DEFENSE.md Pass 2 verdict table<br/>Extract concessions + pre-execution requirements<br/>Build pre-flight checklist → EXECUTION_PLAN.md"]
+    style PREFLIGHT fill:#e8f4e8,stroke:#2e7d32
+
+    PREFLIGHT --> G1
+
+    G1[/"✋ Gate 1 — Experiment Plan<br/>All pre-flight items CLOSED · User approval required"/]
 
     G1 --> S6["Step 6 — Design & Run Experiment<br/>Baseline verification · Precondition check"]
     S6 --> S7["Step 7 — Synthesize Conclusions<br/>CONCLUSIONS.md + figures"]
