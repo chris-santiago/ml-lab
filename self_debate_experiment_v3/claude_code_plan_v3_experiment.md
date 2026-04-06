@@ -341,8 +341,8 @@ preregistration = {
             "criterion": "Ensemble DC >= 0.5 on >= 60% of defense_wins cases -> compute partially explains"
         },
         "secondary_multiround_debate": {
-            "claim": "Multi-round debate (ml-lab protocol) outperforms single-pass isolated debate on DC and DRQ dimensions",
-            "criterion": "multiround_mean(DC + DRQ) > isolated_debate_mean(DC + DRQ) across non-defense_wins cases"
+            "claim": "Multi-round adversarial exchange outperforms single-pass isolated debate on DRQ (DC is structurally identical to FVC in this scorer — see dc_note)",
+            "criterion": "multiround_mean(DRQ) > isolated_debate_mean(DRQ) across non-defense_wins cases; DC reported for completeness but not independently informative"
         }
     },
     "rubric": {
@@ -828,7 +828,22 @@ The Defender sees the Critique — this is the standard ml-lab protocol.
 Alternate ml-critic (Mode 2) and ml-defender (Mode 2) on contested points.
 Maximum 4 rounds. Force-resolve any remaining contested points as empirical_test_required.
 
+Maintain a running resolution list across rounds. After each round, update which
+contested points are now resolved (conceded or empirically settled) and which remain
+open. Pass only the unresolved points to the next Mode 2 dispatch. Format:
+  [RESOLVED: point X — conceded by ml-defender]
+  [RESOLVED: point Y — empirical_test_required]
+  [OPEN: point Z — still contested]
+This prevents re-litigation of settled points and ensures the debate converges.
+
 As orchestrator, extract final verdict from the converged debate.
+CRITICAL: When adjudicating the multiround verdict, base your judgment ONLY on the
+debate transcript (critic and defender outputs from all rounds). Do NOT reference
+ground_truth, correct_position, must_find_issue_ids, planted_issues, scoring_targets,
+or any answer-key fields from the case file. The orchestrator must adjudicate from
+the same information the agents had — the task_prompt and the debate exchange. This
+parallels the ensemble contamination guard above.
+
 Write v3_raw_outputs/{case_id}_multiround_run{N}.json in same format as above,
 plus these additional fields:
   "debate_rounds": <integer — total rounds run>,
@@ -1344,8 +1359,15 @@ stats_results.json, evaluation_results.json.
    - Benchmark pass/fail criteria table with results
    - Hypothesis verdicts: primary and all secondary (isolated vs. baseline, isolated
      vs. ensemble, multiround vs. isolated), with evidence
-   - Multiround vs. isolated comparison: which condition wins on DC, DRQ dimensions
-     specifically? Is multiround outperformance consistent or case-dependent?
+   - Multiround vs. isolated comparison: which condition wins on DRQ specifically?
+     (DC is structurally identical to FVC in this scorer — report DC for completeness
+     but note it provides no independent signal.) Is multiround outperformance
+     consistent or case-dependent?
+   - Limitation note: multiround condition uses orchestrator adjudication rather than
+     ml-lab's agent-consensus adjudication (where verdicts emerge from explicit agent
+     concessions in DEBATE.md). If agent-consensus adjudication is a genuine performance
+     feature, the measured multiround advantage is a lower bound on what the canonical
+     ml-lab protocol would produce.
    - Failure mode taxonomy by failure_attribution:
      * 'agent' failures: list case_id and which dimension failed
      * 'protocol' failures: list case_id and diagnosis
