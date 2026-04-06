@@ -287,3 +287,102 @@ raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
 ```
 
 ---
+
+## Issue 12 — Report leads with raw lift; most representative metric is buried
+
+**Scope:** Future fix — report presentation issue; applies to v3 report and any future experiment reports  
+**Severity:** Moderate — the ordering creates an anchoring effect that misrepresents the experiment's most honest finding
+
+The v3 report leads with raw lift (+0.341), which is the least representative of the three lift metrics computed. The decomposition to corrected lift (+0.127) and fair-comparison lift (+0.053) exists in the sensitivity analysis but is not prominent. Most readers will anchor on +0.341 before reaching the corrections.
+
+The three metrics measure different things:
+- **Raw lift (+0.341):** Includes structural penalties on baseline (DC hardcoded to 0.0, DRQ capped at 0.5) that reflect real architectural differences but are not measures of epistemic value. Debate's apparent advantage here is partly definitional.
+- **Corrected lift (+0.127):** Removes the structural penalties, leaving only genuine performance differences on equally-applicable dimensions.
+- **Fair-comparison lift (+0.053):** Restricts to dimensions where baseline has equal structural agency — the most honest answer to "does debate outperform baseline on a level playing field?"
+
+The rubric design is pre-registered and defensible. The penalties are not wrong — DC and DRQ measure things baseline genuinely cannot do. But a report that answers "does debate help?" should lead with the number that measures debate's value under equal conditions (+0.053), not the number inflated by structural asymmetries (+0.341).
+
+**What to fix in v4:** Lead with fair-comparison lift as the primary metric in the abstract and findings summary. Present raw lift in the decomposition table as supplementary context with an explicit note that it includes structural penalties. The sensitivity analysis ordering should mirror this: most representative first, least representative last.
+
+---
+
+## Issue 13 — DC scored 0.0 for baseline instead of N/A; inflates raw lift
+
+**Scope:** Active — affects all v3 lift calculations; must be corrected in v4 rubric  
+**Severity:** High — DC=0.0 for baseline is the single largest contributor to raw lift inflation and is indefensible on methodological grounds
+
+The rubric scores DC (Defender Correctness) as 0.0 for baseline because baseline has no Defender. This is wrong. DC should be N/A for baseline for the same reason ETD is N/A when `ideal_resolution` is `critique_wins` or `defense_wins` — the dimension is structurally inapplicable, not failed. Baseline doesn't play the Defender role; penalizing it for not performing a role it never had is not a legitimate comparison.
+
+The consequence is material. DC=0.0 for baseline vs. DC≈1.0 for debate conditions is the single largest per-dimension gap in the rubric, and it drives the majority of the raw lift (+0.341). The corrected lift (+0.127) and fair-comparison lift (+0.053) both implicitly acknowledge this by removing or restricting DC from the comparison — but the damage is done if the raw lift number leads.
+
+The rubric's own precedent makes this inconsistency visible: ETD is scored N/A when inapplicable, not 0.0. DC should follow the same logic. There is no principled argument for treating "role not present" as a failure on DC while treating "case type not applicable" as N/A on ETD.
+
+A secondary observation: in v3, DC = FVC empirically for all non-baseline conditions (the report states this explicitly). This means DC added no independent signal over FVC for the conditions where it was actually scored. Combined with the baseline inflation, DC contributed inflated lift without contributing information.
+
+**What to fix in v4:**
+- Score DC as N/A for baseline, consistent with ETD's N/A treatment for inapplicable cases
+- Re-derive expected lift metrics with this correction applied before preregistering targets
+- Evaluate whether DC provides independent signal over FVC in v4 (harder cases may produce Defender/Judge divergence, which would validate DC as a genuine independent dimension)
+- Pre-register an explicit rationale for DC's treatment of baseline in the v4 rubric so it cannot be attacked as a post-hoc choice
+
+---
+
+## Issue 14 — Multiround condition was never meaningfully exercised
+
+**Scope:** Active — affects v3 interpretation of multiround results; v4 design response decided  
+**Severity:** Moderate — multiround is presented as a distinct condition but was functionally identical to isolated_debate in 91.5% of runs
+
+Multiround averaged 1.03 rounds in v3, with 91.5% of runs resolving in a single round. A multiround run that resolves in one round is structurally identical to isolated_debate — the Critic and Defender exchange once, the Judge decides, and no additional rounds occur. The multi-round mechanism requires genuine contested territory to activate; the v3 benchmark's easy cases provided none.
+
+The consequence: the score difference between multiround (0.986) and isolated_debate (0.975) is not measuring "what additional rounds contribute." It is noise plus the occasional second round on the 8.5% of runs that exercised the mechanism. Any claim about multiround's relative performance is ungrounded. This is related to but distinct from Issue 9 (near-ceiling scores) — a harder benchmark could still show near-ceiling scores across conditions while genuinely exercising the multiround mechanism.
+
+**V4 design response:** Add a **forced multiround condition** (2-round minimum) run on all hard cases only. The Critic must respond to the Defender's response at least once, even if all points appeared conceded in round 1. This guarantees the mechanism is exercised at least once beyond the opening exchange without manufacturing artificial debate on easy cases where early resolution is correct. Limiting to hard cases keeps compute cost manageable.
+
+The 2-round minimum is the smallest intervention that validates the mechanism. Running it alongside natural multiround on hard cases enables a direct comparison: if forced multiround outperforms natural multiround, Defenders are conceding too quickly and the additional exchange surfaces real signal. If they perform the same, natural multiround is validated as sufficient for cases with genuine complexity.
+
+**ML-lab design question — revisit after v4:** If v4 hard cases produce natural multiround averaging 2+ rounds, the v3 result (1.03 rounds) was a benchmark difficulty artifact and the current ml-lab protocol is sound. If v4 hard cases still produce ~1 round naturally but forced multiround scores higher, that is a protocol finding: ml-lab should enforce a minimum of 2 rounds in its debate design. Do not resolve this question before v4 results are in.
+
+---
+
+## Issue 15 — ETD scored for ensemble and baseline; creates an illegitimate comparison
+
+**Scope:** Active — affects all v3 ETD comparisons involving ensemble and baseline; v4 redesign decided  
+**Severity:** High — the ensemble ETD result (mean 1.000) is an artifact of the evaluation design, not evidence that ensemble produces better empirical tests than debate
+
+### Background: the ensemble's original purpose
+
+The ensemble condition was designed as a compute-matched non-adversarial baseline: three independent Critic passes synthesized into a verdict, using the same total token budget as isolated_debate. The intent was to isolate the effect of adversarial role structure — does debate's critic/defender/judge exchange improve reasoning, or does simply running more independent passes achieve the same thing?
+
+### How ETD entered the ensemble
+
+The ETD dimension (Empirical Test Design) measures whether the final verdict includes a well-specified, actionable empirical test for contested claims. In v3, the scoring prompt instructed all conditions — including ensemble and baseline — to produce an empirical test if any contested claims existed. This was added as a structural prompt constraint because early runs showed the debate protocol without the instruction produced ETD=0.0 nearly universally (the agents never spontaneously produced structured test designs).
+
+### Why both naive options fail
+
+Once ETD is a prompt constraint applied uniformly, the comparison is broken in two ways depending on what you do:
+
+**Option A — Give ensemble the ETD instruction:** The ensemble agents receive the same ETD prompt constraint as debate agents. This means ensemble ETD is scored against the same rubric as debate ETD. But this is testing ml-lab's prompt engineering against itself: the ETD signal reflects whether the synthesizer followed a formatting instruction, not whether adversarial role structure produces better empirical reasoning. The ensemble's ETD=1.000 result is exactly this artifact. No debate occurred; the synthesizer simply formatted its output correctly.
+
+**Option B — Withhold the ETD instruction from ensemble:** The ensemble is set up to fail on ETD before the first token is generated. This is not a fair comparison either — it measures "who had the instruction" not "who reasoned better."
+
+Both options conflate instruction compliance with reasoning quality. ETD cannot be used to compare debate vs. non-debate conditions when the dimension is instruction-dependent rather than structure-dependent.
+
+### Resolution: ETD is a debate-internal metric in v4
+
+ETD will be scored N/A for ensemble and baseline in v4. This is not a workaround — it reflects what ETD actually measures. An empirical test is meaningful as a debate output because it represents what the Judge determined could resolve a contested point after the Critic and Defender have both argued it. For ensemble and baseline, there is no contested point structure — only a single-pass verdict (or a synthesis of single-pass verdicts). The concept of "test that resolves a contested claim" does not exist in those conditions.
+
+This treatment is consistent with the existing N/A precedent: ETD is already scored N/A for cases where `ideal_resolution` is `critique_wins` or `defense_wins`, because those cases have no contested territory to test. The same logic extends to conditions with no adversarial exchange.
+
+### V4 comparison structure
+
+Two clean comparisons replace the previous undifferentiated all-conditions table:
+
+1. **Debate vs. ensemble** — scored on IDR, IDP, DRQ, FVC only (the dimensions both can legitimately produce). ETD excluded from this comparison. This answers: "does adversarial role structure improve issue identification and verdict quality beyond compute-matched parallel passes?"
+
+2. **Debate conditions vs. each other** (isolated_debate, multiround, forced_multiround) — scored on IDR, IDP, DRQ, FVC, ETD. ETD included here because all three conditions involve the same adversarial exchange; the dimension is structurally applicable. This answers: "does additional debate structure improve outcomes within the adversarial paradigm?"
+
+Baseline (single-pass, no synthesis) remains in the result tables for orientation, but is excluded from formal lift calculations. Its role is to anchor the scale, not to compete on dimensions it was never designed to exercise.
+
+**This must be disclosed in the v4 experiment report.** The v3 ensemble ETD=1.000 result should be reported as a measurement artifact and the redesign rationale — including the Option A / Option B analysis — should appear in the methods section. Reviewers will ask why ETD is excluded from the debate vs. ensemble comparison; the answer must be pre-emptive, not defensive.
+
+---
