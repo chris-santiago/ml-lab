@@ -62,10 +62,69 @@ If the hypothesis is revised during a macro-iteration, append a new section (`##
 
 Maintain `INVESTIGATION_LOG.jsonl` throughout the investigation. This is an append-only audit trail of every action — file reads, file writes, subagent dispatches, code executions, user gates, decisions, debate rounds, corrections, audit checks. If in doubt whether to log an action, log it.
 
-**Format:** JSONL — one JSON object per line, appended via Bash:
+**Format:** JSONL via `log_entry.py`. **Never write log entries manually.** Schema compliance and seq monotonicity are enforced by the script — manual `echo` writes skip validation and produce inconsistent logs.
 
+**Setup (do this once, immediately after writing HYPOTHESIS.md):** Create `log_entry.py` in the investigation directory:
+
+```python
+# log_entry.py
+# /// script
+# requires-python = ">=3.10"
+# ///
+"""
+Structured INVESTIGATION_LOG.jsonl entry writer.
+Enforces schema compliance, validates cat, auto-increments seq, auto-generates ts.
+Usage: uv run log_entry.py --step 3 --cat subagent --action dispatch_critic --detail "..." [--artifact X] [--duration_s Y] [--meta '{"k":"v"}']
+NEVER write log entries manually. Always use this script.
+"""
+import argparse, json, sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+ALLOWED_CATS = {'gate', 'write', 'read', 'subagent', 'exec', 'decision', 'debate', 'review', 'audit', 'workflow'}
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--step', required=True)
+parser.add_argument('--cat', required=True, choices=sorted(ALLOWED_CATS))
+parser.add_argument('--action', required=True)
+parser.add_argument('--detail', required=True)
+parser.add_argument('--artifact', default=None)
+parser.add_argument('--duration_s', type=float, default=None)
+parser.add_argument('--meta', default='{}')
+args = parser.parse_args()
+
+try:
+    meta = json.loads(args.meta)
+except json.JSONDecodeError as e:
+    print(f"ERROR: --meta must be valid JSON: {e}", file=sys.stderr)
+    sys.exit(1)
+
+log_file = Path('INVESTIGATION_LOG.jsonl')
+seq = 1
+if log_file.exists():
+    lines = [l for l in log_file.read_text().splitlines() if l.strip()]
+    if lines:
+        try:
+            seq = json.loads(lines[-1]).get('seq', 0) + 1
+        except Exception:
+            seq = len(lines) + 1
+
+entry = {
+    'ts': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+    'step': args.step, 'seq': seq, 'cat': args.cat,
+    'action': args.action, 'detail': args.detail,
+    'artifact': args.artifact, 'duration_s': args.duration_s, 'meta': meta,
+}
+with open(log_file, 'a') as f:
+    f.write(json.dumps(entry) + '\n')
+print(f"[seq={seq}] {args.cat}/{args.action}: {args.detail}")
+```
+
+All log entries are written as:
 ```bash
-echo '{"ts":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","step":"3","seq":47,"cat":"subagent","action":"dispatch_critic","detail":"Initial critique mode — reading HYPOTHESIS.md, churn_poc.py, README.md","artifact":"CRITIQUE.md","duration_s":null,"meta":{}}' >> INVESTIGATION_LOG.jsonl
+uv run log_entry.py --step 3 --cat subagent --action dispatch_critic \
+  --detail "Initial critique mode — reading HYPOTHESIS.md, churn_poc.py, README.md" \
+  --artifact CRITIQUE.md --meta '{"critique_points": 7}'
 ```
 
 **Schema:**
@@ -110,12 +169,17 @@ echo '{"ts":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","step":"3","seq":47,"cat":"suba
 
 **First and last entries:** The first entry (`cat: workflow`, `action: investigation_start`) is written immediately after `HYPOTHESIS.md`. The last (`cat: workflow`, `action: investigation_complete`) is written just before Final Output to Caller.
 
-**Sequence recovery:** If `seq` is lost, recover via `tail -1 INVESTIGATION_LOG.jsonl | jq .seq`. Do not re-read the full log during the investigation.
+**Sequence recovery:** `log_entry.py` auto-increments by reading the last line of the log. No manual tracking required. If the file is empty or missing, seq starts at 1 automatically.
 
 **Examples:**
-```
-{"ts":"2026-04-05T14:23:01Z","step":"pre","seq":1,"cat":"workflow","action":"investigation_start","detail":"Hypothesis agreed, HYPOTHESIS.md written, beginning investigation","artifact":"HYPOTHESIS.md","duration_s":null,"meta":{"report_mode":"full_report"}}
-{"ts":"2026-04-05T15:12:44Z","step":"5","seq":28,"cat":"gate","action":"gate_experiment_plan_approved","detail":"User approved experiment plan with 4 empirical tests","artifact":null,"duration_s":null,"meta":{"empirical_tests":4,"conceded_points":2}}
+```bash
+uv run log_entry.py --step pre --cat workflow --action investigation_start \
+  --detail "Hypothesis agreed, HYPOTHESIS.md written, beginning investigation" \
+  --artifact HYPOTHESIS.md --meta '{"report_mode":"full_report"}'
+
+uv run log_entry.py --step 5 --cat gate --action gate_experiment_plan_approved \
+  --detail "User approved experiment plan with 4 empirical tests" \
+  --meta '{"empirical_tests":4,"conceded_points":2}'
 ```
 
 ---
@@ -183,6 +247,8 @@ The ml-defender argues for the original implementation against each critique poi
 
 Receive `DEFENSE.md`.
 
+Log `subagent`/`receive_defense` with `meta` containing `{"overall_verdict": "<verdict>", "conceded_count": N, "rebutted_count": N, "empirically_open_count": N}`. Extract the Defender's overall verdict from the Pass 2 section. If the verdict is `empirical_test_agreed`, note in the log detail that the Gate 1 pre-flight extraction will be required after Step 5.
+
 ### Step 5 — Debate Each Contested Point to Resolution
 
 Orchestrate the debate by alternating Agent tool invocations of `ml-critic` and `ml-defender`:
@@ -208,13 +274,29 @@ Extract the **empirical test list** from `DEBATE.md`: every point resolved as "e
 
 ### Gate 1 — Experiment Plan
 
+**Before constructing the gate, read the Defender's verdict.** After receiving `DEFENSE.md`, execute the following extraction:
+
+1. Parse the Pass 2 verdict table in `DEFENSE.md`. Extract every item with verdict `Concede` or `Rebut (partial concede)` — each is a known gap that must be addressed or documented before the experiment runs.
+2. Extract every pre-execution requirement stated by the Defender (items flagged as "must be confirmed before execution", "must appear in the experiment plan", or equivalent phrasing).
+3. From `DEBATE.md`, extract every point resolved as `critic wins` and its associated action item.
+4. Compile all extracted items into a **pre-flight checklist** at the top of the experiment plan. Each row: `| # | Source | Item | Verification Method | Status (PENDING/CLOSED) |`
+
+This checklist is dynamically constructed from the actual review output — it must not be pre-written before the review runs.
+
+Log `gate`/`experiment_plan_preflight_constructed` with `meta` containing `{"checklist_item_count": N}`.
+
 Write a structured plan covering:
+- **Pre-flight checklist:** every conceded item and pre-execution requirement from the Defender's verdict, with verification method and status
 - **Empirical tests:** each test from the list above with its pre-specified verdicts and which side it favors
 - **Conceded critique points:** how each concession will be addressed in the experiment design
 - **Experimental conditions:** all conditions to be run, including the trivial baseline
 - **Subpopulations / stratifications:** any segmented analyses identified in the debate
 
-Present this plan to the user. **Do not begin Step 6 until the user approves.**
+Present this plan to the user. **Do not begin Step 6 until:**
+1. Every pre-flight checklist item is marked CLOSED (verified or explicitly deferred with documented rationale).
+2. The user explicitly approves the experiment plan.
+
+The Defender's verdict is not advisory — it is the investigation's own quality check. A static pre-written checklist cannot substitute for reading the review output.
 
 **Artifacts:** `CRITIQUE.md`, `DEFENSE.md`, `DEBATE.md`
 
