@@ -403,7 +403,9 @@ This is consistent with the DEBATE.md resolution from the prior experiment (§4)
 
 ## 9. Variance Estimation and External Validation (2026-04-04)
 
-**Within-case variance (E1).** The full debate protocol was run 3 independent times on all 5 representative cases to estimate within-case LLM stochasticity.
+**Within-case variance (E1 + E1b).** The full debate protocol was run 3 independent times on 8 cases total: 5 convergence=1.0 cases (E1) and 3 convergence=0.5 cases (E1b — the correct stress test per Peer Review M4).
+
+**E1 — convergence=1.0 cases (salient, unambiguous flaws):**
 
 | Case | Debate std | Debate mean (3-run) | Baseline std | Baseline mean (3-run) | Stable |
 |------|------------|---------------------|--------------|-----------------------|--------|
@@ -413,7 +415,15 @@ This is consistent with the DEBATE.md resolution from the prior experiment (§4)
 | defense_wins_001 | 0.0 | 0.875 | 0.0 | 0.625 | YES |
 | real_world_framing_002 | 0.0 | 1.000 | 0.0 | 0.750 | YES |
 
-All 5 cases: debate_std = 0.0. The protocol produces deterministic outputs at the 3-run level for cases with salient, unambiguous flaws. The bootstrap CIs in §3 reflect cross-case sampling variance, not within-case stochasticity. Notable: baseline means are higher in replication than original runs (elevated by rubric ceiling effects and high salience of confounds in task prompts); bb001 baseline elevated by ETD volatility (ETD=1.0 in all 3 replications vs. 0.0/0.5 in original — confirms ETD is prompt-sensitive for the baseline). See `within_case_variance_results.json`.
+**E1b — convergence=0.5 cases (genuine Critic/Defender divergence in original run):**
+
+| Case | Debate std | Debate mean (3-run) | Baseline std | Baseline mean (3-run) | Stable |
+|------|------------|---------------------|--------------|-----------------------|--------|
+| scope_intent_003 | 0.0 | 1.000 | 0.0 | 0.700 | YES |
+| real_world_framing_001 | 0.0 | 0.917 | 0.0 | 0.583 | YES |
+| metric_mismatch_002 | **0.048** | 0.889 | 0.192 | 0.472 | NO |
+
+7/8 cases: debate_std=0.0. The protocol is effectively deterministic for cases with unambiguous correct positions (convergence=1.0) and for hard/clear critique cases (si003, rw001) even when convergence=0.5. **Non-zero variance appears specifically on mm002 (correct_position=mixed):** Defender stochastically tipped to defense_wins in 1/3 runs, reducing DC from 1.0 to 0.5 (mean 0.833 vs. 0.917). Variance is confined to DC; IDR, FVC, and Judge verdict were stable in all 3 runs — Judge adjudication successfully overrode the Defender error. The determinism claim requires this qualification: the protocol produces stable scores on cases with an identifiable correct position; on genuinely two-sided cases where defense_wins is locally plausible, DC introduces run-to-run variance of ≈0.05. See `within_case_variance_results.json` and `within_case_variance_nonconverging.json`.
 
 **External exoneration benchmark (E19).** Three defense_wins-type cases drawn from peer-reviewed ML work (ground truth from published record, not protocol designer): BERT/SQuAD 1.1 (Devlin et al. 2019), ResNet-152/ImageNet (He et al. 2016), stratified 5-fold CV on clinical readmission prediction.
 
