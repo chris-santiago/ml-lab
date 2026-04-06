@@ -58,6 +58,68 @@ If the hypothesis is revised during a macro-iteration, append a new section (`##
 
 ---
 
+## Investigation Log
+
+Maintain `INVESTIGATION_LOG.jsonl` throughout the investigation. This is an append-only audit trail of every action — file reads, file writes, subagent dispatches, code executions, user gates, decisions, debate rounds, corrections, audit checks. If in doubt whether to log an action, log it.
+
+**Format:** JSONL — one JSON object per line, appended via Bash:
+
+```bash
+echo '{"ts":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","step":"3","seq":47,"cat":"subagent","action":"dispatch_critic","detail":"Initial critique mode — reading HYPOTHESIS.md, churn_poc.py, README.md","artifact":"CRITIQUE.md","duration_s":null,"meta":{}}' >> INVESTIGATION_LOG.jsonl
+```
+
+**Schema:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ts` | ISO 8601 | yes | Timestamp via `date -u +%Y-%m-%dT%H:%M:%SZ` |
+| `step` | string | yes | Current step: `"pre"`, `"1"`–`"13"`, `"final"`. Substeps: `"5.R2"` (debate round 2), `"6-7.I2"` (micro-iter 2), `"C2"` (macro cycle 2) |
+| `seq` | integer | yes | Monotonically increasing from 1 |
+| `cat` | string | yes | Category code from table below |
+| `action` | string | yes | Descriptive verb_noun name |
+| `detail` | string | yes | One-sentence description of what happened |
+| `artifact` | string/null | no | Filename produced or consumed |
+| `duration_s` | number/null | no | Seconds elapsed for exec/subagent actions |
+| `meta` | object | no | Structured extras (counts, metrics, verdicts) |
+
+**Category codes:**
+
+| `cat` | Scope |
+|---|---|
+| `gate` | User prompts, approvals, confirmations, declines |
+| `write` | File creation or modification |
+| `read` | File reads for analysis |
+| `subagent` | Dispatching subagents and receiving results |
+| `exec` | Running scripts, interpreting output |
+| `decision` | Routing choices, verdicts, resolution classifications |
+| `debate` | Round tracking, point resolutions |
+| `review` | Peer review triage, remediation, convergence |
+| `audit` | Coherence audit checks and corrections |
+| `workflow` | Step transitions, iterations, corrections, start/end |
+
+**Logging rhythm:**
+
+- **Step boundaries:** Log `workflow` / `step_start` entering a step, `step_end` exiting.
+- **File I/O:** Log `read` before analyzing a file, `write` after producing or modifying an artifact.
+- **Subagents:** Log `subagent` / `dispatch_*` before the Agent tool call, `receive_*` after. Summarize the subagent's output in `detail`; capture structured counts in `meta` (e.g., `{"critique_points": 7, "major": 3}`).
+- **Code execution:** Log `exec` / `run_*` before running a script, then log outcome with key metrics in `meta`.
+- **Gates:** Log `gate` when presenting a gate and again when the user responds.
+- **Decisions:** Log `decision` at every routing choice (macro-iteration outcome, force-resolution, recommendation stability).
+- **Debate:** Log `debate` for round starts, point resolutions, and convergence.
+- **Corrections:** Log `workflow` / `correction_received` immediately when the user corrects something.
+
+**First and last entries:** The first entry (`cat: workflow`, `action: investigation_start`) is written immediately after `HYPOTHESIS.md`. The last (`cat: workflow`, `action: investigation_complete`) is written just before Final Output to Caller.
+
+**Sequence recovery:** If `seq` is lost, recover via `tail -1 INVESTIGATION_LOG.jsonl | jq .seq`. Do not re-read the full log during the investigation.
+
+**Examples:**
+```
+{"ts":"2026-04-05T14:23:01Z","step":"pre","seq":1,"cat":"workflow","action":"investigation_start","detail":"Hypothesis agreed, HYPOTHESIS.md written, beginning investigation","artifact":"HYPOTHESIS.md","duration_s":null,"meta":{"report_mode":"full_report"}}
+{"ts":"2026-04-05T15:12:44Z","step":"5","seq":28,"cat":"gate","action":"gate_experiment_plan_approved","detail":"User approved experiment plan with 4 empirical tests","artifact":null,"duration_s":null,"meta":{"empirical_tests":4,"conceded_points":2}}
+```
+
+---
+
 ## Step 1 — Build the Minimal Proof-of-Concept
 
 **Goal:** Produce the simplest possible end-to-end script that tests the hypothesis. It should run in one command and produce a number.
@@ -541,6 +603,7 @@ At the end of the investigation, these files must exist:
 | `REPORT_ADDENDUM.md` | 9 | Production re-evaluation and revised recommendation |
 | `PEER_REVIEW_R{N}.md` | 10 | Peer review findings per round |
 | `TECHNICAL_REPORT.md` | 11 (optional) | Publication-ready synthesis in results mode |
+| `INVESTIGATION_LOG.jsonl` | All | Append-only audit trail of every action taken during the investigation |
 
 ---
 
