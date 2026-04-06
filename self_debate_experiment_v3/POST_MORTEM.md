@@ -250,3 +250,22 @@ Issue 7 addressed raw outputs specifically because they are ground truth. This i
 Each commit message should identify the phase and note any anomalies flagged during that phase. This gives the experiment a complete, auditable trail and makes it possible to reconstruct the state at any point in the run.
 
 ---
+
+## Issue 11 — MiniMax-M2.7 cross-vendor validation yielded 82% parse failures
+
+**Scope:** Active — cross-vendor Phase 10 results are inconclusive for 31/38 cases  
+**Severity:** Low — the partial results (7 valid cases) are directionally consistent with the main benchmark; the validation goal was to rule out same-company bias, which it partially achieved
+
+Phase 10 ran `cross_model_scorer.py` against MiniMax-M2.7 via the Anthropic SDK compatible endpoint. 31 of 38 cases (82%) failed to parse:
+
+- **25 cases:** `No text block in response; content types: ['ThinkingBlock']` — MiniMax-M2.7 returned only a ThinkingBlock with no accompanying text. The scorer's defensive fix (`next(b for b in response.content if hasattr(b, 'text'), None)`) correctly detected this, but had no text to parse.
+- **4 cases:** JSON parse errors (`Unterminated string`, `Expecting value`) — the model returned text but emitted malformed JSON.
+- **2 cases:** `Unterminated string` — truncated JSON response.
+
+**What the 7 valid cases showed:** All 7 cases returned external_IDR=1.000, matching isolated_debate_IDR=1.000. Delta=0.000, not material. This is consistent with the main benchmark finding that IDR=1.0 across all conditions — MiniMax-M2.7 also identifies the planted issues correctly on the cases where it responds. The same-company bias concern is not supported by the available data, though the sample is too small (7/38) to be conclusive.
+
+**Root cause:** MiniMax-M2.7 has a prompt-dependent behavior where it enters extended thinking mode and sometimes emits only the thinking artifact with no final text response. This differs from Claude's extended thinking behavior (which always includes a final text block). The model's response format is not reliably compatible with the scorer's expected JSON output.
+
+**What to fix in v4:** If cross-vendor validation is required, test the external model's response format before the full run with 2-3 probe cases. Add a `thinking_budget_tokens` parameter if the SDK supports it, or add a system prompt instruction to suppress extended thinking. A fallback to extract JSON from within ThinkingBlock content could recover some cases but is fragile. The most reliable fix is to select an external model that does not exhibit ThinkingBlock-only behavior on simple JSON extraction prompts.
+
+---
