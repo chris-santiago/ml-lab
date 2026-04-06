@@ -150,3 +150,14 @@ Both cases score 1.0 on every dimension including ETD, have all planted issues f
 **Fix required before v4:** Audit `case_passes()` logic and result aggregation for rwf_002 and rwf_010. Verify that re-run outputs were correctly written and read by the scorer. Re-score both cases from corrected raw outputs after the ETD schema fix is applied.
 
 ---
+
+## Issue 7 — Raw outputs not committed after Phase 6 completion
+
+**Scope:** Future fix  
+**Severity:** Moderate — raw outputs are ground truth for all downstream scoring; untracked files are vulnerable to inadvertent modification
+
+The `v3_raw_outputs/` directory is never committed to git during the experiment run. All downstream scoring, ETD evaluation, bootstrap CIs, and sensitivity analysis read directly from these files. If any file is modified after scoring — whether by a re-run, a tool call, or an accidental overwrite — there is no way to detect the change or recover the original. The isolation breach re-runs in this experiment (Issue 3) are a concrete example: the re-run outputs replaced the contaminated files with no git record of what was overwritten or when.
+
+**What to fix in v4:** Add an explicit directive to the experiment plan: once Phase 6 (all conditions, all runs) is complete and `check_isolation.py` passes clean, the orchestrator must commit `v3_raw_outputs/` immediately before any scoring begins. The commit message should record the isolation check result and run count. This creates a tamper-evident snapshot of ground truth that scoring and analysis can be traced back to.
+
+---
