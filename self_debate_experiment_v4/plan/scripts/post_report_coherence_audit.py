@@ -10,14 +10,14 @@ warnings = []
 
 # Check 1: Claim consistency across CONCLUSIONS, REPORT, ENSEMBLE_ANALYSIS
 docs = {}
-for fname in ['CONCLUSIONS.md', 'REPORT.md', 'ENSEMBLE_ANALYSIS.md']:
+for fname in ['CONCLUSIONS.md', 'REPORT.md', 'ENSEMBLE_ANALYSIS.md', 'REPORT_ADDENDUM.md']:
     p = Path(fname)
     if p.exists():
         docs[fname] = p.read_text()
     else:
         errors.append(f'Missing required document: {fname}')
 
-if len(docs) == 3:
+if len(docs) >= 3:
     def extract_lifts(text):
         return [float(m) for m in re.findall(r'(?:lift|improvement).*?([+-]?\d+\.\d{3,4})', text, re.IGNORECASE)]
     lifts_c = extract_lifts(docs.get('CONCLUSIONS.md', ''))
@@ -25,6 +25,18 @@ if len(docs) == 3:
     if lifts_c and lifts_r:
         if abs(max(abs(x) for x in lifts_c) - max(abs(x) for x in lifts_r)) > 0.01:
             errors.append('Headline lift inconsistency between CONCLUSIONS.md and REPORT.md')
+
+# Check 1b: REPORT_ADDENDUM.md quantitative consistency
+addendum_text = docs.get('REPORT_ADDENDUM.md', '')
+report_text_c1 = docs.get('REPORT.md', '')
+if addendum_text and report_text_c1:
+    lifts_a = extract_lifts(addendum_text)
+    lifts_r2 = extract_lifts(report_text_c1)
+    if lifts_a and lifts_r2:
+        if abs(max(abs(x) for x in lifts_a) - max(abs(x) for x in lifts_r2)) > 0.005:
+            errors.append('REPORT_ADDENDUM.md: headline lift inconsistency with REPORT.md — numbers must match exactly')
+elif not addendum_text:
+    warnings.append('REPORT_ADDENDUM.md missing or empty — skipping addendum checks')
 
 # Check 2: README currency
 readme = Path('README.md')
@@ -82,6 +94,39 @@ if report_text:
     pass_mentions = re.findall(r'(\d+)/\d+.*?pass', report_text)
     if pass_mentions and int(pass_mentions[0]) != pass_count:
         errors.append(f'REPORT.md: pass count mismatch')
+
+# Check 7: REPORT_ADDENDUM.md does not contradict named limitations
+addendum_text_c7 = docs.get('REPORT_ADDENDUM.md', '')
+report_text_c7 = docs.get('REPORT.md', '')
+if addendum_text_c7 and report_text_c7:
+    # If hypothesis was rejected (fc_lift < 0.10), addendum must not claim validation
+    fc_lift = None
+    try:
+        with open('v4_results.json') as f:
+            v4_data = json.load(f)
+        fc_lift = v4_data.get('fair_comparison_lift_isolated_vs_baseline')
+    except Exception:
+        pass
+    if fc_lift is not None and fc_lift < 0.10:
+        unqualified_validation = re.search(
+            r'\b(production.ready|fully validated|conclusively|definitively proven)\b',
+            addendum_text_c7, re.IGNORECASE
+        )
+        if unqualified_validation:
+            errors.append(
+                f'REPORT_ADDENDUM.md uses unqualified validation language ("{unqualified_validation.group()}")'
+                f' but fc_lift={fc_lift:.4f} is below 0.10 threshold — hypothesis not supported'
+            )
+    # Check that limitations section exists in addendum
+    if 'limitation' not in addendum_text_c7.lower() and 'unresolved' not in addendum_text_c7.lower():
+        errors.append('REPORT_ADDENDUM.md: no limitations or unresolved issues section found — required per spec')
+
+# Check 8: REPORT_ADDENDUM.md reporting norms (same as REPORT.md)
+addendum_text_c8 = docs.get('REPORT_ADDENDUM.md', '')
+if addendum_text_c8:
+    first_line_a = addendum_text_c8.strip().split('\n')[0].lower()
+    if any(kw in first_line_a for kw in ['results mode', 'mode:', 'framing:', 'findings stated']):
+        errors.append('REPORT_ADDENDUM.md starts with a mode declaration — violates reporting norms')
 
 if errors:
     print('POST-REPORT COHERENCE AUDIT FAILED:')

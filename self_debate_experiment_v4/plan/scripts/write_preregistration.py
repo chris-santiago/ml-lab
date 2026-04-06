@@ -81,7 +81,7 @@ preregistration = {
         "ambiguous": "Cannot distinguish agent vs protocol from outputs alone",
         "none": "Case passed — no failure to attribute"
     },
-    "per_case_pass_criterion": "mean(non-null dimensions) >= 0.65 AND all applicable dimensions >= 0.5",
+    "per_case_pass_criterion": "mean(non-null PRIMARY dimensions: IDR/IDP/DRQ/ETD/FVC) >= 0.65 AND all applicable primary dimensions >= 0.5. DC is diagnostic-only and excluded.",
     "n_runs_per_case": 3,
     "forced_multiround_scope": "hard cases only (difficulty == 'hard'); minimum 2 rounds"
 }
@@ -93,12 +93,12 @@ rubric = {
     "scoring_dimensions": {
         "IDR": "Fraction of scoring_targets.must_find_issue_ids correctly identified (fractional). N/A on defense_wins.",
         "IDP": "Fraction of claimed issues that are valid; must_not_claim items are explicit false positives (0.0/0.5/1.0). N/A on defense_wins.",
-        "DC": "Whether defense correctly reached verdict type (0.0/0.5/1.0). N/A for baseline (no Defender role). N/A on defense_wins cases.",
+        "DC": "DIAGNOSTIC ONLY — excluded from per-case mean and pass/fail criterion. Whether defense correctly reached verdict type (0.0/0.5/1.0). N/A for baseline (no Defender role). N/A on defense_wins cases. Reported as DC/FVC divergence diagnostic in summary.",
         "DRQ": "Whether typed verdict matches expected resolution (0.0/0.5/1.0). No structural cap or override for any condition.",
         "ETD": "Empirical test has condition + supports_critique_if + supports_defense_if (0.0/0.5/1.0). N/A when ideal is critique_wins or defense_wins. N/A for ensemble and baseline conditions.",
         "FVC": "Verdict in scoring_targets.acceptable_resolutions (1.0); adjacent to ideal (0.5); wrong (0.0)."
     },
-    "pass_fail_rule": "mean(non-null dimensions) >= 0.65 AND all applicable dimensions >= 0.5",
+    "pass_fail_rule": "mean(non-null PRIMARY dimensions: IDR/IDP/DRQ/ETD/FVC) >= 0.65 AND all applicable primary dimensions >= 0.5. DC is diagnostic-only and excluded from pass/fail.",
     "notes": "Rubric fixed before any agent run. Do not modify after execution begins."
 }
 

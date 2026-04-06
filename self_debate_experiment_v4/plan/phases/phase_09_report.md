@@ -36,7 +36,20 @@ Generate the final artifacts. Reporting norms apply throughout:
      scoring results from Phase 10 as the mitigation evidence.
    - Artifacts section
 
-2. REPORT_ADDENDUM.md — production re-evaluation (same as v3)
+2. REPORT_ADDENDUM.md — production re-evaluation:
+   - **Deployment scenario**: What would using this protocol in production look like?
+     Describe the operational setup (model, conditions, latency, cost per case).
+   - **Benchmark-to-production transfer**: Which findings from REPORT.md generalize
+     to production scenarios and which are benchmark-specific artifacts.
+   - **Unresolved limitations at scale**: For each limitation named in REPORT.md's
+     Limitations section, state whether it applies at production scale and whether
+     it has been mitigated. Do NOT dismiss any named limitation without evidence.
+   - **Deployment recommendation**: explicit trust/distrust verdict under specified
+     conditions. If fc_lift < 0.10 (hypothesis rejected), the recommendation must
+     not use "production-ready" or "validated" without qualification.
+   - **Quantitative consistency requirement**: any numbers cited from the benchmark
+     (means, lifts, pass rates) must match REPORT.md exactly — copy from
+     stats_results.json, do not paraphrase.
 
 3. PEER_REVIEW_R1.md — Round 1 (research-reviewer, Opus):
    Dispatch research-reviewer on REPORT.md.

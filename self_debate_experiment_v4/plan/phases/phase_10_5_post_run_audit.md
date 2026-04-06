@@ -33,10 +33,16 @@ Instruct the agent to check for these known failure modes from v3:
 6. Forced multiround: do all forced_multiround raw outputs have debate_rounds >= 2?
    Flag any with debate_rounds == 1.
 7. **Hollow forced-round detection:** For each forced_multiround case, compare round 1 vs round 2 snapshots.
-   Flag as hollow if: round2_verdict == round1_verdict AND round2_points_resolved == 0.
+   **Prerequisite guard:** If a forced_multiround file has no `rounds` key (or `rounds` is empty), flag
+   immediately as SCHEMA ERROR (severity: critical) — `validate_raw_schema.py` should have caught this
+   before scoring; if it appears here, schema validation was skipped or bypassed. Do NOT compute
+   hollow_rate from files with missing `rounds`; exclude them from the rate and log separately.
+   For files with valid `rounds` arrays: flag as hollow if round2_verdict == round1_verdict AND
+   round2_points_resolved == 0.
    Log each hollow case: decision/hollow_forced_round_detected with case_id and round data in meta.
-   Compute hollow_rate = hollow_cases / total_forced_multiround_cases.
+   Compute hollow_rate = hollow_cases / total_forced_multiround_cases_with_valid_rounds.
    If hollow_rate > 0.5: log a CRITICAL anomaly — majority of forced rounds are hollow; mechanism validation is compromised.
+8. **DC/FVC diagnostic integrity check:** Verify that DC scores are present in raw outputs for all non-baseline, non-defense_wins cases. Confirm `dc_fvc_diagnostic` key exists in `v4_results.json`. Flag any condition where `dc_fvc_diagnostic[condition]['divergence_rate']` is None (indicates all DC values were null — scoring bug). If forced_multiround shows the highest divergence_rate among conditions, note this as expected (adversarial pressure is most likely to cause Defender capitulation).
 
 The agent produces a structured anomaly report with:
 - anomaly_type, case_id, file_path, severity, evidence, recommended_action

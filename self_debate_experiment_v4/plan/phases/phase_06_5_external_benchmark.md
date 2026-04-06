@@ -24,6 +24,8 @@ Write outputs to v4_raw_outputs/{case_id}_{condition}_run{N}.json.
 After completing all cases, run isolation check on external isolated_debate outputs.
 
 ```bash
+uv run plan/scripts/validate_raw_schema.py
+# Must pass (exit 0) before check_isolation.py or self_debate_poc.py
 uv run plan/scripts/check_isolation.py  # scans all isolated_debate outputs including ext_*
 
 uv run plan/scripts/self_debate_poc.py \
@@ -33,6 +35,7 @@ uv run plan/scripts/self_debate_poc.py \
 
 **Logging:**
 ```bash
+uv run log_entry.py --step 6.5 --cat exec --action validate_raw_schema_external --detail "validate_raw_schema.py passed on all outputs including external — schema contract met"
 uv run log_entry.py --step 6.5 --cat exec --action check_isolation_external --detail "check_isolation.py passed on external outputs — no isolation breaches"
 uv run log_entry.py --step 6.5 --cat exec --action score_external --detail "self_debate_poc.py run on external_cases_v4.json" --artifact v4_external_results.json
 uv run log_entry.py --step 6.5 --cat workflow --action step_end --detail "Phase 6.5 complete: external raw outputs collected, isolation check clean"

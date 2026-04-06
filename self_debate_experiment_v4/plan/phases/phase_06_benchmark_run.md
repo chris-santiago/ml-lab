@@ -96,6 +96,13 @@ After completing all runs for a case, log:
 uv run log_entry.py --step 6 --cat exec --action case_complete --case_id {case_id}
   --detail "all applicable conditions, 3 runs each" --meta '{"difficulty": "..."}'
 
+> **Script:** `plan/scripts/validate_raw_schema.py` — enforces the v4 raw output schema contract before scoring. For forced_multiround, validates both `debate_rounds` (int ≥ 2) and `rounds` (array ≥ 2 entries with `round`/`verdict`/`points_resolved`/`points_open`). The scoring engine (`self_debate_poc.py`) does not read these fields, so a mismatch is invisible to scoring but breaks Phase 10.5 audit checks. Run before isolation check and scoring.
+
+```bash
+uv run plan/scripts/validate_raw_schema.py
+# Must pass (exit 0) before check_isolation.py or self_debate_poc.py
+```
+
 > **Script:** `plan/scripts/check_isolation.py` — scans isolated_debate and forced_multiround defender raw outputs for isolation breaches; checks if verbatim Critic language appears in Defender output. Raises SystemExit if breaches detected (results contaminated).
 
 ```bash
@@ -117,6 +124,7 @@ uv run log_entry.py --step 6 --cat workflow --action rerun_complete \
 ```
 
 ```bash
+uv run log_entry.py --step 6 --cat exec --action validate_raw_schema --detail "validate_raw_schema.py passed — all raw output files conform to v4 schema contract" --artifact validate_raw_schema.py
 uv run log_entry.py --step 6 --cat exec --action check_isolation --detail "check_isolation.py passed — no isolation breaches in isolated_debate runs" --artifact check_isolation.py
 uv run log_entry.py --step 6 --cat workflow --action step_end --detail "Phase 6 complete: raw outputs collected, isolation check clean"
 ```

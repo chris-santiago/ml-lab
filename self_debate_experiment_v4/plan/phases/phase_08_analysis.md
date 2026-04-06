@@ -52,6 +52,13 @@ REPORTING NORMS (apply to all artifacts in this phase):
      - Primary forced_multiround results: exclude hollow-round cases
      - Secondary table: include hollow-round cases with note
      - If hollow_rate > 0.5: lead with finding ("majority of hard cases converged in round 1 — forced_multiround provides weak mechanism evidence"); do NOT present primary results as definitive
+   - **DC/FVC divergence diagnostic section (required):**
+     - DC is diagnostic-only and excluded from primary scoring (PRIMARY_SCORING_DIMS = IDR/IDP/DRQ/ETD/FVC)
+     - For each condition, report: n_comparable_runs, mean_abs_delta (DC vs FVC), divergent_run_count (|delta| > 0.2), divergence_rate
+     - Source: `dc_fvc_diagnostic` key in `v4_results.json`
+     - If any condition shows divergence_rate > 0.1: flag as "DC adds independent signal on this condition — investigate cases"
+     - If all conditions show mean_abs_delta < 0.05: note "DC redundant with FVC — empirically confirmed for v4 cases"
+     - This section informs whether DC should be promoted to primary scoring in future versions
 
 4. Figures (save as .png):
    - per_condition_comparison.png: bar chart all 5 conditions on overall mean score

@@ -148,6 +148,7 @@ Every item below must exist before Phase 11 (git commit).
 | `PEER_REVIEW_R1.md` | Phase 9 |
 | `FINAL_SYNTHESIS.md` | Phase 9 |
 | `TECHNICAL_REPORT.md` | Phase 9.75 |
+| `validate_raw_schema.py` | Phase 6 |
 | `check_isolation.py` | Phase 6 |
 | `coherence_audit.py` | Phase 8.5 |
 | `post_report_coherence_audit.py` | Phase 9.5 |
@@ -197,6 +198,7 @@ All scripts reside in `plan/scripts/`. Invoke with `uv run plan/scripts/<name>.p
 | `filter_verified_cases.py` | Keep/revise/reject filter post-verification | 1 |
 | `write_preregistration.py` | Pre-registration + rubric writer | 3 |
 | `self_debate_poc.py` | Scoring engine (5 conditions, v4 rubric) | 5, 7 |
+| `validate_raw_schema.py` | Raw output schema contract enforcement (forced_multiround fields) | 6, 6.5 |
 | `check_isolation.py` | Isolation breach scanner | 6 |
 | `stats_analysis.py` | Bootstrap CIs, Wilcoxon signed-rank tests | 7 |
 | `sensitivity_analysis.py` | Fair-comparison lift decomposition | 7 |

@@ -13,6 +13,9 @@ Key changes from v3:
 - DRQ NOT capped for any condition (DC=N/A removes need for structural override)
 - Fair-comparison lift (IDR/IDP/DRQ/FVC) as primary metric
 - forced_multiround runs on hard cases only
+- DC demoted to diagnostic-only: excluded from per-case mean and pass/fail criterion.
+  Kept in scores dict for reporting and failure attribution. DC/FVC delta computed
+  per condition as a divergence diagnostic in summary output.
 """
 
 import json
@@ -32,6 +35,7 @@ EVAL_RESULTS_FILE = OUTPUT_DIR / args.output.replace('.json', '_eval.json')
 
 CONDITIONS = ['isolated_debate', 'multiround', 'forced_multiround', 'ensemble', 'baseline']
 FAIR_COMPARISON_DIMS = ['IDR', 'IDP', 'DRQ', 'FVC']
+PRIMARY_SCORING_DIMS = ['IDR', 'IDP', 'DRQ', 'ETD', 'FVC']  # DC excluded — diagnostic-only
 
 
 def load_cases():
@@ -175,9 +179,10 @@ def score_run(case, output, condition):
     scores['ETD'] = compute_etd(empirical_test, ideal_resolution, condition)
     scores['FVC'] = compute_fvc(verdict, acceptable_resolutions, ideal_resolution)
 
-    non_null = [v for v in scores.values() if v is not None]
-    mean = round(sum(non_null) / len(non_null), 4) if non_null else 0.0
-    passes = mean >= 0.65 and all(v >= 0.5 for v in non_null)
+    # DC is diagnostic-only — excluded from primary mean and pass/fail criterion
+    primary_vals = [scores[d] for d in PRIMARY_SCORING_DIMS if scores.get(d) is not None]
+    mean = round(sum(primary_vals) / len(primary_vals), 4) if primary_vals else 0.0
+    passes = mean >= 0.65 and all(v >= 0.5 for v in primary_vals)
 
     return {
         'scores': scores,
@@ -285,6 +290,24 @@ def main():
     fm_hard = [r['forced_multiround']['mean'] for r in hard_results if r['forced_multiround']['mean'] is not None]
     mr_hard = [r['multiround']['mean'] for r in hard_results if r['multiround']['mean'] is not None]
 
+    # DC/FVC divergence diagnostic — checks whether DC adds signal beyond FVC
+    dc_fvc_diagnostic = {}
+    for cond in CONDITIONS:
+        deltas = []
+        for r in all_results:
+            cond_data = r.get(cond, {})
+            for run in cond_data.get('runs', []):
+                dc = run['scores'].get('DC')
+                fvc = run['scores'].get('FVC')
+                if dc is not None and fvc is not None:
+                    deltas.append(abs(dc - fvc))
+        dc_fvc_diagnostic[cond] = {
+            'n_comparable_runs': len(deltas),
+            'mean_abs_delta': round(sum(deltas) / len(deltas), 4) if deltas else None,
+            'divergent_runs': sum(1 for d in deltas if d > 0.2),
+            'divergence_rate': round(sum(1 for d in deltas if d > 0.2) / len(deltas), 4) if deltas else None,
+        }
+
     summary = {
         'benchmark_isolated_debate_mean': bm_isolated,
         'benchmark_multiround_mean': bm_multiround,
@@ -298,6 +321,7 @@ def main():
         'forced_multiround_hard_mean': round(sum(fm_hard) / len(fm_hard), 4) if fm_hard else None,
         'multiround_hard_mean': round(sum(mr_hard) / len(mr_hard), 4) if mr_hard else None,
         'protocol': 'v4_five_conditions',
+        'dc_fvc_diagnostic': dc_fvc_diagnostic,
         'cases': all_results
     }
 
