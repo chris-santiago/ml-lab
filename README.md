@@ -60,6 +60,9 @@ The diagram below shows the complete workflow, including user-approval gates and
 flowchart TD
     START(["▶ Start"]) --> PRE["Ask: hypothesis · metrics · report_mode<br/>Write HYPOTHESIS.md"]
 
+    PRE ~~~ LOG["INVESTIGATION_LOG.jsonl<br/>written throughout all steps"]
+    style LOG fill:#f9f3e0,stroke:#c9a227,stroke-dasharray: 5 5
+
     PRE --> S1["Step 1 — Build PoC<br/>Reference check · Explicit params"]
     S1 --> S2["Step 2 — Clarify Intent<br/>Write README.md"]
 
