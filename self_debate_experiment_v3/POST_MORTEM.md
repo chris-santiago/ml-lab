@@ -169,7 +169,24 @@ Both cases score 1.0 on every dimension including ETD, have all planted issues f
 
 ---
 
+## Issue 7 — Raw outputs not committed after Phase 6 completion
+
+**Scope:** Future fix  
+**Severity:** Moderate — raw outputs are ground truth for all downstream scoring; untracked files are vulnerable to inadvertent modification
+
+The `v3_raw_outputs/` directory is never committed to git during the experiment run. All downstream scoring, ETD evaluation, bootstrap CIs, and sensitivity analysis read directly from these files. If any file is modified after scoring — whether by a re-run, a tool call, or an accidental overwrite — there is no way to detect the change or recover the original. The isolation breach re-runs in this experiment (Issue 3) are a concrete example: the re-run outputs replaced the contaminated files with no git record of what was overwritten or when.
+
+**What to fix in v4:** Add explicit directives to the experiment plan for two commits:
+
+1. **After Phase 6 (main benchmark):** Once all benchmark cases are complete and `check_isolation.py` passes clean, commit `v3_raw_outputs/` before any scoring begins. Commit message should record isolation check result and benchmark run count.
+2. **After Phase 6b (external cases):** Once all external cases are complete and isolation check passes, commit `v3_raw_outputs/` again to snapshot the full dataset including external cases.
+
+Each commit creates a tamper-evident checkpoint that scoring and analysis can be traced back to. The two-commit structure also makes it easy to identify which files belong to the main benchmark vs. the external benchmark by comparing the two snapshots.
+
+---
+
 ## Issue 8 — Post-mortem process is entirely manual; consider automation
+
 
 **Scope:** Future improvement — implement after v3 experiment is fully complete  
 **Severity:** Low — process works, but does not scale and requires concurrent human attention during experiment execution
@@ -191,18 +208,20 @@ A skill that knows the experiment structure: reads a post-mortem template, runs 
 
 ---
 
-## Issue 7 — Raw outputs not committed after Phase 6 completion
+## Issue 9 — Near-ceiling scores limit interpretability of v3 results
 
-**Scope:** Future fix  
-**Severity:** Moderate — raw outputs are ground truth for all downstream scoring; untracked files are vulnerable to inadvertent modification
+**Scope:** Active — affects interpretation of all v3 findings  
+**Severity:** High — the experiment cannot support several claims that the results superficially suggest
 
-The `v3_raw_outputs/` directory is never committed to git during the experiment run. All downstream scoring, ETD evaluation, bootstrap CIs, and sensitivity analysis read directly from these files. If any file is modified after scoring — whether by a re-run, a tool call, or an accidental overwrite — there is no way to detect the change or recover the original. The isolation breach re-runs in this experiment (Issue 3) are a concrete example: the re-run outputs replaced the contaminated files with no git record of what was overwritten or when.
+Post-fix results show all three debate conditions at 0.975–0.993 and a 93.9% pass rate (46/49). These numbers look strong but have limited interpretive value for four distinct reasons.
 
-**What to fix in v4:** Add explicit directives to the experiment plan for two commits:
+**1. The pass rate improvement is partially a scorer artifact.** Five of the six newly-passing cases (post-ETD fix) were failures caused by a scorer bug, not by agents underperforming. Treating 93.9% as evidence of benchmark difficulty would be incorrect — it reflects a correct fix, not a hard benchmark being cleared.
 
-1. **After Phase 6 (main benchmark):** Once all benchmark cases are complete and `check_isolation.py` passes clean, commit `v3_raw_outputs/` before any scoring begins. Commit message should record isolation check result and benchmark run count.
-2. **After Phase 6b (external cases):** Once all external cases are complete and isolation check passes, commit `v3_raw_outputs/` again to snapshot the full dataset including external cases.
+**2. The ETD fix may have introduced rubric leniency.** The corrected `compute_etd()` awards ETD=1.0 if `condition`, `supports_critique_if`, and `supports_defense_if` are present — it checks field presence, not content quality. Any three-field empirical test object clears the bar. The original intent was to assess whether the test was well-specified; the schema fix may have inadvertently lowered that bar, contributing to the ceiling effect.
 
-Each commit creates a tamper-evident checkpoint that scoring and analysis can be traced back to. The two-commit structure also makes it easy to identify which files belong to the main benchmark vs. the external benchmark by comparing the two snapshots.
+**3. Conditions are indistinguishable at this score level.** 0.975 vs. 0.986 vs. 0.993 is within noise — the experiment cannot support any claim about whether multiround or ensemble adds value over isolated debate. Differential performance between protocol variants requires cases hard enough to separate the conditions. V3 does not have enough of those.
 
----
+**4. The fair-comparison lift of +0.053 is the most defensible number.** After controlling for cases where baseline was also tested, debate adds approximately 5 points over baseline. At that margin, the experiment barely supports the claim that debate outperforms baseline at all, let alone that more elaborate debate structures add incremental value.
+
+**Implication for v4 case design:** The benchmark needs cases that genuinely stress-test the conditions against each other — ambiguous scenarios where a single-pass critic misses something that a multiround exchange surfaces, or where ensemble synthesis resolves a contested point that isolated debate leaves open. High-difficulty cases with nuanced `empirical_test_agreed` resolutions are the most likely candidates. A 93.9% pass rate on a well-designed benchmark should be a warning sign, not a headline result.
+
