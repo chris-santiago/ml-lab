@@ -60,20 +60,25 @@ The diagram below shows the complete workflow, including user-approval gates and
 flowchart TD
     START(["▶ Start"]) --> PRE["Ask: hypothesis · metrics · report_mode<br/>Write HYPOTHESIS.md"]
 
-    PRE ~~~ LOG["INVESTIGATION_LOG.jsonl<br/>written throughout all steps"]
+    PRE ~~~ LOG["INVESTIGATION_LOG.jsonl<br/>uv run log_entry.py throughout all steps"]
     style LOG fill:#f9f3e0,stroke:#c9a227,stroke-dasharray: 5 5
 
     PRE --> S1["Step 1 — Build PoC<br/>Reference check · Explicit params"]
     S1 --> S2["Step 2 — Clarify Intent<br/>Write README.md"]
 
     S2 --> S3["Step 3 — ml-critic<br/>CRITIQUE.md"]
-    S3 --> S4["Step 4 — ml-defender<br/>DEFENSE.md"]
+    S3 --> S4["Step 4 — ml-defender<br/>DEFENSE.md · log verdict"]
     S4 --> DROUND["Debate Round N<br/>Critic ↔ Defender"]
     DROUND --> DRES{"All points<br/>resolved?"}
     DRES -- "No · rounds left" --> DROUND
-    DRES -- "Yes or max 4 reached" --> G1
+    DRES -- "Yes or max 4 reached" --> PREFLIGHT
 
-    G1[/"✋ Gate 1 — Experiment Plan<br/>User approval required"/]
+    PREFLIGHT["Parse DEFENSE.md Pass 2 verdict table<br/>Extract concessions + pre-execution requirements<br/>Build pre-flight checklist → EXECUTION_PLAN.md"]
+    style PREFLIGHT fill:#e8f4e8,stroke:#2e7d32
+
+    PREFLIGHT --> G1
+
+    G1[/"✋ Gate 1 — Experiment Plan<br/>All pre-flight items CLOSED · User approval required"/]
 
     G1 --> S6["Step 6 — Design & Run Experiment<br/>Baseline verification · Precondition check"]
     S6 --> S7["Step 7 — Synthesize Conclusions<br/>CONCLUSIONS.md + figures"]
@@ -191,12 +196,15 @@ Every action taken during an `ml-lab` investigation is recorded to `INVESTIGATIO
 
 **Schema** (key fields): `ts` (ISO 8601), `step` (e.g. `"5"`, `"5.R2"`, `"pre"`), `seq` (monotonic integer), `cat`, `action`, `detail`. Optional fields: `artifact`, `duration_s`, `meta` (structured counts and metrics).
 
-**Example entry:**
-```json
-{"ts":"2026-04-05T15:12:44Z","step":"5","seq":28,"cat":"gate","action":"gate_experiment_plan_approved","detail":"User approved experiment plan with 4 empirical tests","artifact":null,"duration_s":null,"meta":{"empirical_tests":4,"conceded_points":2}}
+**How entries are written:** via `log_entry.py` (PEP 723 script created at investigation start). The script enforces schema compliance, validates `cat` against the allowed taxonomy, auto-increments `seq`, and auto-generates `ts`. Log entries are never written manually.
+
+```bash
+uv run log_entry.py --step 5 --cat gate --action gate_experiment_plan_approved \
+  --detail "User approved experiment plan with 4 empirical tests" \
+  --meta '{"empirical_tests":4,"conceded_points":2}'
 ```
 
-The full schema, rhythm rules, and sequence recovery instructions are in [`agents/ml-lab.md`](agents/ml-lab.md).
+The full schema, rhythm rules, and `log_entry.py` source are in [`agents/ml-lab.md`](agents/ml-lab.md).
 
 ---
 
@@ -212,7 +220,7 @@ The run exercised every major feature of the workflow.
 
 **Steps 1–5.** The PoC returned AP = 0.96 — strong-looking. The critic identified four issues; the defender conceded three and marked one as empirically open. One debate round resolved the contested point into a three-condition experiment design: ordered LSTM, count-vector LR, equalized-distribution LSTM.
 
-**Gate 1.** Before any experiment ran, ml-lab surfaced a structured experiment plan: the three conditions with pre-specified verdicts, the conceded critique points to incorporate, and the precondition check — confirming the LSTM actually encoded sequential ordering rather than frequency signal before treating AP as meaningful. User approved.
+**Gate 1.** Before any experiment ran, ml-lab parsed the Defender's Pass 2 verdict table from `DEFENSE.md`, extracted the three conceded critique points as pre-flight checklist items, and verified each was closed before presenting the experiment plan. The plan covered the three conditions with pre-specified verdicts and the precondition check — confirming the LSTM actually encoded sequential ordering rather than frequency signal before treating AP as meaningful. User approved once all pre-flight items were marked closed.
 
 **Steps 6–7.** The experiment returned mixed results: the randomized-phases test showed the critique was right (AP dropped from 0.96 to 0.68 — phase position was signal, not sequence structure). The ordered vs. bag-of-categories comparison went to the defense. Then Condition C returned AP = 1.00.
 
