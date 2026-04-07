@@ -317,3 +317,49 @@ Add a clarifying line to the cross-cutting Reminders block at the top of every p
 ```
 
 Also add this to the CRITICAL EXECUTION DIRECTIVE in any agent `.md` files dispatched during Phase 6. The fix applies to all phases that use the Agent tool — not only Phase 6.
+
+---
+
+## Issue 9 — CLI-Based Agent Invocation Pattern (`claude --agent`) Is Not a Valid Execution Path
+
+**Scope:** Active — pattern was attempted during Phase 6; must be prevented in all future phases
+**Severity:** Moderate — failed invocations produce silent errors (stderr redirected to `/dev/null`) with no indication to the operator
+
+### What Happened
+
+During Phase 6, the following pattern was attempted to invoke the `ml-critic` agent from a bash script:
+
+```bash
+PROMPT=$(cat /tmp/p004.txt)
+claude --agent ml-critic -p "$PROMPT" --dangerously-skip-permissions 2>/dev/null &
+CRITIC_PID=$!
+sleep 2
+kill -0 $CRITIC_PID 2>/dev/null && echo "Critic process running" || echo "Critic process exited"
+```
+
+The `--agent` flag is not a documented Claude CLI option. The process exits immediately. Because stderr is suppressed and the invocation runs in the background, the failure is silent — no error is surfaced and the phase continues without the agent having run.
+
+### Root Cause
+
+Named agents in `~/.claude/agents/` are orchestration resources dispatched via the `Agent` tool inside a running Claude Code session. They are not standalone executables and cannot be invoked from bash. The CLI's `-p` flag runs a headless session but does not accept an `--agent` selector.
+
+### Impact
+
+If any phase script attempts this pattern, the agent silently does nothing. Downstream scoring or analysis that depends on the agent's output will fail or produce empty results without a clear error trail unless logs are inspected carefully.
+
+### What to Fix
+
+1. **Add to cross-cutting Reminders block** in all phase files that dispatch agents:
+
+   ```
+   > - Agents are invoked exclusively via the Agent tool inside this session.
+   >   Do not attempt `claude --agent <name>` from bash — this flag does not exist
+   >   and the process will exit silently. All agent dispatch must go through the
+   >   orchestrator's Agent tool call.
+   ```
+
+2. **Add to `plan/PLAN.md` Execution Rules**, alongside the existing agent dispatch rule:
+
+   > `Agents may only be invoked via the Agent tool. CLI-based agent invocation (claude --agent) is not supported and fails silently.`
+
+3. **For v5 — if true shell parallelism is needed:** Use the Anthropic API directly with the agent's `.md` prompt as the system prompt, dispatched via subprocess. This is the only path to genuine bash-level parallelism outside a Claude Code session.
