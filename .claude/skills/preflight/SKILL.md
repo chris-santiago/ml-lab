@@ -60,10 +60,14 @@ For each extracted filename: check that `plan/phases/<filename>` exists on disk.
 
 ### Check 4 — No orphaned phase references (WARN)
 
-Using Grep, search `plan/` recursively for any string matching `phase_\d+.*\.md` (phase filename patterns). Collect all unique filenames mentioned. For each, check whether the file exists in `plan/phases/`. Flag any filename that appears in prose but does not exist on disk.
+Run this exact command from the experiment root to extract bare phase filenames:
+```bash
+grep -roh 'phase_[0-9][0-9_a-z]*\.md' plan/ | sort -u
+```
+The pattern `phase_[0-9][0-9_a-z]*\.md` stops at `.md` and only matches digits, underscores, and lowercase letters — it will not capture trailing markdown link syntax like `](phases/...`. For each unique filename returned, check whether `plan/phases/<filename>` exists on disk.
 
 - PASS if all referenced filenames resolve to existing files.
-- WARN for each unresolvable reference with the file it appears in and the line number.
+- WARN for each unresolvable reference. To find which file contains it, run: `grep -rn '<filename>' plan/`
 
 This catches renames where cross-references were not updated.
 
@@ -71,36 +75,66 @@ This catches renames where cross-references were not updated.
 
 ### Check 5 — Step number consistency (WARN)
 
-For each file in `plan/phases/`: 
-1. Extract the phase number from the `## Phase N` or `## Phase N.N` header on line 1.
-2. Find all `--step` flag values in the file (pattern: `--step\s+[\d.]+`).
-3. Flag any `--step` value that does not match the phase number from the header.
+Phase files use either `# Phase N` or `## Phase N` as the header (both forms are used; the number of `#` characters varies). Run this for each file in `plan/phases/`:
 
-- PASS if all `--step` values match the phase header in every file.
-- WARN for each mismatch. Give the filename, line number, header number, and mismatched `--step` value.
+```bash
+for f in plan/phases/*.md; do
+  fname=$(basename "$f")
+  # Match both # and ## headers
+  header=$(grep -m1 '^#\+ Phase' "$f" | grep -o 'Phase [0-9.]*' | awk '{print $2}')
+  steps=$(grep -o '\-\-step [0-9.]*' "$f" | awk '{print $2}' | sort -u)
+  for s in $steps; do
+    [ "$s" != "$header" ] && echo "MISMATCH [$fname] header=$header --step=$s"
+  done
+done
+```
+
+- PASS if no output.
+- WARN for each line of output. Include filename, header phase, and mismatched `--step` value.
 
 ---
 
 ### Check 6 — Stale detail strings (WARN)
 
-For each file in `plan/phases/`:
-1. Extract the phase number from the `## Phase N` header (same as Check 5).
-2. Find all `--detail` strings that contain a phrase matching `"Phase \d+` or `"Phase \d+\.\d+` (e.g., `--detail "Phase 10.5: ..."`)
-3. Extract the phase number embedded in the detail string. If it differs from the file's header phase number, flag it.
+Run this for each file in `plan/phases/`:
 
-- PASS if no mismatches found.
-- WARN for each stale detail string. Give filename, line number, header phase, and detail-string phase. Note: these produce misleading log entries but don't break execution.
+```bash
+for f in plan/phases/*.md; do
+  fname=$(basename "$f")
+  header=$(grep -m1 '^#\+ Phase' "$f" | grep -o 'Phase [0-9.]*' | awk '{print $2}')
+  grep -n '"Phase [0-9]' "$f" | while IFS=: read lineno content; do
+    detail_phase=$(echo "$content" | grep -o '"Phase [0-9.]*' | sed 's/"Phase //')
+    [ -n "$detail_phase" ] && [ "$detail_phase" != "$header" ] && \
+      echo "STALE [$fname:$lineno] header=Phase $header detail=Phase $detail_phase"
+  done
+done
+```
+
+- PASS if no output.
+- WARN for each line of output. Note: these produce misleading log entries but don't break execution.
 
 ---
 
 ### Check 7 — Agents installed (BLOCKER)
 
-Read `plan/PLAN.md`. Find the Execution Rules section — it contains a sentence listing agent names in backticks (e.g., `` `ml-critic`, `ml-defender`, `research-reviewer` ``). Extract all agent names from that sentence.
+The Execution Rules section of `plan/PLAN.md` contains exactly one sentence of the form:
+> `Agents (`ml-critic`, `ml-defender`, ...) are invoked by name via the Agent tool.`
 
-For each agent name: check that `~/.claude/agents/<agent-name>.md` exists.
+Extract agent names from that sentence only — not from the full file. Run:
+```bash
+grep 'invoked by name' plan/PLAN.md | grep -o '`[a-z][a-z-]*`' | tr -d '`' | while read agent; do
+  if [ -f "$HOME/.claude/agents/${agent}.md" ]; then
+    echo "INSTALLED: $agent"
+  else
+    echo "MISSING: $agent"
+  fi
+done
+```
 
-- PASS if all agents are installed.
-- FAIL for each missing agent. Remediation: `cp agents/<agent-name>.md ~/.claude/agents/` from the repo root.
+The pattern `` `[a-z][a-z-]*` `` matches only lowercase-letter agent names in backticks — it will not match schema field names, step numbers, or other backtick-quoted terms in the file.
+
+- PASS if all agents print INSTALLED.
+- FAIL for each MISSING agent. Remediation: `cp agents/<agent-name>.md ~/.claude/agents/` from the repo root.
 
 ---
 
