@@ -363,3 +363,49 @@ If any phase script attempts this pattern, the agent silently does nothing. Down
    > `Agents may only be invoked via the Agent tool. CLI-based agent invocation (claude --agent) is not supported and fails silently.`
 
 3. **For v5 — if true shell parallelism is needed:** Use the Anthropic API directly with the agent's `.md` prompt as the system prompt, dispatched via subprocess. This is the only path to genuine bash-level parallelism outside a Claude Code session.
+
+---
+
+## Issue 10 — "Contains brace with quote character (expansion obfuscation)" Approval Prompt Fires on Every `--meta` Argument
+
+**Scope:** Active — fires repeatedly during Phase 6 on every `log_entry.py` call that passes a `--meta` JSON argument
+**Severity:** Moderate — cannot be suppressed via allow rules; requires restructuring the commands
+**Related:** Issue 3 (newline+# heuristic — same pre-permission check class)
+
+### What Happened
+
+Every `log_entry.py` invocation that passes a `--meta` argument with inline JSON triggers the Claude Code security prompt "Contains brace with quote character (expansion obfuscation)." Phase 6 has many such calls — anomaly counts, hollow-round rates, DC/FVC diagnostic flags — making the approval prompts frequent throughout execution.
+
+### Root Cause
+
+Like Issue 3, this is a hard-coded pre-permission security heuristic that runs before `permissions.allow` is evaluated. The pattern `{` followed by `"` inside a quoted argument can be used to obfuscate shell expansion (e.g., `${IFS}`-style injection). No allow rule can suppress it.
+
+### Impact
+
+Operators must manually approve every `--meta` log entry during Phase 6, breaking the hands-off execution flow. Phase 6 generates the highest density of structured log entries in the experiment.
+
+### What to Fix
+
+Restructure `--meta` arguments to avoid inline JSON with brace+quote patterns. Two options:
+
+**Option 1 — Fold meta into `--detail` string (immediate workaround, no script changes):**
+
+```bash
+uv run self_debate_experiment_v4/log_entry.py --step 9.5 --cat audit \
+  --action post_run_audit_complete \
+  --detail "Anomaly report complete — anomaly_count=3 critical_count=1"
+```
+
+Folds structured fields into the `--detail` string as `key=value` pairs. Less queryable downstream but avoids the heuristic entirely and requires no changes to `log_entry.py`.
+
+**Option 2 — Add `--meta-file` support to `log_entry.py` (v5 permanent fix):**
+
+```bash
+echo '{"anomaly_count": 3, "critical_count": 1}' > /tmp/meta.json
+uv run self_debate_experiment_v4/log_entry.py --step 9.5 --cat audit \
+  --action post_run_audit_complete --meta-file /tmp/meta.json
+```
+
+Reads JSON from a file rather than inline. Preserves structured meta logging without triggering the heuristic. Requires adding `--meta-file` flag to `log_entry.py`.
+
+Use Option 1 for the current experiment run. Implement Option 2 in v5.
