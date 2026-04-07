@@ -192,3 +192,33 @@ Three options were available per the plan:
 - **IDP < 1.0** — Red herrings embedded naturally as scenario features make false-positive critiques more likely
 - **DRQ failure on mixed cases** — Genuine defense evidence makes critique_wins feel too strong, but the flaws make defense_wins wrong; correct empirical_test_agreed requires recognizing both sides
 
+
+---
+
+## Issue 6 — Difficulty Gate Cannot Be Calibrated by Switching LLM Evaluators: Cases Remain Self-Annotating
+
+**Scope:** Future fix — gate was waived by LEAD; experiment proceeds with documented caveat
+**Severity:** Moderate
+
+### What Happened
+
+After the initial Phase 5.5 gate failure (Issue 5), the operator re-sourced 10 hard cases via an external LLM using the v1 generation prompt. The revised cases were re-verified (Phase 1 re-run) and the gate was re-run first with a Sonnet-class evaluator (9/9 cases scored 1.0), then with `claude-haiku-4-5` as a weaker proxy evaluator. Haiku also scored 1.0 on all 9 cases. The gate failed under both evaluators.
+
+### Root Cause
+
+The fundamental issue is not model capability — it is prompt design. The revised cases still describe flaws explicitly or strongly hint at them within the same paragraph that introduces the problematic design choice. A reviewer of any capability level who reads the document carefully will find the flaw because it is named. The v1 generation prompt produced "self-annotating" cases: memos that describe problems rather than documents that contain problems. Switching to a weaker evaluator cannot compensate for cases where the signal-to-noise ratio is 1.0 by construction.
+
+### Impact
+
+The difficulty gate as designed is not a reliable quality check for LLM-based benchmark evaluation. It correctly identified that the cases were too easy, but the available remediation paths (case revision, evaluator swap) both failed. The gate was waived by LEAD and the experiment proceeds with the caveat that the "hard" difficulty label is calibrated for human analysts, not Claude-family models. Difficulty-stratified lift results should be interpreted accordingly.
+
+### What to Fix
+
+The case generation prompt must be redesigned from scratch to produce cases where the flaw is not nameable from the text. `CASE_GENERATION_PROMPT_V2.md` (written during this phase) documents the required design principles:
+
+- Flaw mechanism never named in the prompt text — described as a neutral design choice
+- Multi-paragraph cross-referencing required to identify each must_find issue
+- Active red herrings embedded as natural scenario features (not just listed in must_not_claim)
+- Confident opening narrative that makes the evaluation appear sound
+
+The gate evaluator model is secondary — if the cases are correctly designed, even a strong model will miss flaws. If the cases are self-annotating, no weaker model will reliably fail them.
