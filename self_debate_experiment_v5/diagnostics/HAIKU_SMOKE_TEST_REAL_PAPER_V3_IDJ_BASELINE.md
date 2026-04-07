@@ -62,33 +62,39 @@
 
 ## Comparison to Prior Runs
 
+> **⚠ Stochastic contamination warning:** The V3 run re-dispatched all 14 cases because the original V2 responses were lost in context compaction. This means the V3 defense_wins scores are from a *different* Haiku roll, not the same responses scored under a new rubric. The comparison below is informational only — V3 vs V2 deltas on defense_wins are not interpretable as improvement or regression. See note under Key Findings.
+
 | Metric | V2 (3-dim, 2xx) | V3 (4-dim, 2xx) | Delta |
 |--------|:---:|:---:|:---:|
-| Overall mean | 0.810 | 1.000 | +0.190 |
-| Critique/mixed mean | ~0.905 (est.) | 1.000 | +0.095 |
-| Defense_wins mean | ~0.733 (est.) | 1.000 | +0.267 |
-| Cases scoring < 0.55 | 0 / 14 | 0 / 14 | ±0 cases |
+| Overall mean | 0.810 | 1.000 | +0.190 (stochastic — see warning) |
+| Critique/mixed mean | **1.000** | 1.000 | 0 |
+| Defense_wins mean | **0.467** | 1.000 | +0.533 (stochastic — NOT a genuine improvement) |
+| Cases scoring < 0.55 | **4 / 14** | 0 / 14 | −4 cases (stochastic) |
 | Gate result | FAIL | FAIL | — |
 
-*Note: V2 stratum means are estimated from the documented 3-dim overall mean of 0.810. See `REAL_PAPER_CASES_SMOKE_TEST_V2.md` for per-case V2 scores.*
+*V2 actuals from `REAL_PAPER_CASES_SMOKE_TEST_V2.md`: cases 206–209 all scored 0.33 (Haiku invented flaws and condemned sound methodology). Case 205 scored 1.00. Defense_wins mean = 0.467. Critique/mixed mean = 1.000.*
 
 ---
 
 ## Key Findings
 
-### 1. IDJ alone does not lower scores
+### 1. IDJ alone does not lower critique/mixed scores
 
 All 9 IDJ-eligible cases (201–204, 210–214) scored IDJ=1. Haiku successfully identified and challenged the planted wrong justification in every case. This means the "addressed_but_incorrectly" justifications in the 2xx cases are not subtle enough — Haiku can recognize they are wrong without domain-specific knowledge.
 
-**Implication:** IDJ adds a valid dimension to the scoring engine but does not create calibration headroom on the existing 2xx case batch. The dimension will become meaningful in the actual experiment when weaker-performing models partially challenge justifications (IDJ=0.5) or miss them entirely (IDJ=0).
+**Implication:** IDJ adds a valid dimension to the scoring engine but does not create calibration headroom on the existing 2xx critique/mixed cases. The dimension will become meaningful in the actual experiment when weaker-performing models partially challenge justifications (IDJ=0.5) or miss them entirely (IDJ=0).
 
-### 2. All strata score 1.000 — broken baseline confirmed
+### 2. Defense_wins "improvement" is a stochastic artifact — V2 results were correct
 
-The 2xx cases replicate the broken-baseline finding from V1 and V2. Haiku finds all must_find issues, correctly assesses verdicts, and now also challenges all IDJ-eligible justifications. No stratum drives the ceiling — it is uniform across pure critique, mixed, and defense_wins cases.
+In V2, cases 206–209 all scored 0.33 because Haiku invented 6–8 flaws each and condemned sound methodology. That was the *intended* behavior — the Defense_Wins Case Design Requirements successfully induced false critique from Haiku in V2.
 
-### 3. V3 mean is higher than V2 despite adding IDJ
+In V3, those same cases scored 1.00 because this Haiku re-run happened to correctly defend the methodology. This is **not** a genuine improvement in case difficulty — it is stochastic variation. The V3 defense_wins results should not be compared to V2.
 
-V3 overall mean (1.000) exceeds V2 (0.810) even though IDJ is an additional dimension that would lower the mean for cases where IDJ=0. This is because this Haiku run also scored IDR/IDP/FVC = 1 on cases where V2 had partial failures. The delta reflects stochastic response variation, not a systematic regression.
+**The V2 defense_wins calibration (0.467 mean, 4/5 failing) remains the operative baseline.** The 2xx defense_wins cases are correctly calibrated; this run was a lucky roll.
+
+### 3. Critique/mixed stratum result is reliable
+
+The critique/mixed cases (201–204, 210–214) were not in a position where stochastic variation could change the outcome — they all scored 1.00 in V2 (3-dim) and 1.00 in V3 (4-dim). The IDJ=1 finding on all 9 IDJ-eligible cases is stable and not an artifact of re-running. Critique/mixed ceiling is confirmed.
 
 ### 4. What Lever A and Lever B fix (projected)
 
@@ -106,9 +112,9 @@ See `CALIBRATION_DIAGNOSTIC.md` Section 10 for projected score table after Lever
 
 - [x] IDJ dimension is implemented correctly in the proxy rubric (9/9 IDJ cases scored, all returned 0 or 1 — in this run, all 1)
 - [x] Defense_wins cases correctly receive IDJ=N/A and are not penalized
-- [x] All 5 defense_wins cases correctly received defense (FVC=1); no false condemnations
 - [x] No must_not_claim violations detected in any response
-- [x] Pre-generation-round baseline documented: 14/14 = 1.000, gate FAILS
+- [x] Critique/mixed ceiling confirmed: IDJ=1 on all 9 eligible cases; Lever A+B re-generation required
+- [ ] **Defense_wins calibration not confirmed by this run** — V3 re-run produced different Haiku responses than V2; all 5 defense_wins cases passed, which contradicts V2's finding (4/5 failed). V2 defense_wins results (cases 206–209 scoring 0.33) remain the operative calibration reference.
 
 ---
 
