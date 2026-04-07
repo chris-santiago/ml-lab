@@ -420,3 +420,31 @@ Use Option 1 for the current experiment run. Implement Option 2 in v5.
 ```
 
 Add to `.claude/settings.json` before starting the Phase 6 session (remove after). Bypasses all approval prompts — including hard-coded security heuristics that allow rules cannot suppress — while restricting file operations to the repo. Bash commands are not path-restricted, but all experiment outputs land inside the repo anyway. Most aggressive option; appropriate for a known, bounded phase running locally.
+
+---
+
+## Issue 11 — v5 Plan Must Incorporate v4 Debate Insights and Settled Hypothesis Findings
+
+**Scope:** Future fix — v4 experiment still running; applies to v5 plan construction
+**Severity:** Moderate — a v5 plan built without v4 outcome artifacts risks repeating resolved questions and ignoring validated design constraints
+
+### What Happened
+
+This post-mortem captures execution issues but not the intellectual resolution of the v4 hypothesis. The debate artifacts — DEBATE.md in particular — contain the settled arguments: what the critic raised, what the defender conceded, what remained contested, and what was upheld. These represent knowledge that does not exist anywhere else in the artifact set and is the most likely to be overlooked when constructing a v5 plan.
+
+A v5 plan built from the v4 plan files alone will inherit the v4 framing without knowing which parts of that framing were validated, which were falsified, and which open questions the debate identified as requiring a follow-on experiment.
+
+### Impact
+
+v5 may re-test already-settled questions, preserve design choices that were conceded as flaws, or miss the most productive next research direction — all because the planning session started from plan files rather than outcome files.
+
+### What to Fix
+
+Before drafting any v5 plan, the orchestrator must read and synthesize these artifacts in priority order:
+
+1. **`DEBATE.md`** *(highest priority — most likely to be missed)* — what the critic raised, what was conceded, what was defended and upheld, what was left open
+2. **`CONCLUSIONS.md`** — settled quantitative findings and their interpretations
+3. **`REPORT.md` / `TECHNICAL_REPORT.md`** — final framing of what was established
+4. **`POST_MORTEM.md`** — execution issues and their v5 fix recommendations (this file)
+
+The v5 hypothesis should be derived from the open questions v4 left unresolved. The v5 protocol should preserve confirmed v4 design properties and replace all conceded v4 design flaws. Neither of these decisions can be made correctly without reading DEBATE.md first.
