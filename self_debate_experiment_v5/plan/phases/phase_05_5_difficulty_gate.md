@@ -29,8 +29,9 @@ For each baseline response, score the following inline (do not invoke self_debat
 - IDR: Did the response identify all must_find_issue_ids?
 - IDP: Was at least one issue description substantively correct?
 - FVC: Is the verdict (or implied resolution) in acceptable_resolutions?
+- IDJ: For each issue in issues_found that has a stated justification in the memo — did the response specifically argue that justification is wrong? (For defense_wins cases or cases with no addressed_but_incorrectly issues: IDJ=N/A)
 
-Compute a preliminary baseline mean for each case from those three binary scores.
+Compute a preliminary baseline mean for each case from the applicable scores (IDR, IDP, FVC, IDJ where applicable). IDJ is N/A for defense_wins cases and cases with no addressed_but_incorrectly issues; exclude N/A dimensions from the denominator.
 
 **Preliminary Spearman check (on the 15-case stratified pilot):**
 Rank the 15 cases by difficulty (easy=1, medium=2, hard=3) and by their baseline means. Compute Spearman rho between rank-difficulty and baseline scores. If rho > 0 (hard cases scoring HIGHER than easy ones — inverted correlation), flag as a warning and present to LEAD before proceeding. This is an early warning for the Issue 15 pattern observed in v4.
@@ -65,6 +66,23 @@ cd self_debate_experiment_v5 && uv run log_entry.py --step 5.5 --cat gate --acti
 ```bash
 cd self_debate_experiment_v5 && uv run log_entry.py --step 5.5 --cat workflow --action step_end \
   --detail "Phase 5.5 difficulty gate complete; outcome logged above"
+```
+
+**Stratum diagnostic (non-blocking — informational only):**
+Report mean scores broken down by stratum:
+
+| Stratum | N cases | N below 0.55 | Mean score |
+|---|---|---|---|
+| Pure critique | N | N | X.XX |
+| Mixed | N | N | X.XX |
+| Defense_wins | N | N | X.XX |
+
+This table does not affect the gate decision. It identifies which stratum drives any gate failure and informs Phase 8 analysis planning.
+
+```bash
+cd self_debate_experiment_v5 && uv run log_entry.py --step 5.5 --cat gate \
+  --action stratum_diagnostic \
+  --detail "Stratum breakdown: critique mean=X.XX (N/N below 0.55); mixed mean=X.XX (N/N); defense_wins mean=X.XX (N/N)"
 ```
 
 **Phase 5.5 commit:**

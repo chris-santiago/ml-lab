@@ -13,13 +13,13 @@ preregistration = {
         "primary_fair_comparison_lift": {
             "claim": "Isolated debate fair-comparison lift over baseline >= +0.10",
             "threshold": 0.10,
-            "dimensions": ["IDR", "IDP", "DRQ", "FVC"],
-            "note": "Fair-comparison set: dimensions where baseline has equal structural agency. DC and ETD excluded from this comparison."
+            "dimensions": ["IDR", "IDP", "IDJ", "DRQ", "FVC"],
+            "note": "Fair-comparison set: dimensions where baseline has equal structural agency. DC and ETD excluded from this comparison. IDJ added per calibration diagnostic — captures justification evaluation quality."
         },
         "primary_passrate": {"claim": "Debate case pass rate >= 75%", "threshold": 0.75},
         "primary_benchmark_mean": {"claim": "Debate benchmark mean >= 0.65", "threshold": 0.65},
         "secondary_ensemble_mixed": {
-            "claim": "Debate outperforms ETD-excluded ensemble on IDR/IDP/DRQ/FVC for mixed-position cases",
+            "claim": "Debate outperforms ETD-excluded ensemble on IDR/IDP/IDJ/DRQ/FVC for mixed-position cases",
             "criterion": "Debate mean on mixed cases (fair dims) > ensemble mean on same cases (fair dims)"
         },
         "secondary_defense_wins": {
@@ -29,6 +29,12 @@ preregistration = {
         "secondary_forced_multiround": {
             "claim": "Forced multiround outperforms natural multiround on hard cases",
             "criterion": "forced_multiround_mean(hard) > multiround_mean(hard) on DRQ and IDR"
+        },
+        "stratum_fc_lift": {
+            "claim": "Pre-registered stratum breakdown for Phase 8 interpretation",
+            "strata": ["pure_critique", "mixed", "defense_wins"],
+            "expected_primary_lift_driver": "defense_wins (DRQ/FVC); critique/mixed (IDJ)",
+            "note": "Not a hypothesis test — a pre-committed interpretive structure. Prevents post-hoc stratum selection."
         }
     },
     "rubric": {
@@ -37,7 +43,8 @@ preregistration = {
         "DC": "correct verdict via defense function (0.0/0.5/1.0); N/A for baseline (structural inapplicability — no Defender role); N/A on defense_wins cases",
         "DRQ": "typed verdict matches ideal (1.0); matches other acceptable_resolution (0.5); adjacent (0.5); wrong (0.0); baseline NOT capped — equal treatment required for fair comparison",
         "ETD": "empirical test has condition + supports_critique_if + supports_defense_if + ambiguous_if (0.0/0.5/1.0); N/A when ideal is critique_wins or defense_wins; N/A for ensemble and baseline conditions",
-        "FVC": "verdict in acceptable_resolutions list (1.0); adjacent to ideal not in list (0.5); wrong (0.0)"
+        "FVC": "verdict in acceptable_resolutions list (1.0); adjacent to ideal not in list (0.5); wrong (0.0)",
+        "IDJ": "Fraction of addressed_but_incorrectly must_find issues where model correctly argued stated justification is wrong (0.0/0.5/1.0); N/A if no addressed_but_incorrectly issues in case"
     },
     "etd_scoring_detail": {
         "schema": "condition / supports_critique_if / supports_defense_if / ambiguous_if (canonical v5 schema)",
@@ -59,13 +66,13 @@ preregistration = {
     },
     "comparison_structures": {
         "debate_vs_ensemble": {
-            "dimensions": ["IDR", "IDP", "DRQ", "FVC"],
+            "dimensions": ["IDR", "IDP", "IDJ", "DRQ", "FVC"],
             "excluded": ["DC", "ETD"],
             "rationale": "ETD excluded: ensemble has no adversarial exchange. DC excluded: ensemble has no Defender role. This answers: does adversarial role structure improve issue identification and verdict quality beyond parallel independent passes?"
         },
         "debate_conditions_vs_each_other": {
             "conditions": ["isolated_debate", "multiround", "forced_multiround"],
-            "dimensions": ["IDR", "IDP", "DC", "DRQ", "ETD", "FVC"],
+            "dimensions": ["IDR", "IDP", "IDJ", "DC", "DRQ", "ETD", "FVC"],
             "note": "All three have the same adversarial exchange structure; ETD and DC are both applicable"
         }
     },
@@ -81,7 +88,7 @@ preregistration = {
         "ambiguous": "Cannot distinguish agent vs protocol from outputs alone",
         "none": "Case passed — no failure to attribute"
     },
-    "per_case_pass_criterion": "mean(non-null PRIMARY dimensions: IDR/IDP/DRQ/ETD/FVC) >= 0.65 AND all applicable primary dimensions >= 0.5. DC is diagnostic-only and excluded.",
+    "per_case_pass_criterion": "mean(non-null PRIMARY dimensions: IDR/IDP/IDJ/DRQ/ETD/FVC) >= 0.65 AND all applicable primary dimensions >= 0.5. DC is diagnostic-only and excluded.",
     "n_runs_per_case": 3,
     "forced_multiround_scope": "hard cases only (difficulty == 'hard'); minimum 2 rounds"
 }
@@ -96,9 +103,10 @@ rubric = {
         "DC": "DIAGNOSTIC ONLY — excluded from per-case mean and pass/fail criterion. Whether defense correctly reached verdict type (0.0/0.5/1.0). N/A for baseline (no Defender role). N/A on defense_wins cases. Reported as DC/FVC divergence diagnostic in summary.",
         "DRQ": "Whether typed verdict matches expected resolution (0.0/0.5/1.0). No structural cap or override for any condition.",
         "ETD": "Empirical test has condition + supports_critique_if + supports_defense_if (0.0/0.5/1.0). N/A when ideal is critique_wins or defense_wins. N/A for ensemble and baseline conditions.",
-        "FVC": "Verdict in scoring_targets.acceptable_resolutions (1.0); adjacent to ideal (0.5); wrong (0.0)."
+        "FVC": "Verdict in scoring_targets.acceptable_resolutions (1.0); adjacent to ideal (0.5); wrong (0.0).",
+        "IDJ": "Fraction of addressed_but_incorrectly must_find issues where model correctly argued the stated justification is wrong (0.0/0.5/1.0). N/A if no addressed_but_incorrectly issues in case.",
     },
-    "pass_fail_rule": "mean(non-null PRIMARY dimensions: IDR/IDP/DRQ/ETD/FVC) >= 0.65 AND all applicable primary dimensions >= 0.5. DC is diagnostic-only and excluded from pass/fail.",
+    "pass_fail_rule": "mean(non-null PRIMARY dimensions: IDR/IDP/IDJ/DRQ/ETD/FVC) >= 0.65 AND all applicable primary dimensions >= 0.5. DC is diagnostic-only and excluded from pass/fail.",
     "notes": "Rubric fixed before any agent run. Do not modify after execution begins."
 }
 

@@ -15,10 +15,10 @@ Write two files in self_debate_experiment_v5/:
    Claim: the isolated self-debate protocol (ml-critic + ml-defender each receiving only
    the task prompt, orchestrator adjudicates) will achieve a benchmark aggregate score
    at least +0.10 higher than a single-pass baseline on the fair-comparison dimensions
-   (IDR, IDP, DRQ, FVC) — dimensions where baseline has equal structural agency.
+   (IDR, IDP, IDJ, DRQ, FVC) — dimensions where baseline has equal structural agency.
    Mechanism: adversarial role separation forces engagement with both sides, producing
    better-typed verdicts and catching false positives that correlated parallel assessors miss.
-   Primary metrics: IDR, IDP, DRQ, FVC (fair-comparison set). Secondary metrics: DC, ETD
+   Primary metrics: IDR, IDP, IDJ, DRQ, FVC (fair-comparison set). Secondary metrics: DC, ETD
    (debate-internal; not used in lift calculation against baseline).
 
    Five conditions:
@@ -37,11 +37,22 @@ Write two files in self_debate_experiment_v5/:
    - DC = N/A for defense_wins cases (IDR/IDP also N/A per v3 convention)
 
    Secondary hypotheses:
-   (1) Debate outperforms ensemble on IDR/IDP/DRQ/FVC (fair-comparison dimensions)
+   (1) Debate outperforms ensemble on IDR/IDP/IDJ/DRQ/FVC (fair-comparison dimensions)
    (2) Ensemble FVC >= 0.5 on >= 60% of defense_wins cases (per v4 DEBATE Issue 7 resolution:
        DC=N/A for all defense cases; FVC used as the observable proxy criterion)
    (3) Forced multiround outperforms natural multiround on hard cases (additional exchange
        surfaces real signal when cases have genuine complexity)
+
+   Pre-registered stratum analysis (Phase 8):
+   fc_lift will be reported separately for three strata: pure critique, mixed, and defense_wins.
+   Expected directional patterns:
+   - Defense_wins stratum: primary driver of DRQ/FVC lift (isolated debate Defender prevents false condemnation)
+   - Critique/mixed stratum: primary driver of IDJ lift (debate forces justification quality evaluation)
+   - Mixed stratum: additional DRQ lift from reaching empirical_test_agreed verdict + ETD quality improvement
+
+   Global fc_lift (H1 primary criterion) remains the hypothesis test. Stratum breakdown is the
+   interpretive structure for understanding mechanism, pre-registered to prevent post-hoc selection
+   of favorable stratum framing.
 
    Known confound — multiround vs isolated_debate comparison (v4 DEBATE Issue 1, unresolved):
    multiround's Defender sees the Critic output; isolated_debate's Defender does not. Any

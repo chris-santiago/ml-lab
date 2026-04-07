@@ -59,6 +59,7 @@ As orchestrator, adjudicate:
     ambiguous_if: [result that does not resolve the dispute]
 - Extract issues_found: which scoring_targets.must_find_issue_ids appear in Critic output
 - Extract all_issues_raised: all numbered issues in Critic output
+- Extract justifications_challenged: for each issue in issues_found, did the Critic specifically argue that the memo's stated reason or justification for this concern is wrong or insufficient? If yes, include its issue_id. If the memo gave no stated justification for a found issue, omit it from this list.
 
 Write v5_raw_outputs/{case_id}_isolated_debate_run{N}.json:
 {
@@ -67,6 +68,7 @@ Write v5_raw_outputs/{case_id}_isolated_debate_run{N}.json:
   "verdict": "critique_wins | defense_wins | empirical_test_agreed",
   "issues_found": [...],
   "all_issues_raised": [...],
+  "justifications_challenged": [...],
   "empirical_test": {"condition": "...", "supports_critique_if": "...",
                      "supports_defense_if": "...", "ambiguous_if": "..."} or null
 }
@@ -74,7 +76,7 @@ Write v5_raw_outputs/{case_id}_isolated_debate_run{N}.json:
 **POST-WRITE VALIDATION (mandatory after every output file, all conditions):**
 After writing each `v5_raw_outputs/` file:
 1. Read it back and attempt `json.loads()` — if it fails, the file is malformed
-2. Verify these top-level keys are present and non-null: `case_id`, `run`, `condition`, `verdict`, `issues_found`, `all_issues_raised`
+2. Verify these top-level keys are present and non-null: `case_id`, `run`, `condition`, `verdict`, `issues_found`, `all_issues_raised`, `justifications_challenged`
 3. If parse fails OR required keys are missing: delete the malformed file, re-dispatch the agent for that case/condition/run immediately, and write a corrected file before proceeding to the next case
 
 --- MULTIROUND DEBATE CONDITION (ml-lab protocol) ---
