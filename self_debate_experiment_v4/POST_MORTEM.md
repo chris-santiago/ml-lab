@@ -84,17 +84,23 @@ Execution is not blocked — the operator can approve each prompt and the comman
 
 ### What to Fix
 
-Add a `permissions.allow` block to `.claude/settings.json` at the repo root that pre-approves the two highest-frequency command patterns:
+**There is no allow rule that suppresses this warning.** The check is a hard-coded pre-permission security heuristic in Claude Code that runs before `permissions.allow` is evaluated — no `settings.json` pattern can bypass it.
 
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(uv run log_entry.py *)",
-      "Bash(git commit -m *)"
-    ]
-  }
-}
+The primary trigger in v4 is heredoc-style commit messages used in every phase commit block:
+
+```bash
+# Triggers the warning:
+git commit -m "$(cat <<'EOF'
+chore: snapshot artifacts [none]
+EOF
+)"
 ```
 
-This grants standing approval for `log_entry.py` invocations in any form and for `git commit -m` regardless of the message contents, covering the heredoc commit blocks in the phase files. No other permission boundaries are relaxed. **Status: Applied** — `.claude/settings.json` already contains `"Bash(uv run *)"` and `"Bash(git *)"` wildcard rules that cover these patterns; no additional changes required.
+**Workaround:** Replace all heredoc commit blocks in the phase files with plain single-line `-m` arguments. Most v4 commit messages are already single-line; wrapping them in a heredoc adds no value and is the sole cause of the warning:
+
+```bash
+# No warning:
+git commit -m "chore: snapshot artifacts [none]"
+```
+
+This applies to all `git commit` blocks in `plan/phases/phase_0*.md` through `plan/phases/phase_11_final.md`. The `log_entry.py` `--detail` arguments that cross the newline-`#` threshold are a secondary trigger and can be addressed by keeping detail strings on a single line.
