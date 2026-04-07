@@ -38,6 +38,7 @@ A case is hard for an LLM when the flaw **cannot be found by analyzing the docum
 ### Principle 1: Flaws Are Wrong Assumptions, Not Inconsistent Facts
 
 **Never:** Two paragraphs that contradict each other (model finds this instantly).
+**Never:** Parallel before/after paragraph structure ("The old system... The new system...") — this is the first thing agents scan. Even if the content is sound, parallel structure triggers a mechanical diff that will surface any asymmetry.
 **Instead:** A single coherent methodology that is based on an unstated assumption that happens to be wrong.
 
 Example: A document describes using propensity score matching with a logistic regression propensity model to adjust for confounders in a treatment-control comparison. The methodology sounds standard. But the treatment was assigned based on a decision tree with interaction effects — logistic propensity scores cannot capture the true assignment mechanism, making the matched comparison biased. The document never states the assignment mechanism incorrectly — it simply doesn't state it, and the reader must know that propensity matching requires the propensity model to be correctly specified.
@@ -100,6 +101,70 @@ The reviewer who applies the category-appropriate checklist should NOT find the 
 V5 hard case prompts must be **500–800 words** (v1 was 200–400). Longer prompts with more operational detail create more surface area for the reviewer to track. The flaw should be a small detail within a large, mostly-sound methodology. The signal-to-noise ratio should be low.
 
 Include realistic operational details: team names, deployment timelines, infrastructure constraints, stakeholder quotes, budget figures, rollout plans. These are not flaws — they are noise that makes the flaw harder to isolate.
+
+### Principle 8: The Obvious Finding Must Be a Red Herring
+
+Raw output analysis of v1–v2 cases showed that agents immediately lock onto the most salient surface feature — an unusual class ratio, a short evaluation window, a non-standard metric name — and announce it as the flaw. In v5, this surface feature must exist but must be the **must_not_claim** item: a genuine concern that has an adequate (if subtle) justification. The real flaw must be found elsewhere, in the less salient methodology.
+
+This forces the agent to do two things correctly: (1) evaluate the justification for the obvious concern rather than stopping when it finds it, and (2) continue searching after that concern is resolved. A case where the only unusual-looking feature is the real flaw is too easy — a calibrated agent locks onto unusual features first.
+
+---
+
+## Detection Patterns to Design Against
+
+Empirical analysis of raw agent outputs across v1–v2 hard cases revealed four systematic detection strategies that agents apply. Every v5 case must be designed to resist all four.
+
+### Pattern 1: Diff-the-Paragraphs
+
+Agents maintain an internal checklist of comparison dimensions (data source, preprocessing, evaluation metric, time period, population) and mechanically diff every stated attribute across compared systems. Any asymmetry — even a word choice difference — is flagged as a potential flaw.
+
+**Defense:** The compared systems must be described in non-parallel prose. Interleave operational details about both systems. Never use a "System A: ... System B: ..." structure. Avoid symmetric sentence patterns even when describing different things.
+
+### Pattern 2: Claim-vs-Evidence Gap Analysis
+
+Agents read each claim and ask whether the cited evidence supports it. If a metric is reported and the measurement methodology is implicit, agents probe the methodology. If a significance claim is made, agents check whether statistical details are consistent.
+
+**Defense:** All evidence must appear to support its claim. The flaw must be in the *framework* the evidence is embedded in (wrong assumption, omitted confounder) — not in a gap between a claim and its stated evidence. The numbers must be internally consistent; the error must require computation to surface.
+
+### Pattern 3: Label Provenance Tracing
+
+For prediction or classification tasks, agents trace the path from raw data → features → labels and look for temporal contamination, label drift, or definition changes. This pattern finds leakage and endpoint changes instantly.
+
+**Defense:** Label definitions must be stable and unambiguous throughout the document. If the task involves a label, describe its definition once, clearly, and do not reference it again in a way that implies change. The flaw must be in something other than the label pipeline.
+
+### Pattern 4: Observational Study Confound Enumeration
+
+For any before/after, treatment/control, or cohort comparison, agents apply a textbook causal checklist: selection bias, survivorship, concurrent interventions, regression to the mean, informative censoring. They enumerate candidate confounders and check whether each is addressed.
+
+**Defense:** Confounders that agents would enumerate must be explicitly addressed in the document — with justifications that are mostly-correct but subtly wrong (Type D flaw), or addressed correctly (must_not_claim). The real flaw must be outside the standard confound checklist — e.g., a violated statistical assumption, a quantitative error, or an omitted step the standard checklist doesn't ask about.
+
+---
+
+## Trigger Phrases to Eliminate
+
+The following phrases and structural patterns caused immediate flaw detection in v1–v2 raw outputs. Do not use them in v5 prompts.
+
+**Numerical patterns that invite direct comparison:**
+- Side-by-side statistics for compared groups: "Group A: 23%; Group B: 7%"
+- Named temporal partitions: "Q1–Q2 vs. Q3–Q4", "pre-launch vs. post-launch", "before vs. after"
+- Explicit percentage-point lifts: "+12.3pp improvement"
+
+**Population selection signals:**
+- "opt-in", "self-selected", "voluntary enrollment"
+- "normal intake", "standard referral pathway", "usual care"
+- Any phrase that signals the treatment group chose their own treatment
+
+**Threshold/calibration signals:**
+- "threshold was calibrated on [the evaluation period]"
+- "cutoff selected based on [the held-out set]"
+- "optimized against [the test data]"
+
+**Structural signals:**
+- Parallel paragraph structure for compared systems
+- Sentences containing both a confound and the mechanism in one clause: "because patients in the intervention arm were healthier to begin with, we..."
+- Explicit transition sentences: "To address this concern, we..." — agents read these as a roadmap to the concerns and their justifications, and evaluate each one
+
+**Replacement strategy:** Integrate comparison details into a single unified narrative about the evaluation design. Report results as properties of the evaluation, not as contrasts between systems. If a concern is addressed, the justification must be embedded in operational detail, not flagged with a transition sentence.
 
 ---
 
@@ -251,7 +316,19 @@ After generating all cases, evaluate each one against the following test:
 
 **The Justification Test:** Does the document acknowledge potential concerns and provide justifications? For each justification: is the justification clearly correct (reviewer stops investigating), clearly wrong (reviewer flags immediately), or subtly wrong (reviewer must evaluate carefully)? The answer must be "subtly wrong" for at least one justification per case.
 
+**The Run-to-Run Variation Test (proxy difficulty check):** Mentally simulate submitting this task_prompt to a single-pass evaluator twice with temperature > 0. Would both runs produce the same findings, in the same order, at the same confidence level? If YES → the case has a deterministic single correct reading. A hard case should generate **meaningfully different runs**: different issues found, different ordering, different uncertainty level, or different verdict. Verbatim-identical outputs across runs are a direct measure of a case being too easy — they indicate the document has a single obvious reading that every reviewer converges to without deliberation.
+
 Discard or redesign any case that fails two or more tests. Note which tests each case passes in the `notes` field.
+
+---
+
+## Difficulty Acceptance Criteria
+
+A v5 hard case passes the gate if a `claude-haiku-4-5` single-pass assessor scores **mean < 0.55** — meaning Haiku misses ≥ 1 must_find issue, OR asserts a must_not_claim item, OR reaches the wrong verdict.
+
+Additionally, a well-designed hard case should produce **run-to-run variation** when evaluated at nonzero temperature: different runs should differ in which issues they identify, the ordering, or the verdict. If you can predict exactly what a reviewer will find on every run, the case is too easy regardless of whether the reviewer is technically correct.
+
+Cases that score 1.0 with Haiku, or that produce verbatim-identical reviewer outputs across runs, must be redesigned.
 
 ---
 
