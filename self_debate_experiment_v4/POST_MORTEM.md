@@ -649,3 +649,81 @@ Both bugs raised exceptions before any output was written. Manual in-place fixes
 1. Enforce `for d in dims` before `if cond(d)` in all comprehensions — binding clauses always precede filter clauses
 2. Audit all `.get(key, default)` arithmetic/comparison calls in scoring paths; replace with `(d.get(key) or default)` pattern
 3. Add a Phase 6 output normalization step that replaces `None`-valued score fields with `0` before Phase 7 scripts read them
+
+---
+
+## Issue 17 — v5 Benchmark Case Generation Redesigned to Break Hard-Case Ceiling
+
+**Scope:** Future fix — applies to v5 benchmark case generation; v4 results are not affected
+**Severity:** High — addresses the root cause of the inverted difficulty–score correlation and ceiling failure documented in Issues 14 and 15
+**Status:** Resolved
+**Related:** Issue 14 (Phase 6.75 ceiling scores on all hard cases), Issue 15 (inverted difficulty–score correlation, rho=+0.691)
+
+### What Happened
+
+All v4 hard cases scored at ceiling (baseline mean = 1.0) across three independent gate runs. Issue 14 confirmed that switching the case generator from Claude-family to ChatGPT did not break the ceiling. Issue 15 identified the structural cause: hard cases relied on planted flaws detectable by internal consistency checking — factual contradictions between stated facts within a single document. Finding within-document inconsistencies is a capability LLMs exercise through pattern-matching, regardless of how those inconsistencies are distributed across paragraphs or surrounded by red herrings. The flaw type was wrong; redesigning surface structure without changing the flaw type cannot break the ceiling.
+
+Two generation prompts were redesigned to address this root cause before v5 case generation begins.
+
+### Changes Made — `benchmark_case_generation_prompt.md`
+
+The main prompt was redesigned around 8 structural principles that collectively prohibit the flaw types that produced ceiling scores in v4:
+
+- **Principle 1** prohibits parallel before/after paragraph structure. The pattern — "in the training period ... in the deployment period" — triggers a mechanical diff scan that finds the inconsistency without domain reasoning.
+- **Principle 8** requires the most salient surface feature to be a `must_not_claim` red herring. The agent must evaluate the justification and continue searching rather than surface the first anomaly it finds.
+
+The remaining 6 principles address related structural tells: contrast-signaling vocabulary, compensation language, named temporal partitions, and other trigger phrases observed causing immediate detection in v4 raw output analysis.
+
+A 4-type flaw taxonomy was added:
+
+| Type | Description |
+|------|-------------|
+| A | Assumption violations — conclusions that follow from stated facts but rest on an unstated assumption that does not hold |
+| B | Quantitative errors — computations that appear reasonable but produce wrong results; verification requires arithmetic |
+| C | Critical omissions — absence of a mandatory disclosure; detection requires knowing what should be present |
+| D | Subtly wrong justifications — correct intent, but the stated reasoning is invalid in a non-obvious way |
+
+All four types require the evaluating model to bring external knowledge, perform computation, or reason about absence — none detectable by comparing statements within the document.
+
+Empirically-grounded detection patterns from v4 raw output analysis were added with structural defenses: Diff-the-Paragraphs, Claim-vs-Evidence Gap Analysis, Label Provenance Tracing, Observational Study Confound Enumeration. A trigger phrase prohibition list was added enumerating specific vocabulary observed immediately preceding correct flaw identification in v4 outputs.
+
+New schema fields: `planted_issues[].flaw_type`, `planted_issues[].requires_external_knowledge`, `difficulty_justification`.
+
+A 5th self-evaluation gate — the **Run-to-Run Variation Test** — was added: verbatim-identical outputs across independent runs are a falsifiable signal the case is too easy.
+
+Hard case acceptance criteria formalized: `claude-haiku-4-5` single-pass mean < 0.55 AND demonstrated run-to-run variation. Phase 5.5 difficulty gate formalized as a mandatory operator step with a documented pass/fail decision point.
+
+### Changes Made — `REAL_PAPER_CASE_GENERATION_PROMPT.md` (new)
+
+A secondary generation strategy grounds cases in documented real-world methodological failures from published ML papers, then transposes the underlying flaw mechanism to a structurally analogous domain to prevent source recognition.
+
+Source paper library (12 papers):
+
+| Paper | Core flaw mechanism |
+|-------|---------------------|
+| Dacrema et al. 2019 | Untuned baselines inflate apparent lift |
+| Obermeyer et al. 2019 | Cost-as-proxy assumption violation in label construction |
+| DeGrave et al. 2021 | Shortcut learning; no out-of-site validation |
+| Lazer et al. 2014 | Stationarity assumption violated by search algorithm changes |
+| Zech et al. 2018 | Hospital-system confounding invisible under internal splits |
+| Recht et al. 2019 | Benchmark overfitting via iterative test-set reuse |
+| Hooker et al. 2019 (ROAR) | Retraining changes the model being evaluated |
+| SMOTE-before-CV pitfall | Correct intent, wrong execution order |
+| Caruana et al. 2015 | Treatment selection bias masking true population risk |
+| Time series sequence leakage | Sequence generation before split leaks future information |
+| Offline-online recommendation gap | Offline metrics do not predict online behavior |
+| RLHF reward overoptimization | Goodhart's Law: reward model becomes the optimization target |
+
+Transformation instructions require extracting the flaw at the abstract mechanism level before transposing to a new domain. A 6th self-evaluation test — the **Source Recognition Test** — was added: a reviewer who has read the source paper must not identify it from the task prompt. A `source_paper` field tracks provenance for operators only.
+
+### Expected Outcome
+
+Hard cases should score mean < 0.55 on `claude-haiku-4-5` single-pass assessment and produce run-to-run variation. Both must be confirmed empirically via Phase 5.5 before any batch proceeds to Phase 6.
+
+### What to Fix in v5
+
+1. Use revised `benchmark_case_generation_prompt.md` as the primary generation prompt. Enforce all 8 design principles at generation time, not at gate time.
+2. Use `REAL_PAPER_CASE_GENERATION_PROMPT.md` as a secondary strategy, targeting at least 4 of 10 hard cases per batch from real-paper transpositions.
+3. Enforce Phase 5.5 as a mandatory gate: no hard case with `claude-haiku-4-5` single-pass mean ≥ 0.55 or with identical outputs across two independent runs proceeds to Phase 6.
+4. Add the Spearman anti-correlation check to Phase 5.5 (per Issue 15): rho between difficulty labels and baseline scores must be negative before the hard-case batch is accepted.
+5. Cap `"mixed"` correct-position cases at ≤ 30% of the hard stratum (per Issue 14) to ensure DRQ is informative.
