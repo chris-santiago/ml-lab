@@ -1,0 +1,658 @@
+[
+  {
+    "case_id": "eval_scenario_007",
+    "category": "broken_baseline",
+    "difficulty": "hard",
+    "task_prompt": "A health-system analytics team is preparing to replace its ICU deterioration model with a newer temporal transformer for early sepsis escalation. The incumbent baseline is an LSTM originally developed on admissions from two hospitals, and the proposed system is trained from the same EHR warehouse but under a refreshed cohort-building pipeline. In the comparison memo, the new model is reported as outperforming the baseline on AUROC and early-warning recall, and the authors describe the refresh as part of the platform modernization effort rather than as a separate study variable.\n\nThe updated pipeline merges ICU transfers that occur within four hours into a single care episode, backfills serum creatinine timestamps from charted time to specimen collection time when the lab interface provides both, and labels a positive case as septic shock onset within 12 hours. The earlier baseline study used separate admissions, relied on charted times, and predicted a broader severe-sepsis endpoint within 24 hours. For the new benchmark, the team trained and evaluated all episodes using a random encounter-level split across the full warehouse. Because some patients have multiple ICU stays over several years, the same patient can contribute episodes to both train and test. The report also includes a small external set of about 1,100 ICU episodes from Hospital B that the authors say was powered for AUROC estimation, and they note that variables such as lactate and vasopressor exposure are included only if observed before the prediction cutoff.\n\nClinical leadership is treating the comparison as evidence that the transformer is better than the incumbent. Review the evaluation design and argue whether that conclusion is already supported, partially supported, or unsupported.",
+    "ground_truth": {
+      "correct_position": "mixed",
+      "final_verdict": "There are serious benchmark flaws, but the new model could still be better after a controlled rerun on a harmonized cohort and patient-level split.",
+      "required_empirical_test": "Rebuild a single cohort with one shared endpoint definition, one timestamping policy, and one patient-level chronological split, then rerun both models and report AUROC and early-warning recall on the same internal and external cohorts."
+    },
+    "planted_issues": [
+      {
+        "issue_id": "endpoint_definition_changed",
+        "description": "The challenger is benchmarked under a 12-hour septic-shock endpoint while the baseline originates from a 24-hour severe-sepsis target, so the prediction task changed.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "lab_timestamp_preprocessing_mismatch",
+        "description": "Backfilling creatinine to specimen time only in the refreshed pipeline changes feature timing and can alter apparent lead time relative to the baseline.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "patient_overlap_across_splits",
+        "description": "A random encounter-level split allows repeat ICU patients to appear in both train and test, inflating performance for both models and especially harming comparability to the older study design.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "cohort_construction_changed_with_model",
+        "description": "Episode merging and cohort refresh were introduced simultaneously with the model change, so the benchmark cannot isolate architecture gains from cohort-definition changes.",
+        "severity": "high"
+      }
+    ],
+    "ideal_critique": [
+      "Recognize that the target endpoint, episode construction, and timestamp policy all changed at once, so the reported gain is not a clean model comparison.",
+      "Notice that repeated ICU patients create a patient-level leakage risk when splitting at the encounter level.",
+      "Argue for a harmonized rerun rather than claiming the transformer is definitely worse."
+    ],
+    "ideal_defense": [
+      "Concede the cohort and label harmonization problems and the need for patient-level splitting.",
+      "Correctly push back on the claim that lactate or vasopressor features are automatically target leakage if they are restricted to the pre-prediction window.",
+      "Emphasize that the external cohort and clinically plausible features mean the new model remains promising pending a fair rerun."
+    ],
+    "ideal_debate_resolution": {
+      "type": "empirical_test_agreed",
+      "supports_critique_if": "After rebuilding a shared cohort with patient-level chronological splitting, the transformer's AUROC advantage drops below 0.01 and early-warning recall at matched alert rate no longer exceeds the baseline on either hospital.",
+      "supports_defense_if": "On the harmonized cohort with patient-level chronological splitting and identical endpoint definitions, the transformer still leads by at least 0.02 AUROC and at least 5 recall points at the same alert rate on both the internal and external cohorts.",
+      "ambiguous_if": "The harmonized rerun keeps a modest internal gain but not the external gain, or preserves AUROC while erasing the alert-rate-matched recall gain."
+    },
+    "scoring_targets": {
+      "must_find_issue_ids": [
+        "endpoint_definition_changed",
+        "lab_timestamp_preprocessing_mismatch",
+        "patient_overlap_across_splits",
+        "cohort_construction_changed_with_model"
+      ],
+      "must_not_claim": [
+        "Including lactate or vasopressor variables is automatically target leakage because they reflect clinician concern.",
+        "The external set is invalid solely because 1,100 ICU episodes is a small sample."
+      ],
+      "acceptable_resolutions": [
+        "empirical_test_agreed"
+      ]
+    },
+    "suspicious_but_valid_features": null,
+    "ground_truth_rationale": "This hard case requires noticing multiple interacting clinical evaluation changes, not just a generic complaint about repeated patients. The right stance is mixed: the current benchmark is unreliable, but it is still plausible that the transformer remains better once endpoint definitions, timestamps, and split policies are harmonized.",
+    "verifier_status": "verified",
+    "notes": "Hard mixed case with two or more high-severity interacting issues and medical-domain knowledge. Red herrings: adequately powered small external cohort and clinically ordered features that are valid if time-windowed correctly. Domain expertise required: clinical (ICU endpoint definitions, deterioration scoring protocols).",
+    "verifier_notes": ""
+  },
+  {
+    "case_id": "eval_scenario_008",
+    "category": "broken_baseline",
+    "difficulty": "hard",
+    "task_prompt": "A subscription business is evaluating a new targeting policy for sending retention offers at renewal risk. The incumbent baseline is a logistic response model that ranks customers by probability of accepting a discount. The proposed replacement is a causal forest trained to estimate incremental profit from contacting each customer. In the offline policy review, the team reports that the new policy would have produced higher profit than the baseline on a completed randomized discount experiment, and finance is preparing to adopt it for the next campaign cycle.\n\nThe analysis package says the older baseline had historically been judged on 14-day renewal retention, while the new policy review emphasizes 28-day net contribution margin after discounts and support costs. To evaluate the causal forest, the team computes doubly robust scores using nuisance models and a propensity model fit once on the full experiment log, including the final slice used for headline reporting. They then choose the contact cutoff that maximizes estimated incremental profit on that same final reporting slice. Treatment rates differed by region because campaign budgets were capped locally, but assignment was randomized within each region and week. The memo does not include a rerun of the logistic baseline under the 28-day margin target; instead it compares the old model's contact rule under its prior cutoff with the new policy under the profit-maximizing cutoff selected from the final slice.\n\nCommercial leadership reads the deck as proof that the causal policy is superior. Assess whether the benchmark already establishes that conclusion and what additional test would settle the dispute.",
+    "ground_truth": {
+      "correct_position": "mixed",
+      "final_verdict": "The current offline benchmark is compromised by changed objectives and holdout reuse, but the causal policy could still be superior if re-evaluated under a clean protocol.",
+      "required_empirical_test": "Using the randomized experiment log, refit nuisance models and policy cutoffs without the final evaluation slice, evaluate both policies on the same frozen 28-day profit metric within the randomized holdout, and report profit lift with block-aware uncertainty by region and week."
+    },
+    "planted_issues": [
+      {
+        "issue_id": "objective_changed_between_policies",
+        "description": "The baseline policy was historically tuned for 14-day retention while the challenger is benchmarked on 28-day net contribution margin, so the optimization target changed with the model.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "dr_score_fit_on_full_experiment_log",
+        "description": "Doubly robust nuisance models and propensities were fit using the full experiment log including the final reporting slice, leaking information into the offline evaluation.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "policy_cutoff_tuned_on_reporting_slice",
+        "description": "The contact threshold was selected to maximize profit on the same slice used for headline evaluation, contaminating the benchmark.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "asymmetric_baseline_reoptimization",
+        "description": "The baseline policy was not re-optimized for the new 28-day margin objective before comparison, so the evaluation protocol favors the challenger.",
+        "severity": "medium"
+      }
+    ],
+    "ideal_critique": [
+      "Identify that the benchmark changes both the business objective and the evaluation protocol at the same time.",
+      "Recognize that offline policy evaluation requires strict holdout discipline for nuisance fitting and cutoff selection.",
+      "Ask for a clean randomized-holdout policy comparison on one predeclared profit metric before accepting the conclusion."
+    ],
+    "ideal_defense": [
+      "Concede the holdout reuse and objective-mismatch issues.",
+      "Push back on claims that region-specific treatment rates automatically invalidate doubly robust evaluation when randomization occurred within region and week.",
+      "Argue that the causal policy remains plausible and should be retested under a common profit objective rather than dismissed outright."
+    ],
+    "ideal_debate_resolution": {
+      "type": "empirical_test_agreed",
+      "supports_critique_if": "On a frozen 28-day profit metric with nuisance fitting and cutoff selection excluding the final evaluation slice, the causal policy's estimated profit lift over the re-optimized baseline falls below zero or its 95% interval includes zero.",
+      "supports_defense_if": "Under a clean holdout protocol on the same 28-day profit metric, the causal policy beats the re-optimized baseline by at least 3% incremental profit and the block-aware 95% interval excludes zero.",
+      "ambiguous_if": "The clean rerun shows a positive but under-3% profit lift or heterogeneous gains that are positive in some regions and negative in others."
+    },
+    "scoring_targets": {
+      "must_find_issue_ids": [
+        "objective_changed_between_policies",
+        "dr_score_fit_on_full_experiment_log",
+        "policy_cutoff_tuned_on_reporting_slice",
+        "asymmetric_baseline_reoptimization"
+      ],
+      "must_not_claim": [
+        "Doubly robust evaluation is invalid whenever treatment probabilities differ across regions.",
+        "Any use of net contribution margin instead of retention is automatically the wrong business metric."
+      ],
+      "acceptable_resolutions": [
+        "empirical_test_agreed"
+      ]
+    },
+    "suspicious_but_valid_features": null,
+    "ground_truth_rationale": "This hard case turns on experimentation-specific evaluation hygiene: the objective changed, the reporting slice was reused for fitting and cutoff choice, and the baseline was not re-optimized under the new metric. Because the data come from a randomized experiment, a clean re-analysis could still validate the causal policy, so the calibrated answer is mixed rather than outright rejection.",
+    "verifier_status": "verified",
+    "notes": "Hard mixed case requiring causal-inference and experimentation knowledge. Red herring: treatment rates differ by region, but randomization within region/week can still support valid offline evaluation if handled correctly.",
+    "verifier_notes": ""
+  },
+  {
+    "case_id": "eval_scenario_009",
+    "category": "broken_baseline",
+    "difficulty": "hard",
+    "task_prompt": "A card-network risk team is assessing whether to replace its production fraud detector with a new graph-based model. The production baseline is a gradient boosted tree scored on an authorization stream, and the challenger adds graph embeddings plus a new merchant-normalization pipeline that merges aliases thought to refer to the same merchant. In the migration deck, the new system is shown with better precision at a fixed alert volume and a modest gain in PR-AUC on the most recent quarter. The team describes the pipeline changes as part of a data quality upgrade completed during the same release cycle.\n\nThe details reveal that the challenger evaluation excludes transactions whose disputes were still unresolved after 60 days so that labels are cleaner at reporting time. It also evaluates on an authorizations-only feed after deduplicating PAN, merchant, amount, and timestamp combinations using the new merchant-normalization rules. The baseline number, by contrast, is copied from the production dashboard on the raw transaction feed, which includes later-resolved disputes and does not apply the new alias-merging deduplication. The alert threshold for the graph model was then tuned on the same Q4 quarter used for final reporting because investigators wanted exactly 18,000 alerts per week. The report does not rerun the production baseline on the deduplicated feed or with the same 60-day label rule.\n\nRisk leadership is leaning toward approving the migration based on the benchmark deck. Review whether the evaluation design fairly establishes that the graph model is better than the existing detector.",
+    "ground_truth": {
+      "correct_position": "critique",
+      "final_verdict": "The benchmark does not fairly compare models because feed definition, label maturity, and threshold selection all changed with the challenger.",
+      "required_empirical_test": null
+    },
+    "planted_issues": [
+      {
+        "issue_id": "unresolved_dispute_exclusion",
+        "description": "Excluding unresolved disputes for the challenger but not the baseline changes label maturity and can bias apparent fraud performance.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "transaction_feed_definition_mismatch",
+        "description": "The challenger is scored on a deduplicated authorizations-only feed while the baseline number comes from a raw dashboard feed, so the evaluation population changed.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "threshold_tuned_on_reporting_quarter",
+        "description": "The graph model's alert threshold was selected on the same Q4 quarter used for final reporting, contaminating precision-at-volume results.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "model_and_pipeline_changed_together",
+        "description": "Graph features and merchant-normalization preprocessing were introduced simultaneously without rerunning the baseline under the new feed rules, preventing attribution of gains.",
+        "severity": "high"
+      }
+    ],
+    "ideal_critique": [
+      "Notice that fraud label maturity and deduplication rules are changing at the same time as the model.",
+      "Recognize that precision at a fixed alert budget is especially vulnerable when the threshold is tuned on the reporting quarter itself.",
+      "Recommend rescoring both models on the same deduplicated feed with the same maturity window and a threshold chosen on prior data."
+    ],
+    "ideal_defense": [
+      "Concede that class imbalance is not the central flaw and that the new pipeline may still be operationally useful.",
+      "Argue only for a common-feed rerun rather than accepting the current dashboard-to-project comparison as proof."
+    ],
+    "ideal_debate_resolution": {
+      "type": "critique_wins",
+      "supports_critique_if": "After both models are rescored on the same deduplicated authorizations feed with the same 60-day maturity rule and thresholds fixed from earlier quarters, the precision-at-volume gain falls below 1 point or reverses.",
+      "supports_defense_if": "On the same deduplicated feed with the same maturity horizon and predeclared thresholds, the graph model improves precision at 18,000 alerts per week by at least 3 points and improves PR-AUC by at least 0.005.",
+      "ambiguous_if": "A fair rerun preserves only one of the two gains, such as precision-at-volume improving while PR-AUC changes by less than 0.005."
+    },
+    "scoring_targets": {
+      "must_find_issue_ids": [
+        "unresolved_dispute_exclusion",
+        "transaction_feed_definition_mismatch",
+        "threshold_tuned_on_reporting_quarter",
+        "model_and_pipeline_changed_together"
+      ],
+      "must_not_claim": [
+        "PR-AUC is unusable for fraud because the positive class is too rare.",
+        "Merchant alias merging is automatically invalid because it removes true behavioral variation."
+      ],
+      "acceptable_resolutions": [
+        "critique_wins"
+      ]
+    },
+    "suspicious_but_valid_features": null,
+    "ground_truth_rationale": "This hard case requires operational fraud knowledge about dispute maturation and transaction-feed definitions. The new system may be stronger, but the deck does not establish that because threshold choice, label maturity, and feed construction all changed with the challenger.",
+    "verifier_status": "verified",
+    "notes": "Hard critique case with multiple interacting high-severity issues. Domain knowledge needed to see why unresolved disputes and feed deduplication materially change the benchmark target. Domain expertise required: financial fraud (dispute resolution timelines, transaction feed standards).",
+    "verifier_notes": ""
+  },
+  {
+    "case_id": "eval_scenario_013",
+    "category": "metric_mismatch",
+    "difficulty": "hard",
+    "task_prompt": "An automotive company is reviewing a perception update for its advanced driver-assistance system. The vision team reports that the new pedestrian detector raises benchmark mAP@0.5 from 61 to 69 on a held-out set collected from the fleet. In the launch memo, they want to say the update will make the car \"safer at night during emergency braking scenarios involving pedestrians.\" The benchmark includes mixed daytime and nighttime frames from urban and suburban roads, with roughly 70% of frames captured during daylight. Ground-truth labels are 2D bounding boxes.\n\nThe new model runs on the same camera hardware as the previous model but adds about 80 milliseconds of average inference latency. The team argues that this is acceptable because mAP increased at all object sizes. They also report that the nighttime slice of mAP improved, though the memo still emphasizes the overall headline number. No end-to-end braking simulations or closed-track safety tests are included in the packet. The system's downstream planner triggers braking only when detections are sufficiently early and stable across consecutive frames. The evaluation does not report first-detection distance, frame-to-frame stability, or recall for near-field pedestrians in low-light conditions.\n\nYour task is to judge whether the benchmark evidence supports the safety claim in the memo. Focus on whether the chosen metric matches the specific statement being made about nighttime emergency braking. You may discuss what parts of the evidence are still useful, what stronger evidence would be needed, and whether any defense of the existing evaluation is reasonable.",
+    "ground_truth": {
+      "correct_position": "mixed",
+      "final_verdict": "The mAP metric alone is insufficient for the safety claim, but whether the detection improvement translates to better braking outcomes is an empirical question requiring planner-in-the-loop testing.",
+      "required_empirical_test": "Conduct planner-in-the-loop tests measuring nighttime braking success rate and stopping margin for the new detector versus baseline."
+    },
+    "planted_issues": [
+      {
+        "issue_id": "aggregate_map_not_night_safety_metric",
+        "description": "Overall mAP on mostly daytime frames does not directly evaluate the memo's nighttime safety claim.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "frame_map_ignores_detection_timing",
+        "description": "Frame-level box overlap does not capture whether pedestrians are detected early and stably enough for emergency braking.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "latency_not_reflected_in_headline_metric",
+        "description": "Added inference latency can offset a detection-quality gain for safety-critical braking, but mAP does not account for that interaction.",
+        "severity": "high"
+      }
+    ],
+    "ideal_critique": [
+      "Separate the narrow object-detection result from the stronger system-level safety claim.",
+      "Emphasize nighttime slice performance, detection timing, stability across frames, and end-to-end braking consequences.",
+      "Note that latency and detector quality interact in safety-critical settings and cannot be ignored just because mAP rose."
+    ],
+    "ideal_defense": [
+      "Concede that mAP is a useful component metric for detector quality, but not sufficient for the memo's safety statement.",
+      "Argue that the improvement is encouraging if it also appears on the nighttime slice.",
+      "Avoid claiming that uniform mAP gains automatically translate into fewer collisions."
+    ],
+    "ideal_debate_resolution": {
+      "type": "empirical_test_agreed",
+      "supports_critique_if": "When evaluated with planner-in-the-loop testing, the new detector does not improve or worsens nighttime braking outcomes because detection timing and latency dominate.",
+      "supports_defense_if": "Planner-in-the-loop tests show statistically significant improvement in nighttime braking success and stopping margin despite the added latency.",
+      "ambiguous_if": "The model improves some nighttime scenarios but trades them off against others, leaving overall safety impact unclear without policy choices."
+    },
+    "scoring_targets": {
+      "must_find_issue_ids": [
+        "aggregate_map_not_night_safety_metric",
+        "frame_map_ignores_detection_timing",
+        "latency_not_reflected_in_headline_metric"
+      ],
+      "must_not_claim": [
+        "using_same_camera_hardware_is_invalid",
+        "all_box_metrics_are_useless"
+      ],
+      "acceptable_resolutions": [
+        "empirical_test_agreed",
+        "critique_wins"
+      ]
+    },
+    "suspicious_but_valid_features": null,
+    "ground_truth_rationale": "The memo makes an end-to-end safety claim about a specific nighttime failure mode, while the headline metric is an aggregate frame-level detection score. In this setting, slice-specific recall, detection timing, stability, and latency-sensitive braking outcomes are the relevant evidence.",
+    "verifier_status": "verified",
+    "notes": "Medium case with three must-find issues. Nighttime slice reporting is directionally useful but not enough. Upgraded to mixed: defense argument that mAP improvement may translate to safety gains is substantive and requires empirical resolution. Relabeled from medium to hard: single-pass assessor expected to fail \u22652 rubric dimensions. Domain expertise required: automotive safety (ADAS perception validation, planner-in-the-loop testing standards).",
+    "verifier_notes": ""
+  },
+  {
+    "case_id": "eval_scenario_016",
+    "category": "metric_mismatch",
+    "difficulty": "hard",
+    "task_prompt": "A streaming platform is deciding whether to advance a recommendation model from offline evaluation to an online experiment. The ranking team reports a 7% gain in NDCG@20 on replay logs and says the model will \"likely improve next-day watch time.\" Their packet includes inverse-propensity-weighted replay estimates with bootstrap confidence intervals, plus a chart showing that over the last four launches, offline NDCG changes were positively correlated with online watch-time lift. One past launch involving a cold-start catalog expansion did not follow the same pattern.\n\nThe candidate model changes how the top of the slate is ordered but does not alter the candidate-generation pool. The evaluation data come from recent traffic, and the team stratified the offline analysis by region and device type. They also report that diversity scores are roughly unchanged. Critics inside the company point out that watch time is affected by slate interactions, novelty, creator supply, and feedback loops that replay logs may not fully capture. Supporters respond that the company has historically used NDCG as a launch gate and that the observed offline-to-online relationship is stronger here than in many previous launches. No A/B test has been run yet, but the team is asking whether the current evidence is enough to state that the model is likely beneficial rather than merely worth testing.\n\nYour task is to assess the strength of the argument. Focus on whether the metric evidence is sufficient for the specific claim being made about watch time, and whether a nuanced position is more appropriate than a simple yes-or-no answer.",
+    "ground_truth": {
+      "correct_position": "mixed",
+      "final_verdict": "The offline NDCG evidence is genuinely suggestive of online benefit but not sufficient to conclude that next-day watch time will improve without an A/B test.",
+      "required_empirical_test": "Run a randomized online experiment measuring next-day watch time, retention, and creator-side effects at the intended traffic mix, while checking whether the offline ranking gain predicts the online lift."
+    },
+    "planted_issues": [
+      {
+        "issue_id": "ndcg_only_indirect_proxy_for_watch_time",
+        "description": "NDCG@20 is a proxy for ranking relevance, not a direct measure of the claimed watch-time outcome.",
+        "severity": "medium"
+      },
+      {
+        "issue_id": "historical_offline_online_link_not_decisive",
+        "description": "Past correlation between offline NDCG and online watch time is supportive evidence but does not guarantee the relationship holds for this launch.",
+        "severity": "medium"
+      },
+      {
+        "issue_id": "replay_logs_miss_slate_feedback_effects",
+        "description": "Replay evaluation cannot fully capture slate interactions, novelty effects, and feedback loops that influence online engagement.",
+        "severity": "medium"
+      }
+    ],
+    "ideal_critique": [
+      "Note that NDCG is still a surrogate and that watch time depends on behavior the replay metric only approximates.",
+      "Mention the broken-correlation cold-start example and the possibility of creator-supply or novelty effects.",
+      "Push for an A/B test before making the stronger causal claim."
+    ],
+    "ideal_defense": [
+      "Acknowledge the limits of offline evaluation but point out that the company has relevant prior evidence linking NDCG to watch-time lift for similar launches.",
+      "Treat inverse-propensity replay and stratified analysis as useful evidence rather than red flags.",
+      "Defend a probabilistic statement such as \"likely worth testing\" or \"suggestive of improvement, pending experiment,\" not a definitive outcome promise."
+    ],
+    "ideal_debate_resolution": {
+      "type": "empirical_test_agreed",
+      "supports_critique_if": "A randomized experiment shows no significant watch-time lift or reveals negative retention or creator-supply effects despite the offline NDCG gain.",
+      "supports_defense_if": "A randomized experiment shows a statistically significant increase in next-day watch time with no material harm to retention or creator-side metrics, consistent with the offline prediction.",
+      "ambiguous_if": "Watch time rises modestly but secondary metrics such as retention, diversity exposure, or creator concentration move in mixed directions."
+    },
+    "scoring_targets": {
+      "must_find_issue_ids": [
+        "ndcg_only_indirect_proxy_for_watch_time",
+        "historical_offline_online_link_not_decisive",
+        "replay_logs_miss_slate_feedback_effects"
+      ],
+      "must_not_claim": [
+        "inverse_propensity_weighting_is_inherently_invalid",
+        "ndcg_has_no_value_for_recommenders"
+      ],
+      "acceptable_resolutions": [
+        "empirical_test_agreed"
+      ]
+    },
+    "suspicious_but_valid_features": null,
+    "ground_truth_rationale": "This is not a pure critique case because the team does have meaningful prior evidence that offline NDCG often relates to online watch time for similar launches. Still, the claim remains about an online behavioral outcome, so the calibrated answer is that the evidence is suggestive rather than dispositive and should be resolved experimentally.",
+    "verifier_status": "verified",
+    "notes": "Medium mixed offline-to-online recommendation case. IPW replay, stratification, and confidence intervals are valid details that should not be mistaken for flaws. Relabeled from medium to hard: single-pass assessor expected to fail \u22652 rubric dimensions.",
+    "verifier_notes": ""
+  },
+  {
+    "case_id": "eval_scenario_017",
+    "category": "metric_mismatch",
+    "difficulty": "hard",
+    "task_prompt": "A hospital system is evaluating an LLM that drafts radiology reports from chest X-rays. The vendor's deck emphasizes two numbers: a large increase in label-extraction F1 on CheXpert-style findings and a reduction in edit distance to attending-written reports. Based on those results, the vendor says the system is \"clinically acceptable enough to reduce radiologist editing time.\" A small internal pilot at one site found that cases with better finding-label agreement tended to require less editing, but the pilot involved only one modality and did not include a controlled comparison against the current dictation workflow.\n\nThe benchmark labels cover common findings such as pleural effusion, cardiomegaly, and consolidation, but not every nuance that matters in a report, such as uncertainty phrasing, interval change, recommendation wording, comparison to prior studies, or whether a critical but rare incidental finding was omitted. The edit-distance metric is computed against one reference report per study even though radiologists at the institution often use different but equally acceptable wording. The evaluation packet includes confidence intervals and notes that human inter-rater agreement on some finding labels is below perfection, which the vendor cites as evidence that the model is nearing expert performance. No blinded study measures actual editing time, clinically important omission rate, or downstream effect on report acceptance.\n\nYour task is to assess whether the current evidence supports the stated deployment claim. Focus on whether the reported metrics are adequate for the specific claim about clinical acceptability and reduced editing burden, and whether a balanced debate could reasonably end with a request for additional empirical testing rather than a simple accept-or-reject decision.",
+    "ground_truth": {
+      "correct_position": "mixed",
+      "final_verdict": "The reported metrics are encouraging but not sufficient to conclude clinical acceptability or reduced editing burden without a targeted radiologist workflow study.",
+      "required_empirical_test": "Run a blinded reader study measuring radiologist editing time, clinically important omission or wording errors, and final report acceptance compared with the current workflow."
+    },
+    "planted_issues": [
+      {
+        "issue_id": "finding_label_f1_not_full_report_quality",
+        "description": "Finding-label F1 covers only part of report quality and misses clinically important aspects such as uncertainty, comparison language, recommendations, and rare omissions.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "edit_distance_not_same_as_editing_burden",
+        "description": "String edit distance to a single reference report is not the same as the actual time or cognitive effort a radiologist spends editing.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "no_controlled_time_to_edit_study",
+        "description": "The deployment claim is about reduced editing time and clinical acceptability, but no controlled radiologist workflow study directly measures those outcomes.",
+        "severity": "high"
+      }
+    ],
+    "ideal_critique": [
+      "Explain that report acceptability depends on more than common-label extraction, especially in medical reporting where wording and omissions can matter clinically.",
+      "Point out that single-reference edit distance penalizes acceptable paraphrases and may not track real editing effort.",
+      "Request a reader or workflow study focused on time-to-edit and clinically important error severity."
+    ],
+    "ideal_defense": [
+      "Acknowledge that the metrics are imperfect but argue that they are nontrivial evidence of likely usefulness, especially if the pilot found some relationship to editing effort.",
+      "Treat sub-perfect human label agreement as context for ceiling effects, not as proof that the deployment claim is already established.",
+      "Defend escalation to a prospective workflow study, not unconditional deployment."
+    ],
+    "ideal_debate_resolution": {
+      "type": "empirical_test_agreed",
+      "supports_critique_if": "In a blinded workflow study, radiologists save no time or the model introduces clinically important omissions or wording errors at unacceptable rates.",
+      "supports_defense_if": "A controlled workflow study shows statistically significant editing-time reduction with non-inferior clinically important error rates and high final report acceptance.",
+      "ambiguous_if": "Editing time improves for routine cases but not for complex studies, or acceptance depends strongly on radiologist subgroup or case mix."
+    },
+    "scoring_targets": {
+      "must_find_issue_ids": [
+        "finding_label_f1_not_full_report_quality",
+        "edit_distance_not_same_as_editing_burden",
+        "no_controlled_time_to_edit_study"
+      ],
+      "must_not_claim": [
+        "confidence_intervals_are_suspicious",
+        "inter_rater_agreement_below_one_means_benchmark_is_invalid"
+      ],
+      "acceptable_resolutions": [
+        "empirical_test_agreed"
+      ]
+    },
+    "suspicious_but_valid_features": null,
+    "ground_truth_rationale": "This case is genuinely mixed because the current metrics and pilot are meaningful signals, especially in a domain where ceiling effects and multiple acceptable phrasings matter. But the stated claim is specifically about clinical acceptability and editing burden, so only a prospective radiologist workflow study can settle it.",
+    "verifier_status": "verified",
+    "notes": "Hard mixed case requiring domain knowledge about radiology reporting and why label agreement or edit distance do not fully capture report utility. Domain expertise required: radiology (report quality standards, radiologist workflow norms).",
+    "verifier_notes": ""
+  },
+  {
+    "case_id": "eval_scenario_025",
+    "category": "hidden_confounding",
+    "difficulty": "hard",
+    "task_prompt": "A regional electric utility is deciding whether to replace its day-ahead load forecasting vendor. The analytics team reports that the new model produced a mean absolute percentage error of 6.9% during its first three months in production, compared with 7.8% for the prior vendor over the preceding three months. The recommendation memo says the reduction is large enough to improve generation scheduling and imbalance costs, so the utility should sign a multiyear contract.\n\nThe old vendor's forecasts were used from January through March, while the new vendor's forecasts were used from April through June. The memo notes that April through June had milder temperatures and no major storm-related outages, whereas the earlier quarter included several cold snaps and two grid events that required emergency operating actions. The new vendor ingests standard weather forecasts and feeder-level history, and it can optionally refresh intraday features before finalizing the day-ahead file. The memo does not show both vendors generating forecasts for the same dates, does not report whether the forecast submission cutoff was normalized between vendors, and does not compare performance by weather regime or outage days. Instead, it presents the quarter-level average error numbers side by side and states that the new model performed better in live conditions.\n\nFinance and operations leaders are aligned that even a modest forecasting gain would matter, but they want to know how much confidence to place in the apparent improvement.",
+    "ground_truth": {
+      "correct_position": "mixed",
+      "final_verdict": "The new vendor may be better, but the current comparison is too confounded to show how much of the error reduction came from the model rather than the operating period.",
+      "required_empirical_test": "Run a matched rolling-origin backtest or parallel forecast bakeoff on the same dates, same submission cutoff, and stratified weather/outage conditions."
+    },
+    "planted_issues": [
+      {
+        "issue_id": "seasonally_mismatched_weather_regime",
+        "description": "Comparing winter months with spring months mixes model quality with large seasonal differences in load volatility and forecast difficulty.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "outage_regime_difference",
+        "description": "The earlier quarter contained storm and grid events that can raise forecast error independently of model quality.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "forecast_cutoff_not_normalized",
+        "description": "If the vendors submitted forecasts at different effective cutoffs or with different refresh rules, the accuracy comparison is not apples to apples.",
+        "severity": "high"
+      }
+    ],
+    "ideal_critique": [
+      "Notice that the key omission is any same-date comparison between the two vendors.",
+      "Use domain knowledge to explain why winter load, storm events, and forecast cutoff rules materially affect error rates.",
+      "Argue that the observed improvement cannot be cleanly assigned to the new model without a normalized bakeoff."
+    ],
+    "ideal_defense": [
+      "Concede that the quarter-to-quarter comparison is not decisive.",
+      "Argue that the result is still compatible with a real improvement and justifies a matched backtest before contract commitment.",
+      "Do not claim that using weather forecasts as inputs is leakage or that all outage days should simply be discarded."
+    ],
+    "ideal_debate_resolution": {
+      "type": "empirical_test_agreed",
+      "supports_critique_if": "In a same-date backtest with matched submission cutoff and weather regimes, the error gap shrinks below 0.2 percentage points or reverses.",
+      "supports_defense_if": "Across at least one year of common-date forecasts with matched cutoff rules, the new vendor beats the old by at least 0.7 percentage points overall and within major weather regimes.",
+      "ambiguous_if": "The new vendor wins overall but only on easier weather days or only when allowed a later effective information cutoff."
+    },
+    "scoring_targets": {
+      "must_find_issue_ids": [
+        "seasonally_mismatched_weather_regime",
+        "outage_regime_difference",
+        "forecast_cutoff_not_normalized"
+      ],
+      "must_not_claim": [
+        "using weather forecasts as inputs is automatically leakage",
+        "excluding outage days is always the correct fix regardless of procurement use case"
+      ],
+      "acceptable_resolutions": [
+        "empirical_test_agreed"
+      ]
+    },
+    "suspicious_but_valid_features": null,
+    "ground_truth_rationale": "This is a strong hidden-confounding case because the memo compares different operating regimes and leaves out whether the vendors were evaluated on the same information set. The right answer is calibrated: the new vendor may truly be better, but the evidence is not yet isolating model quality.",
+    "verifier_status": "verified",
+    "notes": "Hard mixed temporal case requiring forecasting-domain knowledge about weather regimes and submission cutoffs. Domain expertise required: energy sector (seasonal weather regime effects on load forecasting).",
+    "verifier_notes": ""
+  },
+  {
+    "case_id": "eval_scenario_026",
+    "category": "hidden_confounding",
+    "difficulty": "hard",
+    "task_prompt": "A hiring marketplace is evaluating a machine-learning feature that recommends a shortlist of candidates to employers. Employers can open a new \"smart shortlist\" tab inside the recruiting dashboard, review the ranked suggestions, and invite candidates directly from that view. In the quarterly business review, the product team reports that employers who used the tab had an 18% higher interview-to-application rate than employers who did not use it, and it argues that the model is improving matching quality.\n\nThe feature was introduced in January, and adoption rose steadily through March. Those months also coincide with the platform's graduate recruiting season, when large employers post more structured early-career roles and interview volume typically changes. The review notes that employers with an applicant-tracking-system integration adopted the tab earlier because activation was simpler for them, and that regional sales teams rolled out enablement training on different weeks. The analysis compares employers that used the tab at least once during the quarter with employers that never used it, controlling for company size and industry in a regression. It does not mention any randomized exposure, encouragement design, or comparison of outcomes before and after adoption relative to a matched non-adopter set. The model retrains weekly on recent application and interview signals.\n\nLeadership agrees that the metric is commercially relevant, but wants to know whether the observed difference is enough to support broad rollout and pricing changes.",
+    "ground_truth": {
+      "correct_position": "mixed",
+      "final_verdict": "The feature could be helpful, but the current evidence is too confounded by adoption patterns and recruiting-season timing to justify a strong causal claim.",
+      "required_empirical_test": "Run a randomized encouragement or staged rollout, or a matched difference-in-differences analysis comparing adopters and non-adopters across the same recruiting periods."
+    },
+    "planted_issues": [
+      {
+        "issue_id": "employer_adoption_self_selection",
+        "description": "Employers that chose to use the smart-shortlist tab may already differ in hiring sophistication or workflow intensity from non-users.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "graduate_recruiting_season_overlap",
+        "description": "The launch coincides with a seasonal period when interview behavior and role mix change, so quarter-level comparisons can reflect timing rather than model quality.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "integration_based_selection",
+        "description": "Earlier adoption was easier for employers with ATS integrations, making the user group operationally different from non-users.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "regional_enablement_timing",
+        "description": "Regional sales training was rolled out at different times, so adoption and performance may co-move with go-to-market support rather than the model alone.",
+        "severity": "medium"
+      }
+    ],
+    "ideal_critique": [
+      "Recognize that using the tab is itself a treatment-choice variable, not a randomized assignment.",
+      "Notice the seasonal labor-market context and the operational differences created by ATS integrations and sales enablement timing.",
+      "Argue for a design that compares comparable employers over the same recruiting period."
+    ],
+    "ideal_defense": [
+      "Concede that the quarter-level observational comparison is not enough for a pricing or broad-causal claim.",
+      "Argue that the feature remains plausible and commercially promising if a cleaner staged rollout confirms the effect.",
+      "Do not attack weekly retraining as the central flaw, because it is not what drives the confounding."
+    ],
+    "ideal_debate_resolution": {
+      "type": "empirical_test_agreed",
+      "supports_critique_if": "A matched diff-in-diff or randomized encouragement design shows little or no interview-rate improvement once recruiting season and integration status are balanced.",
+      "supports_defense_if": "Across matched employers in the same recruiting windows, encouraged or randomly enabled accounts show a persistent interview-rate lift of at least 10% after adoption.",
+      "ambiguous_if": "The feature helps some integrated enterprise employers, but the average quarter-level gap largely reflects adoption and seasonal mix."
+    },
+    "scoring_targets": {
+      "must_find_issue_ids": [
+        "employer_adoption_self_selection",
+        "graduate_recruiting_season_overlap",
+        "integration_based_selection",
+        "regional_enablement_timing"
+      ],
+      "must_not_claim": [
+        "weekly retraining is itself evidence of leakage",
+        "interview-to-application rate is automatically an invalid business metric"
+      ],
+      "acceptable_resolutions": [
+        "empirical_test_agreed"
+      ]
+    },
+    "suspicious_but_valid_features": null,
+    "ground_truth_rationale": "This case is mixed because the metric could genuinely improve, but the current evidence is driven by who adopted, when they adopted, and what type of employers could activate the feature easily. A stronger design could validate the claim, but the present memo does not.",
+    "verifier_status": "verified",
+    "notes": "Hard mixed causal-inference case with temporal and self-selection confounds.",
+    "verifier_notes": ""
+  },
+  {
+    "case_id": "eval_scenario_027",
+    "category": "hidden_confounding",
+    "difficulty": "hard",
+    "task_prompt": "A bank's internal audit group is evaluating an anomaly-detection model that scores journal entries for possible misstatement or fraud. According to a presentation for the audit committee, the model's precision improved from 11% in the second quarter to 19% in the fourth quarter after it was embedded into the auditors' review queue. The presentation suggests that the model is now mature enough to become the primary screening mechanism for manual review.\n\nIn the second quarter, auditors reviewed journal entries using a legacy rules list and their normal sampling plan. In the fourth quarter, after the model was introduced, the bank was also in year-end close, when journal volume rises and many legitimate manual adjustments occur. During that same period, the bank implemented a new dual-approval policy for large nonstandard entries. The presentation states that model precision was measured using the share of reviewed items that were ultimately escalated by auditors for deeper investigation or adjustment. It does not show a parallel holdout where the old screening method and the new model were applied to the same quarter, and it does not discuss whether embedding model scores into the queue changed which items auditors chose to inspect closely. A note in the appendix mentions that staffing was temporarily increased for the year-end close.\n\nCommittee members want to know whether the apparent precision gain should be treated as evidence that the model itself is materially better than the prior screening process.",
+    "ground_truth": {
+      "correct_position": "critique",
+      "final_verdict": "The claimed precision gain is not reliable evidence of model superiority because year-end audit conditions, policy changes, and model-influenced labeling all changed at once.",
+      "required_empirical_test": "Apply the legacy screen and the model to the same journal-entry population in parallel, with stable review rules and outcome definitions across the same closing period."
+    },
+    "planted_issues": [
+      {
+        "issue_id": "year_end_close_seasonality",
+        "description": "Fourth-quarter journal-entry patterns differ sharply from second-quarter activity, making precision non-comparable across periods.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "dual_approval_policy_change",
+        "description": "The new approval policy for large nonstandard entries changed the underlying process during the same period as model rollout.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "model_influenced_review_labels",
+        "description": "Precision is based on auditor escalations after the model entered the review queue, so the model may be affecting which items receive attention and thus which labels are observed.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "no_same_period_holdout",
+        "description": "Without a same-quarter holdout or parallel evaluation, quarter-over-quarter precision changes cannot be attributed to the model.",
+        "severity": "high"
+      }
+    ],
+    "ideal_critique": [
+      "Identify that year-end close is a fundamentally different audit environment from the second quarter.",
+      "Notice the concurrent approval-policy change and temporary staffing increase as competing explanations for precision changes.",
+      "Explain that once the model shapes the queue, auditor escalations are no longer an independent label source.",
+      "Conclude that a same-period parallel evaluation is necessary before using the model as primary screening."
+    ],
+    "ideal_defense": [
+      "Concede that the quarter-over-quarter precision comparison is not sufficient for a strong deployment claim.",
+      "Argue only that the model may deserve further controlled validation because higher precision could still reflect some real value.",
+      "Do not claim that quarter-end spikes or round-number journals automatically prove fraud risk."
+    ],
+    "ideal_debate_resolution": {
+      "type": "critique_wins",
+      "supports_critique_if": "In a same-quarter parallel evaluation with stable review rules, the model's precision advantage disappears or the same gain is reproduced by process changes alone.",
+      "supports_defense_if": "On the same closing-period journal population with unchanged review protocols, the model materially outperforms the legacy screen on independently adjudicated findings.",
+      "ambiguous_if": "The model improves queue efficiency somewhat, but most of the quarter-over-quarter precision increase is explained by close-period conditions and review-policy changes."
+    },
+    "scoring_targets": {
+      "must_find_issue_ids": [
+        "year_end_close_seasonality",
+        "dual_approval_policy_change",
+        "model_influenced_review_labels",
+        "no_same_period_holdout"
+      ],
+      "must_not_claim": [
+        "quarter-end volume spikes are themselves evidence of fraud",
+        "round-number journal entries are automatically invalid labels"
+      ],
+      "acceptable_resolutions": [
+        "critique_wins",
+        "empirical_test_agreed"
+      ]
+    },
+    "suspicious_but_valid_features": null,
+    "ground_truth_rationale": "This is a hard critique case because several high-severity issues interact: the time period changes, the business process changes, and the label-generation process changes after deployment. Audit-domain knowledge matters because year-end close and approval-control changes are normal but highly consequential comparators.",
+    "verifier_status": "verified",
+    "notes": "Hard finance/audit case with multiple interacting high-severity issues and domain-plausible must_not_claims. Domain expertise required: financial audit (year-end close seasonality, dual-approval policy norms).",
+    "verifier_notes": ""
+  },
+  {
+    "case_id": "eval_scenario_032",
+    "category": "scope_intent_misunderstanding",
+    "difficulty": "hard",
+    "task_prompt": "A payments company has developed a gradient-boosted fraud model for card-not-present transactions. Training data came from one issuing bank\u2019s e-commerce portfolio, and the team evaluated the model on the next six months of transactions plus a later sample from a partner bank that serves many of the same online merchants. Reported lift and calibration were similar across the two issuer datasets, and the deployment proposal explicitly says the model should rank transactions for analyst review rather than automatically decline them. The system was not evaluated on point-of-sale transactions or on merchant segments such as travel and buy-now-pay-later financing that were rare in the original data.\n\nThe business team wants marketing language saying the model can be used to prioritize review queues for national e-commerce merchants. Some analysts argue that this is adequately scoped because the claim is only about triage for card-not-present commerce, not about universal fraud prevention or autonomous decision-making. Others argue that the phrase national e-commerce merchants is still too broad because the evidence comes from issuer-side data concentrated in a subset of merchant categories, and the partner-bank check does not prove robustness across very different transaction mixes. A further complication is that fraud labels are chargebacks and confirmed fraud investigations, which are influenced by bank and merchant policies. The debate is whether the claim is already appropriately bounded for a practical triage use case, or whether it still overgeneralizes in a specific way that should be narrowed before release.",
+    "ground_truth": {
+      "correct_position": "mixed",
+      "final_verdict": "The triage claim is defensible for card-not-present merchant settings similar to the evaluated issuer portfolios, but the broader wording about national e-commerce merchants still extends beyond the evidence for underrepresented merchant categories and label regimes.",
+      "required_empirical_test": "Prospective segmented evaluation across merchant categories that were sparse or absent in the original training and issuer portfolios."
+    },
+    "planted_issues": [
+      {
+        "issue_id": "merchant_category_scope_slippage",
+        "description": "Evidence from a narrow set of e-commerce transaction mixes does not establish performance across the full range of national merchant categories.",
+        "severity": "high"
+      },
+      {
+        "issue_id": "issuer_label_policy_dependence",
+        "description": "Fraud labels depend partly on issuer and merchant investigation and chargeback practices, limiting how far the ranking claim generalizes.",
+        "severity": "medium"
+      }
+    ],
+    "ideal_critique": [
+      "Recognize that this is not the strongest kind of overreach because the claim is about triage rather than automatic declines, but it still may be too broad by merchant mix.",
+      "Point out that partner-bank validation helps, yet it does not cover categories that were scarce or absent in the evaluated portfolios.",
+      "Note that chargeback-based labels are partly policy-dependent, which matters when generalizing across institutions and merchants."
+    ],
+    "ideal_defense": [
+      "Defend the narrower point that ranking transactions for analyst review is closer to what was actually studied than claiming end-to-end fraud prevention.",
+      "Concede that marketing language should probably be narrowed to card-not-present settings resembling the validated portfolios.",
+      "Avoid overstating the partner-bank result as proof for all merchant segments."
+    ],
+    "ideal_debate_resolution": {
+      "type": "empirical_test_agreed",
+      "supports_critique_if": "Prospective merchant-segment audits show materially worse lift or calibration in travel, digital-goods, or financing categories than in the originally validated segments.",
+      "supports_defense_if": "A prespecified rollout across the claimed merchant categories shows stable ranking performance and acceptable calibration for analyst triage across segments.",
+      "ambiguous_if": "Performance remains strong in some additional merchant categories but degrades in others, making a narrower segmented claim appropriate."
+    },
+    "scoring_targets": {
+      "must_find_issue_ids": [
+        "merchant_category_scope_slippage",
+        "issuer_label_policy_dependence"
+      ],
+      "must_not_claim": [
+        "automatic_decline_decisioning_was_tested",
+        "time_split_validation_is_methodologically_invalid"
+      ],
+      "acceptable_resolutions": [
+        "empirical_test_agreed"
+      ]
+    },
+    "suspicious_but_valid_features": null,
+    "ground_truth_rationale": "This is intentionally borderline. The defense is right that the claim is narrower than a full fraud-prevention claim because it focuses on analyst prioritization. The critique is also right that national e-commerce merchants is still broader than the issuer portfolios and merchant mixes actually tested, so the best answer is a mixed one with targeted external validation.",
+    "verifier_status": "verified",
+    "notes": "Medium mixed case. The evaluated use is somewhat aligned with the claim, but merchant-category and label-policy scope remain unresolved. Relabeled from medium to hard: single-pass assessor expected to fail \u22652 rubric dimensions.",
+    "verifier_notes": ""
+  }
+]
