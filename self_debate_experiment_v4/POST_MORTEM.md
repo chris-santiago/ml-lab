@@ -286,3 +286,34 @@ The difficulty gate cannot serve as a quality signal when the evaluator is any C
 ### What to Fix
 
 For v5, the gate evaluator must be a non-Anthropic model, or the difficulty criterion must be validated against human annotators rather than a model pilot. Case generation must also be validated by the non-Claude evaluator before committing to a full benchmark run. The gate mechanism itself is sound — the failure is in using a same-family model as the evaluator.
+
+---
+
+## Issue 8 — Phase 6 Agents Attempt Direct Anthropic API Calls Despite Running Inside Claude Code Session
+
+**Scope:** Active — occurred during Phase 6 execution
+**Severity:** High — agents stall or waste resources attempting authentication that is not needed and cannot succeed from within a subagent context
+
+### What Happened
+
+During Phase 6 benchmark execution, one or more dispatched agents attempted to call the Anthropic API directly — searching for an `ANTHROPIC_API_KEY` environment variable, attempting to instantiate an API client, or running API connectivity tests. These agents are invoked via the Agent tool inside an already-authenticated Claude Code session and have no need to call the API directly; their inference is handled by the orchestrator's session.
+
+### Root Cause
+
+Agent prompts and phase files do not explicitly state the execution context. Agents lacking this context may assume they are running as standalone scripts that must self-authenticate, especially if they contain or observe code patterns (e.g., from `self_debate_poc.py`) that use `anthropic.Anthropic()` client initialization. The distinction between "I am a subagent invoked by Claude Code" and "I am a script that must call the API" is not communicated anywhere in the dispatch prompt or cross-cutting Reminders blocks.
+
+### Impact
+
+Agents stall mid-phase attempting to locate or test API credentials that do not exist in the subagent environment. This wastes tokens, adds latency, and may cause partial phase execution if the agent abandons its task after failing to authenticate.
+
+### What to Fix
+
+Add a clarifying line to the cross-cutting Reminders block at the top of every phase file that dispatches agents:
+
+```
+> - You are running as a subagent inside an authenticated Claude Code session.
+>   Do not attempt to call the Anthropic API directly, locate API keys, or
+>   instantiate an API client. Your inference is handled by the session.
+```
+
+Also add this to the CRITICAL EXECUTION DIRECTIVE in any agent `.md` files dispatched during Phase 6. The fix applies to all phases that use the Agent tool — not only Phase 6.
