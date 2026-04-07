@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-07
 **Source:** `CALIBRATION_DIAGNOSTIC.md` Section 12 implementation checklist
-**Tracks:** All pre-Phase-0 changes (no generation round required)
+**Tracks:** All pre-Phase-0 changes (no generation round required) + generation prompt updates (Lever A + B)
 
 ---
 
@@ -21,6 +21,8 @@ Created two new documents in `diagnostics/`:
 - This file (`CALIBRATION_CHANGES_SUMMARY.md`)
 
 ### 2–6. Five file edits: IDJ dimension added across scoring engine, phase files, and pre-registration
+
+### 7–8. Generation prompt updates: Lever A + Lever B added to both case generation prompts
 
 ---
 
@@ -79,11 +81,28 @@ Created two new documents in `diagnostics/`:
 | `per_case_pass_criterion` | Updated dims to `IDR/IDP/IDJ/DRQ/ETD/FVC` |
 | `pass_fail_rule` | Updated dims to `IDR/IDP/IDJ/DRQ/ETD/FVC` |
 
+### `synthetic-candidates/benchmark_case_generation_prompt.md`
+
+| Location | Change |
+|----------|--------|
+| Critique Requirement 2 (Decoy Dominance) | Added **Lever B** — at least 1 `must_not_claim` per hard critique case must be a domain-specific false alarm (plausible under general ML knowledge but wrong due to field-specific convention not stated in memo; `requires_external_knowledge` must name the exonerating domain knowledge) |
+| Case Format — `acceptable_resolutions` field guidance | Added **Lever A** — hard critique/mixed cases must use `["empirical_test_agreed"]` only; `ideal_debate_resolution.type` must be `empirical_test_agreed`; easy/medium cases may still use `critique_wins` |
+| Phase 4 summary table | Added 2 tracking rows: (1) hard critique/mixed cases with `acceptable_resolutions = ['empirical_test_agreed']` only; (2) hard critique cases with ≥1 domain-specific false-alarm `must_not_claim` (Lever B) |
+
+### `synthetic-candidates/REAL_PAPER_CASE_GENERATION_PROMPT.md`
+
+| Location | Change |
+|----------|--------|
+| Critique Requirement 2 (Decoy Dominance) | Added **Lever B** — same domain-specific false-alarm requirement as benchmark prompt |
+| Constraints section | Added **Lever A** — hard critique/mixed cases must use `acceptable_resolutions: ["empirical_test_agreed"]` only; domain-specific false-alarm `must_not_claim` required per case |
+| Output Format schema | Fixed `"acceptable_resolutions": ["critique_wins"]` → `["empirical_test_agreed"]` (stale example) |
+| Self-Evaluation header | Fixed stale "Run all **seven** tests" → "Run all **nine** tests" (9 tests were listed but header was not updated) |
+
 ---
 
 ## Traceability
 
-All changes implement `CALIBRATION_DIAGNOSTIC.md` Section 12, "Before Phase 0 (no generation round required)":
+All changes implement `CALIBRATION_DIAGNOSTIC.md` Section 12:
 
 | Checklist item | Status |
 |----------------|--------|
@@ -92,17 +111,17 @@ All changes implement `CALIBRATION_DIAGNOSTIC.md` Section 12, "Before Phase 0 (n
 | `plan/phases/phase_05_5_difficulty_gate.md` — IDJ proxy dimension + stratum diagnostic | ✅ Done |
 | `plan/phases/phase_02_hypothesis.md` — IDJ in dims + stratum pre-registration | ✅ Done |
 | `plan/scripts/write_preregistration.py` — IDJ in rubric/dims + `stratum_fc_lift` hypothesis | ✅ Done |
+| `synthetic-candidates/benchmark_case_generation_prompt.md` — Lever A + B | ✅ Done |
+| `synthetic-candidates/REAL_PAPER_CASE_GENERATION_PROMPT.md` — Lever A + B | ✅ Done |
 
 ---
 
 ## What Remains (Generation Round Required)
 
-These checklist items require re-generating cases through a non-Anthropic LLM and are not yet done:
+The generation prompts are now fully updated. The remaining steps require running the revised prompts through a non-Anthropic LLM:
 
-- [ ] `synthetic-candidates/benchmark_case_generation_prompt.md` — add Lever A (`acceptable_resolutions: ['empirical_test_agreed']`) and Lever B (domain-specific false-alarm decoys)
-- [ ] `synthetic-candidates/REAL_PAPER_CASE_GENERATION_PROMPT.md` — parallel Lever A + B updates
-- [ ] Re-generate `synthetic-candidates/openai_benchmark_cases.json` (50 cases) via non-Anthropic LLM
-- [ ] Re-generate `synthetic-candidates/real_paper_cases.json` (14 cases) via non-Anthropic LLM
+- [ ] Re-generate `synthetic-candidates/openai_benchmark_cases.json` (50 cases) via non-Anthropic LLM using revised `benchmark_case_generation_prompt.md`
+- [ ] Re-generate `synthetic-candidates/real_paper_cases.json` (14 cases) via non-Anthropic LLM using revised `REAL_PAPER_CASE_GENERATION_PROMPT.md`
 - [ ] Re-run Haiku smoke test using updated 4-dim proxy rubric (IDR/IDP/FVC/IDJ); verify gate passes (≥6/10 hard cases < 0.55)
 - [ ] Proceed to Phase 0 after gate passes
 
