@@ -146,6 +146,33 @@ Three options were available per the plan:
 
 **Resolution chosen: Option 2** — re-source cases via external LLM with a revised generation prompt targeting stronger difficulty calibration. New cases must pass Phase 1 (CASE_VERIFIER) and Phase 5.5 (difficulty gate) before Phase 6 can proceed.
 
+**External LLM output — 10 revised hard cases:**
+
+| Case ID | Category | Revision Strategy |
+|---------|----------|-------------------|
+| eval_scenario_007 | broken_baseline | Recast as clinical informatics quarterly review. Endpoint change buried as "harmonization," patient overlap hidden in encounter-level split description, timestamp change in a pipeline spec section |
+| eval_scenario_008 | broken_baseline | Recast as retention experiment readout. Objective shift buried in "evolving business case" narrative, DR fitting issue in methods section, cutoff tuning in deployment config |
+| eval_scenario_009 | broken_baseline | Recast as fraud ops migration readiness assessment. Dispute exclusion presented as "label maturation," feed mismatch in infrastructure upgrade section, threshold tuning in deployment |
+| eval_scenario_013 | metric_mismatch | Recast as ADAS perception milestone review. mAP-vs-safety gap requires connecting nighttime headline to per-frame evaluation protocol in different paragraphs |
+| eval_scenario_016 | metric_mismatch | Recast as recommendation launch proposal. Offline-online correlation transferability hidden by citing historical precedent from a different launch type |
+| eval_scenario_017 | metric_mismatch | Recast as hospital AI governance vendor review. F1-vs-report-quality gap split between executive summary and technical appendix sections |
+| eval_scenario_025 | hidden_confounding | Recast as procurement vendor selection memo. Weather regime mismatch hidden in date ranges, outage improvement presented as good news |
+| eval_scenario_026 | hidden_confounding | Recast as product analytics pilot retrospective. Self-selection hidden in "opted into" language, seasonal confound in timeline details |
+| eval_scenario_027 | hidden_confounding | Recast as internal audit annual performance report. Year-end seasonality presented positively as "Q4 outperformance," dual-approval as separate governance improvement |
+| eval_scenario_032 | scope_intent | Recast as product council deployment proposal. Training scope in one paragraph, deployment scope in another; second-issuer check adds genuine defense evidence |
+
+**Key techniques applied across all revised cases:**
+- Confident memo tone — every case opens with a recommendation or positive headline, not a problem statement
+- Multi-paragraph flaw distribution — must-find issues require connecting details from separate sections
+- Surface soundness signals — CIs, power analyses, temporal cutoffs, external validation sets make cases look rigorous
+- Genuinely tempting red herrings — 3-4 must_not_claim items embedded naturally per case (e.g., Hospital B sample size, PR-AUC for fraud, IPW propensity clipping, κ=0.71 inter-rater agreement)
+- Defense evidence for mixed cases — external validation, directional A/B results, stakeholder endorsements
+
+**Expected difficulty profile:**
+- **IDR < 1.0** — Flaws require connecting information across paragraphs; a first-pass reader scanning each section as internally sound will miss cross-paragraph dependencies
+- **IDP < 1.0** — Red herrings embedded naturally as scenario features make false-positive critiques more likely
+- **DRQ failure on mixed cases** — Genuine defense evidence makes critique_wins feel too strong, but the flaws make defense_wins wrong; correct empirical_test_agreed requires recognizing both sides
+
 ---
 
 The primary trigger in v4 is heredoc-style commit messages used in every phase commit block:
