@@ -122,6 +122,44 @@ A reviewer reading a correct task_prompt on first pass would say "this looks rea
 
 ---
 
+## Corrective Action Applied (2026-04-07)
+
+Rather than re-generating batch3 cases from scratch, the evaluative analysis paragraphs were surgically removed from the 9 critique/mixed task_prompts (eval_scenario_301–309) in `synthetic-candidates/real_paper_cases_batch3.json`. Defense_wins cases (310–314) were unchanged.
+
+### What Was Removed
+
+For each critique/mixed case, the final paragraph(s) that:
+- Switched from first-person team voice to third-person reviewer voice
+- Explicitly named the flaw mechanism ("the problem is that...", "that argument is not enough...", "the decisive flaw is...")
+- Hedged toward the correct verdict ("provides suggestive evidence but not clean evidence", "the memo has not yet established a clean methodological superiority claim")
+- Contained "A pattern-matching reviewer could stop here and complain that X, yet in this domain Y..." constructions (entire sentence removed)
+
+### What Was Preserved
+
+All content written from the team's advocacy perspective: results, methodology description, stated justifications (including wrong ones), addressed concerns, and the team's deployment recommendation. Each task_prompt now ends with the team's own conclusion — not an outside-reviewer assessment.
+
+### Per-Case Summary
+
+| Case | Removed | Now ends with |
+|------|---------|---------------|
+| 301 | "That business argument is not enough... memo has not yet established clean methodological superiority" | Team: analysts care about queue improvement, not model class |
+| 302 | "The problem is that overlapping windows... suggestive evidence but not clean evidence" | Team: "practical question is whether learned forecaster beats queue mechanics" |
+| 303 | "That distinction matters... current benchmark does not validate the stronger faithfulness claim" | Team: "best explanation is the one whose feature removal most harms retrained performance" |
+| 304 | "stronger routine deployment claim needs a prevalence- and spectrum-aware prospective test" | Team: "model validity should be established on cases with reliable ground truth first" |
+| 305 | "Without a post-redesign forward test... deployment claim remains under-supported" | Team: "behavior-feature drift is harmless so long as model is retrained on mixed-era data" |
+| 306 | "The decisive flaw is verification bias... AUROC may be optimistic" | Team: "label quality is higher and AUROC is therefore conservative" |
+| 307 | "launch case should be reframed around fresh-set performance... old headline benchmark" | Team: "relative ranking between models is preserved" |
+| 308 | "The deeper flaw is a scope mismatch between evidence about best seed and claims about workflow reliability" | Team: "deployment decisions should compare the strongest available artifact" |
+| 309 | "current headline performance can only be trusted after screening-plus-fitting pipeline is nested in proper CV" | Team: "screening was label-aware but performed solely to remove noise before model fitting" |
+
+### Status
+
+`real_paper_cases_batch3.json` has been updated in place. All scoring metadata (must_find_issue_ids, must_not_claim, planted_issues, acceptable_resolutions, ground_truth) is unchanged — only task_prompt content was modified.
+
+**Next step:** Run smoke test V5 on the corrected batch3 cases to verify that the evaluative paragraph removal creates calibration headroom (critique/mixed mean < 1.000, gate pass target ≥9/14 cases scoring mean < 0.55).
+
+---
+
 ## Evidence Across All Smoke Test Runs
 
 Critique/mixed ceiling has been 1.00 in every single run:
