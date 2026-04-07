@@ -561,3 +561,44 @@ Switching the case generator (ChatGPT instead of Claude) did not change scores. 
 **4. v5 difficulty gate must confirm < 1.0 before Phase 6:**
 
 Do not proceed to Phase 6 in v5 with any hard case that scores 1.0 under single-pass Claude evaluation. The Phase 5.5 gate is the correct control point; the acceptance criterion (mean < 0.55 on ≥ 6 of 10 cases) must be enforced, not bypassed.
+
+---
+
+## Issue 15 — Inverted Difficulty–Score Correlation: Spearman rho=+0.691 Between Difficulty Labels and Baseline Rubric Scores
+
+**Scope:** Active — affects current Phase 7 scoring results
+**Severity:** High — invalidates difficulty labels as a validity check; difficulty-stratified lift estimates are uninterpretable
+**Related:** Issue 5 (Phase 5.5 gate failure), Issue 6 (closed-loop evaluation root cause), Issue 14 (Phase 6.75 ceiling scores on hard cases)
+
+### What Happened
+
+`difficulty_validation.py` computed Spearman rho between difficulty labels (easy=1, medium=2, hard=3) and baseline rubric scores (mean of IDR, IDP, FVC) across all benchmark cases. The result was rho=+0.691 (p<0.001) — a strong positive correlation. The script printed:
+
+```
+WARNING: Difficulty labels may not predict rubric performance. Review case design.
+```
+
+The expected relationship is a negative correlation: harder cases should produce lower baseline scores. The observed correlation is in the opposite direction. Hard cases scored higher than easy cases on every scoring dimension across all conditions.
+
+### Root Cause
+
+The inversion arises from a structural asymmetry in how easy and hard cases were constructed:
+
+- **Hard cases** predominantly have `empirical_test_agreed` as their `ideal_resolution`, with broadly stated `acceptable_resolutions` that match multiple argument framings. Any agent that reaches the correct general verdict satisfies the rubric regardless of how it gets there.
+- **Easy cases** tend to have specific `must_find_issue_ids` that require agents to identify named flaws using the exact terminology encoded in the rubric. Agents that identify the correct underlying problem but describe it differently fail to trigger a `must_find` match, depressing IDR.
+
+The result is a rubric that is mechanically easier to satisfy on hard cases than easy ones, independent of analytical difficulty.
+
+### Impact
+
+Difficulty-stratified analysis in Phase 7 is invalid. Apparent lift compression in the easy stratum reflects rubric strictness, not protocol weakness. This compounds Issues 5/6/14 — not only do all cases score near ceiling, but the stratum ordering is inverted relative to its intended interpretation.
+
+### What to Fix
+
+**Immediate:** Do not report difficulty-stratified lift estimates without a prominent caveat. Note rho=+0.691 (p<0.001) in conclusions.
+
+**v5 structural fixes:**
+1. Revise easy-case `must_find_issue_ids` to use broader semantic matching — easy cases should be easy to satisfy
+2. Revise hard-case `acceptable_resolutions` to require more specific framing
+3. Add Spearman anti-correlation check (rho must be < 0) to Phase 5.5 before gate acceptance
+4. Cap `empirical_test_agreed` as `ideal_resolution` for hard cases at ≤30% of the hard stratum
