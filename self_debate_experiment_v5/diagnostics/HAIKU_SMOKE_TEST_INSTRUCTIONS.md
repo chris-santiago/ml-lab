@@ -134,4 +134,5 @@ For tracking improvement across multiple smoke test iterations:
 | `REAL_PAPER_CASES_SMOKE_TEST.md` | 2026-04-07 | 101–114 (14 real-paper v1) | 0.952 | FAIL |
 | `REAL_PAPER_CASES_SMOKE_TEST_V2.md` | 2026-04-07 | 201–214 (14 real-paper v2, 3-dim) | 0.810 | FAIL |
 | `HAIKU_SMOKE_TEST_REAL_PAPER_V3_IDJ_BASELINE.md` | 2026-04-07 | 201–214 (existing 2xx, 4-dim with IDJ) | 1.000 | FAIL — IDJ=1 on all 9 eligible cases; Lever A+B needed |
-| *(next run)* | — | New real_paper_cases.json (Lever A+B re-generated, 4-dim) | — | — |
+| `HAIKU_SMOKE_TEST_REAL_PAPER_V4.md` | 2026-04-07 | 301–314 (batch3, Lever A+B, 4-dim) | 1.000 | FAIL — Lever A/B did not fire; case text structure pre-emptively defuses false alarms and signals empirical_test_agreed; Lever C needed |
+| *(next run)* | — | New real_paper_cases.json (Lever C: remove pre-emptive defusing) | — | — |
