@@ -1,0 +1,72 @@
+## Phase 9.5 — Post-Run Audit Agent (NEW)
+
+> **Reminders (cross-cutting rules)**
+> - All script invocations use `uv run`. Never `python` or `python3` directly.
+> - Agents dispatched by name only. Do not read any file from `agents/`.
+> - All log entries via `uv run log_entry.py`. Never write JSONL manually.
+> - **Subagent context:** You are a subagent in an authenticated Claude Code session. Do not call the Anthropic API directly or locate API keys. Do not attempt `claude --agent <name>` from bash — use the Agent tool only.
+> - **CWD:** Bash tool CWD is always repo root (`ml-debate-lab/`). Prefix all bash commands with `cd self_debate_experiment_v5 &&` or use repo-root-relative paths.
+
+> Automated anomaly detection to supplement manual post-mortem. Issue 8 remediation.
+
+```bash
+uv run log_entry.py --step 9.5 --cat workflow --action step_start --detail "Phase 9.5: post-run audit agent — anomaly detection on raw outputs and scoring"
+```
+
+**Agent prompt:**
+
+Spawn a general-purpose agent with the following materials:
+- v5_raw_outputs/ (sample: first 20 files + any flagged high-variance cases)
+- self_debate_poc.py source
+- v5_results_eval.json
+- stats_results.json
+
+Instruct the agent to check for these known failure modes from v3:
+1. Schema mismatch: are ETD empirical_test fields using the canonical schema
+   (condition/supports_critique_if/supports_defense_if/ambiguous_if)?
+   Flag any file using the old schema (measure/success_criterion/failure_criterion).
+2. Isolation status: are there any isolated_debate defender_raw outputs that contain
+   verbatim Critic language? (check_isolation.py should have caught these, but verify)
+3. Pass/fail anomalies: are there cases in v5_results_eval.json marked fail despite
+   all applicable dimension scores >= 0.5 and mean >= 0.65?
+4. ETD scoring: are there empirical_test_agreed cases where ETD=0.0 despite a populated
+   empirical_test field in the raw output? Flag each such case.
+5. DC scoring: are there any baseline runs where DC != null? (should be N/A in v5)
+6. Forced multiround: do all forced_multiround raw outputs have debate_rounds >= 2?
+   Flag any with debate_rounds == 1.
+7. **Hollow forced-round detection:** For each forced_multiround case, compare round 1 vs round 2 snapshots.
+   **Prerequisite guard:** If a forced_multiround file has no `rounds` key (or `rounds` is empty), flag
+   immediately as SCHEMA ERROR (severity: critical) — `validate_raw_schema.py` should have caught this
+   before scoring; if it appears here, schema validation was skipped or bypassed. Do NOT compute
+   hollow_rate from files with missing `rounds`; exclude them from the rate and log separately.
+   For files with valid `rounds` arrays: flag as hollow if round2_verdict == round1_verdict AND
+   round2_points_resolved == 0.
+   Log each hollow case: decision/hollow_forced_round_detected with case_id and round data in meta.
+   Compute hollow_rate = hollow_cases / total_forced_multiround_cases_with_valid_rounds.
+   If hollow_rate > 0.5: log a CRITICAL anomaly — majority of forced rounds are hollow; mechanism validation is compromised.
+8. **DC/FVC diagnostic integrity check:** Verify that DC scores are present in raw outputs for all non-baseline, non-defense_wins cases. Confirm `dc_fvc_diagnostic` key exists in `v5_results.json`. Flag any condition where `dc_fvc_diagnostic[condition]['divergence_rate']` is None (indicates all DC values were null — scoring bug). If forced_multiround shows the highest divergence_rate among conditions, note this as expected (adversarial pressure is most likely to cause Defender capitulation).
+
+The agent produces a structured anomaly report with:
+- anomaly_type, case_id, file_path, severity, evidence, recommended_action
+for each finding.
+
+Write the anomaly report to POST_MORTEM.md (structured — not just prose).
+Log the result:
+uv run log_entry.py --step 9.5 --cat audit --action post_run_audit_complete \
+  --detail "Anomaly report complete" --meta '{"anomaly_count": N, "critical_count": N}'
+
+If any `critical` anomalies are found, resolve them before Phase 10.
+
+```bash
+uv run log_entry.py --step 9.5 --cat write --action write_post_mortem --detail "POST_MORTEM.md written: structured anomaly report from post-run audit agent" --artifact POST_MORTEM.md
+uv run log_entry.py --step 9.5 --cat workflow --action step_end --detail "Phase 9.5 complete"
+```
+
+**Phase 9.5 commit:**
+```bash
+git add self_debate_experiment_v5/POST_MORTEM.md
+git commit -m "chore: snapshot v5 phase 9.5 artifacts — post-run audit and post-mortem [none]"
+uv run log_entry.py --step 9.5 --cat exec --action commit_phase_artifacts --detail "committed phase 9.5 artifacts: POST_MORTEM.md"
+```
+
+---
