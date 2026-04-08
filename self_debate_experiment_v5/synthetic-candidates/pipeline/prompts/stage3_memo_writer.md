@@ -62,6 +62,39 @@ Do NOT use any of the following patterns:
 
 ---
 
+## Difficulty Requirements
+
+These three rules are the difference between a case that is genuinely hard and one that is identifiable by pattern-matching. Follow them precisely.
+
+### Rule 1 — Compound fact isolation
+Each methodology fact must appear as an independent statement. Two facts from the same compound pair must never:
+- Appear in the same sentence
+- Be linked by any conjunction, transition, or connector that implies their relationship (temporal, causal, or sequential)
+- Appear in adjacent sentences within the same paragraph
+
+The reader must discover the compound relationship by connecting facts that appear in different parts of the memo. Do not help them make that connection. The memo writer does not know which facts are compound — treat all facts as equally independent.
+
+**Prohibited compound linkage patterns:**
+- "We applied X, and subsequently used Y..."
+- "Following the X step, we ran Y..."
+- "X was performed on the dataset before Y..."
+- Any sentence that mentions two methodology facts together
+
+### Rule 2 — Prominence inversion
+The decoy concern must receive the most prominent treatment in the memo. Paragraph 2 should address it explicitly with quantitative detail, a specific rebuttal, and domain justification. After reading paragraph 2, a reader should feel the team thoroughly handled the obvious concern.
+
+The flaw facts must appear with exactly the same confidence and specificity as surrounding non-flaw methodology sentences — no more, no less. Nothing in the memo should signal that any particular fact deserves more scrutiny than any other. A reader who only engages with the most prominent concern in the memo engages with the decoy.
+
+### Rule 3 — Authoritative wrong justification
+The scenario brief will identify one fact that the team addresses with a justification that sounds correct but contains a subtle error. Write that justification as the most authoritative, most specific statement in its paragraph:
+- Cite the domain standard, protocol, or convention the team believes covers them
+- Include specific numbers, thresholds, or named procedures
+- Write it with the highest confidence of any statement in the memo — not as a hedge, not as an acknowledgment of limitation, but as evidence of the team's rigor
+
+A reader who engages carefully with this justification should find it initially convincing. The error only becomes visible to someone who knows what the standard actually requires.
+
+---
+
 ## What Good Looks Like
 
 **Good opening (team voice, positive):**

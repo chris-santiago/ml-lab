@@ -36,8 +36,23 @@ The flaw should only be detectable by someone who knows one of:
 For each critique/mixed case, you must produce flaw facts in **neutralized phrasing** — the flaw should be describable as a plain methodology step, not a problem statement.
 
 For each flaw fact, produce:
-1. **Neutralized phrasing:** How the methodology team would describe this step. No alarm language. Example: "Synthetic minority oversampling was applied to the full labeled dataset before the k-fold cross-validation loop."
-2. **Domain-specific context:** One sentence of domain texture (regulatory norm, operational constraint, or field convention) that makes the step plausible. Example: "In the team's oncology classification pipeline, class imbalance across tumor subtypes reached 1:12 in the rarest category, and the preprocessing team used SMOTE to normalize class frequencies before model development."
+1. **Neutralized phrasing:** How the methodology team would describe this step. No alarm language. Describe exactly **one** action or decision — do not encode the relationship between compound facts in the phrasing.
+2. **Domain-specific context:** One sentence of domain texture (regulatory norm, operational constraint, or field convention) that makes the step plausible.
+
+**Compound fact phrasing rule (critical):** For cases with `compound_fact_ids`, each compound fact must be phrased as a fully independent, standalone methodology step. The problematic relationship between them must NOT appear in either fact's phrasing — it only emerges when a reader connects both facts across paragraphs using domain-specific knowledge.
+
+Prohibited in any compound fact's `neutralized_phrasing`:
+- Temporal connectors: "before", "after", "following", "prior to", "subsequently"
+- Causal connectors: "which was then used for", "applied to the set used for", "in order to"
+- Any phrase that implies the sequence or dependency between the two facts
+
+**Bad example (encodes the relationship):** "Synthetic minority oversampling was applied to the full labeled dataset before the k-fold cross-validation loop." — A reader sees the ordering problem in one sentence.
+
+**Good example (relationship-free):**
+- Fact 1: "Synthetic minority oversampling was applied to address class imbalance in the labeled training set."
+- Fact 2: "Model selection used five-fold cross-validation across the full development dataset."
+
+A reader must connect these across two paragraphs and know why that combination is problematic. Neither fact alone signals a concern.
 
 ---
 

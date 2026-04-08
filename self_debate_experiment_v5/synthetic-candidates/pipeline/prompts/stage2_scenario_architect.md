@@ -87,9 +87,12 @@ Return a JSON object. No markdown formatting.
       "fact_id": "ff_001_1",
       "neutralized_phrasing": "The fact text as received",
       "suggested_paragraph": 3,
-      "presentation_note": "How to present this fact naturally — what surrounding context makes it sound like a routine design choice"
+      "presentation_note": "How to present this fact naturally — what surrounding context makes it sound like a routine design choice",
+      "prominence": "standard | decoy_prominent | authoritative_justification"
     }
   ],
+  "decoy_prominence_note": "Which fact_id(s) are decoys — these must receive the most explicit, quantified treatment in paragraph 2. The reader should feel the team thoroughly handled this concern.",
+  "authoritative_justification_note": "Which fact_id has the addressed-but-incorrectly justification — instruct the memo writer to write this justification with the highest authority in its paragraph: cite the domain standard by name, include specific numbers, write it as the team's most carefully considered statement.",
   "word_count_target": 650,
   "tone_notes": "Any notes for the memo writer about tone, formality, or technical depth appropriate for this team/audience"
 }
