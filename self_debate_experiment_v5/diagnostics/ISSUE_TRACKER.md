@@ -118,3 +118,16 @@ Treat the high Haiku baseline as a feature, not a bug. The experiment measures l
 
 **Option C — Switch calibration model**
 Use a weaker model (e.g., a smaller open-source model) as the gate criterion model instead of Haiku. Haiku may simply be too capable for this task domain. Requires understanding what model capability level is actually the target.
+
+---
+
+## Resolved by Pipeline Design
+
+### RESOLVED-BY-DESIGN — Same-model circular bias in case generation
+**Concern:** If Claude generates the benchmark cases and Claude debates them, the generating model implicitly calibrates cases to its own blind spots. Flaw mechanisms would be shaped by Claude's prior over "what looks like a flaw," making the benchmark a test of Claude's self-knowledge rather than debate quality.
+
+**Resolution:** The modular pipeline in `synthetic-candidates/pipeline/` is explicitly designed to be run by a non-Anthropic LLM (GPT-4o, Gemini, Perplexity, etc.). The generation prompt header has always specified this; the pipeline formalizes it. GPT generates the cases, Claude debates them — different architectures, different priors, clean cross-model design.
+
+**Residual:** The pipeline instructions (flaw taxonomy, decoy requirements, stage logic) were written by Claude, so Claude's fingerprint is on the scaffold even if not the output. This is a weaker bias and arguably unavoidable — someone has to design the benchmark methodology. The execution is cross-model; the meta-design is not.
+
+**Empirical check:** Whether GPT transpositions are genuinely harder for Claude than Claude's own transpositions would be is an open empirical question — the smoke test will answer it.
