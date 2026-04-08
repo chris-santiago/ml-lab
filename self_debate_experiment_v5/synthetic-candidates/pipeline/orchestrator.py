@@ -21,7 +21,6 @@ Usage:
     uv run pipeline/orchestrator.py \\
         --extractor-source real_paper \\
         --batch-size 15 \\
-        --batch-number 4 \\
         --start-case-id 310
 
 Models are configurable per stage via --stage1-model, --stage5-model, etc.
@@ -610,8 +609,11 @@ def run_case(
 # ---------------------------------------------------------------------------
 
 def assemble_batch(config: dict) -> None:
+    start = config["start_case_id"]
+    end = start + config["batch_size"] - 1
+    out_name = f"cases_{start}-{end}.json"
     if config["dry_run"]:
-        console.print(f"\n[dim][DRY RUN] Would assemble cases_batch{config['batch_number']}.json from pipeline/run/cases/[/dim]")
+        console.print(f"\n[dim][DRY RUN] Would assemble {out_name} from pipeline/run/cases/[/dim]")
         return
     cases_dir = RUN_DIR / "cases"
     accepted = []
@@ -630,11 +632,11 @@ def assemble_batch(config: dict) -> None:
         else:
             recycled.append(case)
 
-    out_path = PIPELINE_DIR.parent / f"cases_batch{config['batch_number']}.json"
+    out_path = PIPELINE_DIR.parent / out_name
     out_path.write_text(json.dumps(accepted, indent=2), encoding="utf-8")
 
     total = len(accepted) + len(recycled) + len(exhausted)
-    console.rule(f"[bold]Batch {config['batch_number']} Summary[/bold]")
+    console.rule(f"[bold]Cases {start}–{end} Summary[/bold]")
     console.print(f"  Total processed : {total}")
     console.print(f"  [green]Accepted        : {len(accepted)}[/green]")
     if recycled:
@@ -659,10 +661,8 @@ def parse_args() -> argparse.Namespace:
                    help="Which Stage 1 extractor to use")
     p.add_argument("--batch-size", type=int, required=True,
                    help="Number of cases to generate")
-    p.add_argument("--batch-number", type=int, required=True,
-                   help="Sequential batch number (used in output filename)")
     p.add_argument("--start-case-id", type=int, required=True,
-                   help="First eval_scenario_NNN number (e.g. 310 for batch following 301-309)")
+                   help="First eval_scenario_NNN number (e.g. 310 for batch following 301-309). Output file is named cases_NNN-MMM.json.")
     p.add_argument("--previous-batch-usage", default="{}",
                    help="JSON of sources/domains used in prior batches")
     p.add_argument("--seed", type=int, default=42)
@@ -694,7 +694,6 @@ def build_config(args: argparse.Namespace) -> dict:
     return {
         "extractor_source": args.extractor_source,
         "batch_size": args.batch_size,
-        "batch_number": args.batch_number,
         "start_case_id": args.start_case_id,
         "previous_batch_usage": json.loads(args.previous_batch_usage),
         "seed": args.seed,
@@ -711,8 +710,10 @@ def main() -> None:
     config = build_config(args)
 
     console.rule("[bold]Pipeline Orchestrator[/bold]")
+    start = config["start_case_id"]
+    end = start + config["batch_size"] - 1
     console.print(f"  Extractor : {config['extractor_source']}")
-    console.print(f"  Batch     : {config['batch_number']}  ({config['batch_size']} cases, IDs {config['start_case_id']}–{config['start_case_id'] + config['batch_size'] - 1})")
+    console.print(f"  Cases     : {config['batch_size']} cases, IDs {start}–{end}  →  cases_{start}-{end}.json")
     console.print(f"  Recycles  : max {config['max_recycles']} per case")
     console.print(f"  Smoke test: {'[dim]OFF (--no-smoke)[/dim]' if config['no_smoke'] else '[green]ON[/green]'}")
     console.print("  Models:")
@@ -748,7 +749,7 @@ def main() -> None:
         transient=False,
     ) as progress:
         batch_task = progress.add_task(
-            f"[bold]Batch {config['batch_number']}[/bold]",
+            f"[bold]Cases {start}–{end}[/bold]",
             total=config["batch_size"],
         )
         case_task = progress.add_task("", total=stages_per_case, visible=False)

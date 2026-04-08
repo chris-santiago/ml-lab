@@ -42,9 +42,10 @@ cd self_debate_experiment_v5/synthetic-candidates
 OPENROUTER_API_KEY=your_key uv run pipeline/orchestrator.py \
   --extractor-source real_paper \
   --batch-size 15 \
-  --batch-number 4 \
   --start-case-id 310
 ```
+
+Output file is named automatically by case ID range: `cases_310-324.json`.
 
 The orchestrator runs Stages 1–6 automatically, including:
 - Auto-recycling cases that fail the leakage audit (up to `--max-recycles` attempts)
@@ -60,8 +61,8 @@ The orchestrator runs Stages 1–6 automatically, including:
 | `--resume` | off | Skip cases with existing Stage 4 output |
 | `--dry-run` | off | Print prompts without API calls |
 | `--stage1-model MODEL` | `google/gemini-2.5-pro` | Override Stage 1 model |
-| `--stage5-model MODEL` | `anthropic/claude-sonnet-4-6` | Override Stage 5 model |
-| `--smoke-model MODEL` | `anthropic/claude-haiku-4-5` | Override smoke test model |
+| `--stage5-model MODEL` | `anthropic/claude-sonnet-4.6` | Override Stage 5 model |
+| `--smoke-model MODEL` | `anthropic/claude-haiku-4.5` | Override smoke test model |
 | `--models JSON` | — | Batch-override multiple models |
 
 All models are OpenRouter model strings. Use different models for Stage 1 and Stage 5 to avoid circular bias (generator and auditor sharing the same priors).
@@ -145,15 +146,16 @@ Save to `pipeline/run/cases/mech_NNN.json`.
 
 ### Step 6 — Assemble final batch
 
-Replace `{{BATCH_NUMBER}}` with the actual batch number (e.g., `4`):
+Replace `{{START_ID}}` and `{{END_ID}}` with the actual case ID range (e.g., `310` and `324`):
 
 ```bash
 cd self_debate_experiment_v5/synthetic-candidates
 uv run python -c "
 import json, glob
-cases = [json.load(open(f)) for f in sorted(glob.glob('pipeline/run/cases/*.json'))]
+cases = [json.load(open(f)) for f in sorted(glob.glob('pipeline/run/cases/*.json'))
+         if '_attempt_' not in f]
 print(f'{len(cases)} cases assembled')
-json.dump(cases, open('cases_batch{{BATCH_NUMBER}}.json', 'w'), indent=2)
+json.dump(cases, open('cases_{{START_ID}}-{{END_ID}}.json', 'w'), indent=2)
 "
 ```
 
