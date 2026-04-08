@@ -33,6 +33,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -63,6 +64,10 @@ RUN_DIR = PIPELINE_DIR / "run"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 MAX_WORKERS = 5       # concurrent API calls per stage
 API_TIMEOUT = 180.0   # seconds per request before raising TimeoutError
+
+# Serializes Stage 1 recycles: fact_mixer writes to shared files so concurrent
+# Stage 1 recycles must not overlap (two cases both firing difficulty_idr).
+_STAGE1_RECYCLE_LOCK = threading.Lock()
 
 # Source catalog lives alongside this script
 sys.path.insert(0, str(PIPELINE_DIR))
@@ -658,62 +663,65 @@ def run_stage1_recycle(
     """
     Re-generate the Stage 1 blueprint for one mechanism, then re-run fact_mixer.
 
-    Used when IDR=1.0 persists after Stage 2 recycling — indicates the abstract
-    mechanism itself is too recognizable, not just the scenario framing.
-    Picks the same source but forces a completely different domain transposition.
+    Serialized via _STAGE1_RECYCLE_LOCK: fact_mixer writes to shared stage1.5 files
+    so concurrent Stage 1 recycles (two cases both firing difficulty_idr) must not overlap.
+
+    Used when IDR=1.0 persists — the abstract mechanism is too recognizable, not just
+    the scenario framing. Picks the same source, forces a completely different domain.
     """
-    blueprints_path = RUN_DIR / "stage1_blueprints.json"
-    blueprints: list[dict] = json.loads(blueprints_path.read_text(encoding="utf-8"))
+    with _STAGE1_RECYCLE_LOCK:
+        blueprints_path = RUN_DIR / "stage1_blueprints.json"
+        blueprints: list[dict] = json.loads(blueprints_path.read_text(encoding="utf-8"))
 
-    current = next((bp for bp in blueprints if bp.get("mechanism_id") == mechanism_id), None)
-    if current is None:
-        raise RuntimeError(f"run_stage1_recycle: {mechanism_id} not found in stage1_blueprints.json")
+        current = next((bp for bp in blueprints if bp.get("mechanism_id") == mechanism_id), None)
+        if current is None:
+            raise RuntimeError(f"run_stage1_recycle: {mechanism_id} not found in stage1_blueprints.json")
 
-    # Look up original source from catalog
-    source_ref = current.get("source_reference", "")
-    all_sources = CRITIQUE_SOURCES + DEFENSE_PATTERNS
-    source_entry = next((s for s in all_sources if s["label"] == source_ref), None)
+        # Look up original source from catalog
+        source_ref = current.get("source_reference", "")
+        all_sources = CRITIQUE_SOURCES + DEFENSE_PATTERNS
+        source_entry = next((s for s in all_sources if s["label"] == source_ref), None)
 
-    if source_entry is None:
-        raise RuntimeError(
-            f"run_stage1_recycle: cannot find source '{source_ref}' in catalog — "
-            "cannot re-run Stage 1 without the source text"
+        if source_entry is None:
+            raise RuntimeError(
+                f"run_stage1_recycle: cannot find source '{source_ref}' in catalog — "
+                "cannot re-run Stage 1 without the source text"
+            )
+
+        console.print(f"  S1↻ {mechanism_id} → {config['models']['stage1']} (Stage 1 recycle)")
+
+        operator_note = (
+            f"RECYCLE (IDR=1.0 after prior attempt): {note}\n\n"
+            "The previous domain transposition was too shallow — the mechanism remained "
+            "identifiable through general ML pattern-matching alone. Choose a completely "
+            "different target domain. The flaw must require domain-specific expertise to "
+            "detect, not general ML knowledge. Vocabulary, regulatory context, and "
+            "operational stakes must all be domain-specific enough to prevent pattern-matching."
         )
 
-    console.print(f"  S1↻ {mechanism_id} → {config['models']['stage1']} (Stage 1 recycle)")
+        template = read_prompt("stage1_mechanism_extractor.md")
+        prompt = fill_placeholders(template, {
+            "SOURCE_REFERENCE":     source_entry["text"] + f"\n\n**Operator note:** {operator_note}",
+            "CASE_TYPE":            current.get("case_type", "critique"),
+            "MECHANISM_ID":         mechanism_id,
+            "PREVIOUS_BATCH_USAGE": json.dumps(config["previous_batch_usage"]),
+        })
 
-    operator_note = (
-        f"RECYCLE (IDR=1.0 after prior attempt): {note}\n\n"
-        "The previous domain transposition was too shallow — the mechanism remained "
-        "identifiable through general ML pattern-matching alone. Choose a completely "
-        "different target domain. The flaw must require domain-specific expertise to "
-        "detect, not general ML knowledge. Vocabulary, regulatory context, and "
-        "operational stakes must all be domain-specific enough to prevent pattern-matching."
-    )
+        raw = call_llm_json(prompt, config["models"]["stage1"], client, dry_run=config.get("dry_run", False))
+        if isinstance(raw, list):
+            raw = raw[0] if raw else {}
+        raw["mechanism_id"] = mechanism_id
+        raw.setdefault("pipeline_source", config["extractor_source"])
 
-    template = read_prompt("stage1_mechanism_extractor.md")
-    prompt = fill_placeholders(template, {
-        "SOURCE_REFERENCE":     source_entry["text"] + f"\n\n**Operator note:** {operator_note}",
-        "CASE_TYPE":            current.get("case_type", "critique"),
-        "MECHANISM_ID":         mechanism_id,
-        "PREVIOUS_BATCH_USAGE": json.dumps(config["previous_batch_usage"]),
-    })
+        # Update stage1_blueprints.json in-place
+        for i, bp in enumerate(blueprints):
+            if bp.get("mechanism_id") == mechanism_id:
+                blueprints[i] = raw
+                break
+        blueprints_path.write_text(json.dumps(blueprints, indent=2), encoding="utf-8")
 
-    raw = call_llm_json(prompt, config["models"]["stage1"], client, dry_run=config.get("dry_run", False))
-    if isinstance(raw, list):
-        raw = raw[0] if raw else {}
-    raw["mechanism_id"] = mechanism_id
-    raw.setdefault("pipeline_source", config["extractor_source"])
-
-    # Update stage1_blueprints.json in-place
-    for i, bp in enumerate(blueprints):
-        if bp.get("mechanism_id") == mechanism_id:
-            blueprints[i] = raw
-            break
-    blueprints_path.write_text(json.dumps(blueprints, indent=2), encoding="utf-8")
-
-    console.print(f"  S1↻ {mechanism_id} blueprint updated → re-running fact_mixer")
-    run_fact_mixer(config)
+        console.print(f"  S1↻ {mechanism_id} blueprint updated → re-running fact_mixer")
+        run_fact_mixer(config)
 
 
 # ---------------------------------------------------------------------------
