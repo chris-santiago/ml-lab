@@ -1,5 +1,17 @@
 # ml-debate-lab
 
+## Project Origin
+
+This project started from a single question: can FastText-encoded device IDs and attributes be used as features for ML model consumption? The initial experiment ran in interactive Claude Code session. Once the process proved worth keeping, it became a saved monolith prompt — a single Claude command that ran end-to-end.
+
+That monolith was refactored into modular agent dispatches as complexity grew, but the granularity got too fine and the agents lost overall context. The architecture consolidated back toward a mostly-monolithic structure with two agents debating each other, with context carefully bounded and controlled. That eventually became a reusable Claude plugin.
+
+The plugin raised a new question: how do you evaluate the debate protocol itself? That led to a series of meta-evaluation experiments (v2, v3, v4) — testing whether the critic/defender debate structure actually surfaces real ML methodology flaws. Each round revealed calibration problems: cases were too easy, flaws were too obvious, baselines were too weak.
+
+v5 is the response to that — generating a harder, more rigorous benchmark case library before running the main experiment. The case generation pipeline has itself undergone the same architectural recursion: monolith LLM prompt → agentic multi-stage prompt → Python-orchestrated multi-LLM pipeline with concurrent execution, validation gates, and automated smoke testing.
+
+The original FastText idea has now recursed several levels deep into its own evaluation infrastructure.
+
 ## Prerequisites
 - `uv` must be installed — no pyproject.toml exists; all scripts use PEP 723 inline headers
 - All scripts must be run via `uv run <script>.py` (never `python3` directly)
@@ -31,3 +43,4 @@ This command updates all artifacts, then runs a three-check coherence audit (con
 
 ## Agent Sync
 After editing any file in `agents/` — run `/sync-agents` to copy the updated files to `~/.claude/agents/`.
+
