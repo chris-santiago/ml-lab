@@ -7,10 +7,11 @@
 
 ## Status at Last Update
 
-- Smoke tests run: V1 (1xx) → V2 (2xx) → V3 (2xx + IDJ) → V4 (batch3, Lever A+B) → V5 (batch3, paragraphs removed) → **Pipeline batches 313–342 (pre-fix), 343–357 (post-fix), 358–372 (famous sources retired)**
-- Gate result: **IMPROVING** — IDR=0.0 trend: 0/8 → 3/9 → 4/9 across last three batches; wall persists but recycles working
+- Smoke tests run: V1 (1xx) → V2 (2xx) → V3 (2xx + IDJ) → V4 (batch3, Lever A+B) → V5 (batch3, paragraphs removed) → **Pipeline batches 313–342 (pre-fix), 343–357 (post-fix), 358–372 (famous sources retired), 373–387 (first test of four prompt fixes)**
+- Gate result: **FLAT** — IDR=0.0 trend: 0/8 → 3/9 → 4/9 → 3/8 across last four batches; four prompt fixes (OPEN-16) did not improve IDR=0.0 rate
 - Infrastructure (scripts, phases, agents): **READY** — all preflight checks pass
-- Active blocker: residual IDR=1.0 wall on pattern-level sources (14, 16) and moderately well-known papers (Recht, SMOTE, offline-online gap) — famous-paper retirement helped but wall is broader than those four sources
+- Active blockers: (1) IDR=1.0 gate-slip pattern — IDR=1.0, IDP=0.0 cases (proxy=0.5) pass gate threshold (0.55) but are trivially easy for Haiku (OPEN-17); (2) Sources 7 and 9 exhausted twice — retirement candidates; (3) OPEN-15 (Haiku vs Sonnet gate gap) still unresolved
+- Next batch to run: 388–402 (`--start-case-id 388 --concurrency 25`) — after retiring Sources 7 and 9 and deciding on gate tightening
 
 ---
 
@@ -214,6 +215,62 @@ The Stage 2 prompt said "distribute facts across paragraphs" and "don't cluster 
 
 ---
 
+## OPEN-16 — Flaw facts still pattern-matchable in isolation; compound relationship encoded in phrasing
+
+**Severity:** High — root cause of persistent IDR=1.0 wall after source retirement and transposition fixes  
+**Source:** Cross-batch IDR analysis 2026-04-08; residual wall on Sources 6, 8, 9, 11, 13
+
+After retiring famous papers and adding transposition depth requirements, 5/9 critique/mixed cases still hit IDR=1.0 in batch 358-372. Root cause: flaw facts are phrased in ways that are individually recognizable as ML pitfalls ("SMOTE applied before CV"), and compound facts encode their relationship in a single sentence — allowing pattern-matching without cross-paragraph synthesis.
+
+Two sub-problems:
+1. **Relationship encoding in compound phrasing:** "X was applied before Y" states the problematic ordering explicitly. A model pattern-matches to the known failure mode in one sentence. The compound mechanism (requiring synthesis across paragraphs) is bypassed.
+2. **Uniform fact prominence:** Flaw facts, decoy facts, and neutral facts appear with equal prominence in the memo. A model scanning for the most notable or unusual methodology detail can identify the flaw by its relative distinctiveness rather than by domain reasoning.
+
+**Fixes applied (2026-04-08, commit 820479b):**
+
+*Stage 1 — Compound fact relationship stripping:*
+- `neutralized_phrasing` must describe exactly one action with no temporal/causal/sequential connector to its compound pair
+- Explicit prohibited patterns: "before", "after", "following", "which was then used for", "prior to"
+- Bad/good example added; old example ("SMOTE applied before the k-fold loop") replaced — it was actively teaching the wrong output
+
+*Stage 3 — Three new Difficulty Requirements:*
+- **Rule 1 (compound isolation):** Compound facts must never appear in the same sentence, adjacent sentences, or be linked by any connector implying their relationship. Reader must assemble the compound picture by connecting facts across paragraphs.
+- **Rule 2 (prominence inversion):** Decoy concern gets the most quantified, explicitly-rebutted treatment in paragraph 2. Flaw facts appear at exactly the same specificity level as surrounding non-flaw sentences — nothing distinguishes them.
+- **Rule 3 (authoritative wrong justification):** The addressed-but-incorrectly fact gets a justification written with maximum authority — citing the domain standard by name, including specific numbers, written as the team's most carefully considered statement. Should be initially convincing; error only visible with domain-specific knowledge.
+
+*Stage 2 — Two new output fields:*
+- `decoy_prominence_note`: which fact(s) are decoys, with instruction to memo writer to give them dominant treatment
+- `authoritative_justification_note`: which fact has the wrong justification, with instruction to write it with maximum authority
+
+**First test result (batch 373–387, 2026-04-08):** Fixes did not improve IDR=0.0 rate. 3/8 accepted critique/mixed achieved IDR=0.0 (Source 1/Dacrema, Source 13, Source 11) vs. 4/9 in prior batch. IDR=0.0 trend: 0/8 → 3/9 → 4/9 → 3/8 — essentially flat.
+
+New pattern: IDR=1.0, IDP=0.0 (proxy=0.5) cases now represent 4/8 accepted critique/mixed (Sources 14, 10, 6, 15). These pass the gate (proxy < 0.55) but Haiku correctly identified the flaw in a single pass. Additionally, Sources 7 and 9 exhausted (2 Stage 1 recycles each, still IDR=1.0, IDP=1.0) — both are retirement candidates.
+
+Root cause assessment: the four prompt fixes address the *encoding* of compound relationships but not the *recognizability* of the underlying mechanism. Sources that have recognizable mechanisms at the pattern level will remain IDR=1.0 regardless of prompt engineering. See OPEN-17 for the gate-slip pattern this reveals.
+
+---
+
+## OPEN-17 — Gate permissive for IDR=1.0, IDP=0.0 cases (proxy=0.5 < 0.55 threshold)
+
+**Severity:** High — cases where Haiku correctly identifies the flaw in a single pass are accepted into the benchmark  
+**Source:** Batch 373–387 analysis (2026-04-08)
+
+The gate threshold is `proxy < 0.55`. For critique/mixed cases where IDR=1.0 (Haiku found the planted flaw) but IDP=0.0 (Haiku didn't false-accuse any decoy), the proxy formula yields 0.5 — which passes the gate. These cases are trivially solved by a single Haiku pass; they will be even more trivially solved by a single Sonnet pass.
+
+**Pattern:** In batch 373-387, 4/8 accepted critique/mixed cases fell into this bucket: Sources 14, 10, 6, 15 (IDR=1.0, IDP=0.0, proxy=0.5). They appear in `cases_373-387.json` as valid benchmark cases but provide no test of the debate protocol's value-add.
+
+**Two options:**
+
+1. **Add hard IDR gate for critique/mixed:** If `case_type in ["critique", "mixed"] and IDR == 1.0`, treat as difficulty_idr failure regardless of proxy score. Route to Stage 1 recycle. This would increase recycle rate and exhaustions for sources that produce persistent IDR=1.0.
+
+2. **Two-tier acceptance:** Accept IDR=1.0, IDP=0.0 cases with a `difficulty_tier: "soft_pass"` label. Exclude them from the core benchmark; use them only in a separate "baseline calibration" analysis. Mark IDR=0.0 cases as `difficulty_tier: "hard_pass"`. Gate the main experiment to require a minimum fraction of hard_pass cases.
+
+Option 2 is non-breaking (no change to gate logic) but requires downstream experiment stratification. Option 1 is cleaner but may exhaust remaining active sources faster.
+
+**Next step:** User decision needed — tighten gate (Option 1) or stratify accepted cases (Option 2).
+
+---
+
 ## OPEN-15 — Smoke test gate model (Haiku) is weaker than experiment baseline (Sonnet)
 
 **Severity:** High — gate may be passing cases that are too easy for the actual experiment participants  
@@ -268,6 +325,8 @@ The three sources that achieved IDR=0.0 (Ziegler, Dacrema, Caruana) are technica
 **Cross-batch analysis (2026-04-08):** Source 16 (Instance-Filtering Bias) confirmed consistent IDR=1.0 wall in both batches 343-357 and 358-372. Retired. Active catalog now 11 critique + 3 defense = 14 sources. All other sources with IDR=1.0 appearances had only single-batch data — insufficient to retire; monitoring continues.
 
 **Empirical result (batch 358–372, 2026-04-08):** Retirement helped but wall persists. 4/9 IDR=0.0 (mech_001/Source 14 via S1 recycle, mech_004, mech_005/Source 8 via S1 recycle, mech_012). 5/9 still IDR=1.0 — Sources 14, 16, 6, 8, 11. Wall is not limited to canonical famous papers; pattern-level and moderately-known sources also ceiling. Trend: 0/8 → 3/9 → 4/9. Runtime dropped from ~20 min to ~10 min with concurrency=10. 15/15 accepted, 0 exhausted.
+
+**Empirical result (batch 373–387, 2026-04-08):** 3/8 IDR=0.0 (Source 1, Source 13, Source 11). 4/8 IDR=1.0 proxy-passed (Sources 14, 10, 6, 15 — all IDP=0.0, proxy=0.5). 2 exhausted (Source 7/Hooker, Source 9/Caruana — both IDR=1.0, IDP=1.0 after 2 Stage 1 recycles each). Trend: 0/8 → 3/9 → 4/9 → 3/8 — flat. First test of OPEN-16 prompt fixes; fixes did not improve rate. Source 7 and Source 9 are confirmed wall — retirement pending user decision.
 
 ---
 
