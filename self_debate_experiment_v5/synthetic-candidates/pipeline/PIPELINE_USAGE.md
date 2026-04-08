@@ -67,10 +67,12 @@ Set `{{EXTRACTOR_SOURCE}}` to `real_paper` or `benchmark` to match the Stage 1 p
 
 Produces per-case `writer_view` (no role labels) and `metadata_view` (with role labels) files.
 
+**Steps 3–5 run once per case.** In all file paths below, replace `NNN` with the zero-padded mechanism number from the `mechanism_id` field in the Stage 1 output (e.g., `mech_001`, `mech_002`). For `{{CASE_ID}}`, assign `eval_scenario_NNN` using the next available case number in `benchmark_cases.json` (or start at `301` if this is the first batch).
+
 ### Step 3 — Scenario Architect (Stage 2, one per case)
 
 Fill the placeholders in `prompts/stage2_scenario_architect.md` and instruct an agent to read the file and execute it:
-- `{{TARGET_DOMAIN}}`, `{{DOMAIN_SPECIFIC_DETAIL}}`, `{{CATEGORY}}` — from `writer_view` fields
+- `{{TARGET_DOMAIN}}`, `{{DOMAIN_SPECIFIC_DETAIL}}`, `{{CATEGORY}}` — from the `mech_NNN_writer_view.json` fields of the same name
 - `{{WRITER_VIEW_FACTS}}` — the `facts` array from `mech_NNN_writer_view.json`
 
 Save output to `pipeline/run/stage2/mech_NNN_scenario.json`.
@@ -78,7 +80,7 @@ Save output to `pipeline/run/stage2/mech_NNN_scenario.json`.
 ### Step 4 — Memo Writer (Stage 3, one per case)
 
 Fill the placeholder in `prompts/stage3_memo_writer.md` and instruct an agent to read the file and execute it:
-- `{{SCENARIO_BRIEF}}` — full JSON from Stage 2 output
+- `{{SCENARIO_BRIEF}}` — full JSON from `pipeline/run/stage2/mech_NNN_scenario.json`
 
 Save the memo text to `pipeline/run/stage3/mech_NNN_memo.txt`.
 
@@ -87,18 +89,18 @@ Save the memo text to `pipeline/run/stage3/mech_NNN_memo.txt`.
 **Stage 5 first (keeps it truly blind):**
 
 Fill the placeholder in `prompts/stage5_leakage_auditor.md` and instruct an agent to read the file and execute it:
-- `{{TASK_PROMPT}}` — memo text from Stage 3
+- `{{TASK_PROMPT}}` — memo text from `pipeline/run/stage3/mech_NNN_memo.txt`
 
 Save to `pipeline/run/stage5/mech_NNN_audit.json`.
 
 **Stage 4:**
 
 Fill the placeholders in `prompts/stage4_metadata_assembler.md` and instruct an agent to read the file and execute it:
-- `{{MECHANISM_BLUEPRINT}}` — full metadata view from `mech_NNN_metadata_view.json`
+- `{{MECHANISM_BLUEPRINT}}` — full JSON from `pipeline/run/stage1.5/mech_NNN_metadata_view.json`
 - `{{METADATA_VIEW}}` — same file
-- `{{LEAKAGE_AUDIT}}` — Stage 5 JSON output
-- `{{TASK_PROMPT}}` — memo text from Stage 3
-- `{{CASE_ID}}` — assign `eval_scenario_NNN`
+- `{{LEAKAGE_AUDIT}}` — full JSON from `pipeline/run/stage5/mech_NNN_audit.json`
+- `{{TASK_PROMPT}}` — memo text from `pipeline/run/stage3/mech_NNN_memo.txt`
+- `{{CASE_ID}}` — the case ID assigned for this mechanism (e.g., `eval_scenario_401`)
 
 Save to `pipeline/run/cases/mech_NNN.json`.
 
