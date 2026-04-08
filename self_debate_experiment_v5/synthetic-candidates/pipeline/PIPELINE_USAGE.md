@@ -26,9 +26,45 @@ pipeline/
     stage4_metadata_assembler.md    # Constructs the answer key
     stage5_leakage_auditor.md       # Evaluates memo for leakage (blind)
   fact_mixer.py                     # Stage 1.5: shuffles facts, strips role labels
+  orchestrator.py                   # Automated end-to-end runner (all stages via OpenRouter)
   trigger_phrase_list.md            # Reference: banned constructions for Stage 3
   PIPELINE_USAGE.md                 # This file
 ```
+
+---
+
+## Automated Mode (Recommended)
+
+Run all stages end-to-end with a single command:
+
+```bash
+cd self_debate_experiment_v5/synthetic-candidates
+OPENROUTER_API_KEY=your_key uv run pipeline/orchestrator.py \
+  --extractor-source real_paper \
+  --batch-size 15 \
+  --batch-number 4 \
+  --start-case-id 310
+```
+
+The orchestrator runs Stages 1–6 automatically, including:
+- Auto-recycling cases that fail the leakage audit (up to `--max-recycles` attempts)
+- Smoke test (Stage 6) against a configurable model
+- Final batch assembly filtering to `verifier_status: "pending"` cases only
+
+### Key options
+
+| Option | Default | Description |
+|---|---|---|
+| `--max-recycles N` | 2 | Max recycle attempts per case |
+| `--no-smoke` | off | Skip Stage 6 smoke test |
+| `--resume` | off | Skip cases with existing Stage 4 output |
+| `--dry-run` | off | Print prompts without API calls |
+| `--stage1-model MODEL` | `google/gemini-2.5-pro` | Override Stage 1 model |
+| `--stage5-model MODEL` | `anthropic/claude-sonnet-4-6` | Override Stage 5 model |
+| `--smoke-model MODEL` | `anthropic/claude-haiku-4-5` | Override smoke test model |
+| `--models JSON` | — | Batch-override multiple models |
+
+All models are OpenRouter model strings. Use different models for Stage 1 and Stage 5 to avoid circular bias (generator and auditor sharing the same priors).
 
 ---
 
