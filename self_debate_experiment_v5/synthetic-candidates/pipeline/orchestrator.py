@@ -66,7 +66,7 @@ API_TIMEOUT = 180.0   # seconds per request before raising TimeoutError
 
 # Source catalog lives alongside this script
 sys.path.insert(0, str(PIPELINE_DIR))
-from source_catalog import select_sources  # noqa: E402
+from source_catalog import select_sources, select_benchmark_assignments  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Default model config
@@ -200,11 +200,76 @@ def run_stage1(config: dict, client: OpenAI) -> list[dict]:
         out.write_text(json.dumps(result, indent=2), encoding="utf-8")
         return result
 
-    if config["extractor_source"] != "real_paper":
-        raise NotImplementedError(
-            "Concurrent Stage 1 is only implemented for real_paper mode. "
-            "benchmark mode uses the legacy sequential path — pass --extractor-source real_paper."
+    if config["extractor_source"] == "benchmark":
+        assignments_bm = select_benchmark_assignments(
+            batch_size=config["batch_size"],
+            previous_usage=config["previous_batch_usage"],
+            seed=config["seed"],
         )
+        template_bm = read_prompt("stage1_benchmark_extractor.md")
+
+        console.print(
+            f"[Stage 1] {len(assignments_bm)} benchmark slots → "
+            f"{config['models']['stage1']} (concurrent ≤{MAX_WORKERS})"
+        )
+        for a in assignments_bm:
+            ft_label = a["flaw_type"] or "null"
+            console.print(
+                f"  {a['mechanism_id']}  [{a['case_type']:12}]  {a['category']}  ({ft_label})"
+            )
+
+        def generate_benchmark(assignment: dict) -> dict:
+            mechanism_id = assignment["mechanism_id"]
+            prompt = fill_placeholders(template_bm, {
+                "CATEGORY":             assignment["category"],
+                "CASE_TYPE":            assignment["case_type"],
+                "FLAW_TYPE":            assignment["flaw_type"] or "null",
+                "MECHANISM_ID":         mechanism_id,
+                "PREVIOUS_BATCH_USAGE": json.dumps(config["previous_batch_usage"]),
+            })
+            raw = call_llm_json(prompt, config["models"]["stage1"], client, dry_run=False)
+            if isinstance(raw, list):
+                raw = raw[0] if raw else {}
+            if not isinstance(raw, dict):
+                raise ValueError(
+                    f"Stage 1 {mechanism_id}: expected JSON object, got {type(raw).__name__}"
+                )
+            raw["mechanism_id"] = mechanism_id
+            raw.setdefault("pipeline_source", "benchmark")
+            console.print(
+                f"  [green]✓[/green] {mechanism_id} "
+                f"({assignment['category']} / {assignment['flaw_type'] or 'defense_wins'})"
+            )
+            return raw
+
+        bm_blueprints: list[dict | None] = [None] * len(assignments_bm)
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            future_to_idx = {
+                executor.submit(generate_benchmark, a): i
+                for i, a in enumerate(assignments_bm)
+            }
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    bm_blueprints[idx] = future.result()
+                except Exception as exc:
+                    mech_id = assignments_bm[idx]["mechanism_id"]
+                    console.print(f"  [red]✗ {mech_id} FAILED: {exc}[/red]")
+                    bm_blueprints[idx] = {
+                        "mechanism_id": mech_id,
+                        "pipeline_source": "benchmark",
+                        "error": str(exc),
+                        "status": "failed",
+                    }
+
+        result = [bp for bp in bm_blueprints if bp is not None]
+        out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        n_ok = sum(1 for bp in result if "error" not in bp)
+        console.print(f"[Stage 1] {n_ok}/{len(result)} blueprints OK → {out}")
+        return result
+
+    elif config["extractor_source"] != "real_paper":
+        raise NotImplementedError(f"Unknown extractor_source: {config['extractor_source']}")
 
     # Select sources: code assigns which source each call uses
     assignments = select_sources(

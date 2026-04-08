@@ -28,6 +28,42 @@ class Assignment(TypedDict):
     case_type: str        # "critique" | "mixed" | "defense_wins"
 
 
+class BenchmarkAssignment(TypedDict):
+    mechanism_id: str     # "mech_001"
+    category: str         # "broken_baseline" | "metric_mismatch" | ...
+    flaw_type: str | None # None for defense_wins
+    case_type: str        # "critique" | "mixed" | "defense_wins"
+
+
+# ---------------------------------------------------------------------------
+# Benchmark category catalog
+# ---------------------------------------------------------------------------
+
+# (category_name, min_per_15, max_per_15, case_type)
+BENCHMARK_CATEGORIES: list[tuple[str, int, int, str]] = [
+    ("broken_baseline",               2, 3, "critique"),
+    ("metric_mismatch",               1, 2, "critique"),
+    ("hidden_confounding",            2, 3, "critique"),
+    ("scope_intent_misunderstanding", 1, 2, "critique"),
+    ("defense_wins",                  2, 3, "defense_wins"),
+    ("real_world_framing",            1, 2, "critique"),
+]
+
+BENCHMARK_FLAW_TYPES: list[str] = [
+    "assumption_violation",
+    "quantitative_error",
+    "critical_omission",
+    "wrong_justification",
+]
+
+# Lowest-priority categories to trim when rounding produces excess
+_BENCHMARK_DROP_ORDER: list[str] = [
+    "scope_intent_misunderstanding",
+    "real_world_framing",
+    "metric_mismatch",
+]
+
+
 # ---------------------------------------------------------------------------
 # Source library
 # ---------------------------------------------------------------------------
@@ -456,4 +492,108 @@ def usage_from_blueprints(blueprints: list[dict]) -> dict:
         ref = bp.get("source_reference", "")
         if ref:
             usage[ref] = usage.get(ref, 0) + 1
+    return usage
+
+
+def select_benchmark_assignments(
+    batch_size: int,
+    previous_usage: dict,
+    seed: int = 42,
+) -> list[BenchmarkAssignment]:
+    """
+    Allocate batch_size benchmark case slots across categories.
+
+    Args:
+        batch_size: Number of cases to generate.
+        previous_usage: Dict of "category:NAME" -> count and "domain:..." -> count
+                        entries from prior batches (for LLM domain-diversity guidance).
+        seed: RNG seed for reproducibility.
+
+    Returns:
+        List of BenchmarkAssignment dicts, one per case, ordered by mechanism_id.
+    """
+    rng = random.Random(seed)
+    scale = batch_size / 15.0
+
+    # Start each category at its scaled minimum (floor, min 0)
+    counts: dict[str, int] = {}
+    for name, min_n, _max_n, _ct in BENCHMARK_CATEGORIES:
+        counts[name] = int(min_n * scale)  # floor
+
+    # Fill remaining slots by distributing to categories with headroom
+    remaining = batch_size - sum(counts.values())
+    while remaining > 0:
+        added = False
+        for name, _min_n, max_n, _ct in sorted(
+            BENCHMARK_CATEGORIES,
+            key=lambda c: max(1, round(c[2] * scale)) - counts[c[0]],
+            reverse=True,
+        ):
+            scaled_max = max(1, round(max_n * scale))
+            if counts[name] < scaled_max and remaining > 0:
+                counts[name] += 1
+                remaining -= 1
+                added = True
+        if not added:
+            # All categories at max; force into widest-range category
+            counts[BENCHMARK_CATEGORIES[0][0]] += 1
+            remaining -= 1
+
+    # Trim excess (can arise from ceiling rounding)
+    excess = sum(counts.values()) - batch_size
+    for cat_name in _BENCHMARK_DROP_ORDER:
+        while excess > 0 and counts[cat_name] > 0:
+            counts[cat_name] -= 1
+            excess -= 1
+
+    # Build (category, flaw_type, case_type) triples
+    flaw_type_counts: dict[str, int] = {}
+    triples: list[tuple[str, str | None, str]] = []
+
+    for name, _min_n, _max_n, default_ct in BENCHMARK_CATEGORIES:
+        for _ in range(counts[name]):
+            if default_ct == "defense_wins":
+                triples.append((name, None, "defense_wins"))
+            else:
+                # Pick flaw type; no type may appear more than 3× per batch
+                available = [ft for ft in BENCHMARK_FLAW_TYPES
+                             if flaw_type_counts.get(ft, 0) < 3]
+                if not available:
+                    available = list(BENCHMARK_FLAW_TYPES)
+                ft = rng.choice(available)
+                flaw_type_counts[ft] = flaw_type_counts.get(ft, 0) + 1
+                triples.append((name, ft, "critique"))
+
+    # Upgrade ~35% of critique slots to mixed
+    critique_indices = [i for i, (_, _, ct) in enumerate(triples) if ct == "critique"]
+    n_mixed = min(max(3, round(len(critique_indices) * 0.35)), len(critique_indices))
+    for i in rng.sample(critique_indices, n_mixed):
+        cat, ft, _ = triples[i]
+        triples[i] = (cat, ft, "mixed")
+
+    rng.shuffle(triples)
+
+    return [
+        BenchmarkAssignment(
+            mechanism_id=f"mech_{i + 1:03d}",
+            category=cat,
+            flaw_type=ft,
+            case_type=ct,
+        )
+        for i, (cat, ft, ct) in enumerate(triples)
+    ]
+
+
+def usage_from_benchmark_blueprints(blueprints: list[dict]) -> dict:
+    """Build a previous_usage dict from an existing benchmark stage1_blueprints.json."""
+    usage: dict[str, int] = {}
+    for bp in blueprints:
+        cat = bp.get("category", "")
+        domain = bp.get("target_domain", "")
+        if cat:
+            key = f"category:{cat}"
+            usage[key] = usage.get(key, 0) + 1
+        if domain:
+            key = f"domain:{domain}"
+            usage[key] = usage.get(key, 0) + 1
     return usage
