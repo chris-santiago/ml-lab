@@ -173,10 +173,14 @@ def run_stage1(config: dict, client: OpenAI) -> list[dict]:
     })
 
     print(f"[Stage 1] {extractor_file} → {config['models']['stage1']}")
-    result = call_llm_json(prompt, config["models"]["stage1"], client, config["dry_run"])
 
-    if not isinstance(result, list):
-        raise ValueError(f"Stage 1 must return a JSON array, got {type(result).__name__}")
+    if config["dry_run"]:
+        result = [{"mechanism_id": f"mech_{i+1:03d}", "dry_run": True} for i in range(config["batch_size"])]
+        print(f"[Stage 1] [DRY RUN] Synthetic {config['batch_size']} blueprints")
+    else:
+        result = call_llm_json(prompt, config["models"]["stage1"], client, dry_run=False)
+        if not isinstance(result, list):
+            raise ValueError(f"Stage 1 must return a JSON array, got {type(result).__name__}")
 
     out = RUN_DIR / "stage1_blueprints.json"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -229,6 +233,9 @@ def _archive(mechanism_id: str, attempt: int) -> None:
 
 
 def run_stage2(mechanism_id: str, config: dict, client: OpenAI, note: str = "") -> dict:
+    if config["dry_run"]:
+        print(f"    [Stage 2] {mechanism_id} → {config['models']['stage2']} [DRY RUN]")
+        return {"dry_run": True}
     writer_view = json.loads(
         (RUN_DIR / "stage1.5" / f"{mechanism_id}_writer_view.json").read_text(encoding="utf-8")
     )
@@ -242,7 +249,7 @@ def run_stage2(mechanism_id: str, config: dict, client: OpenAI, note: str = "") 
         "WRITER_VIEW_FACTS":     json.dumps(writer_view.get("facts", []), indent=2),
     })
     print(f"    [Stage 2] {mechanism_id} → {config['models']['stage2']}")
-    result = call_llm_json(prompt, config["models"]["stage2"], client, config["dry_run"])
+    result = call_llm_json(prompt, config["models"]["stage2"], client, dry_run=False)
     out = RUN_DIR / "stage2" / f"{mechanism_id}_scenario.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -250,6 +257,9 @@ def run_stage2(mechanism_id: str, config: dict, client: OpenAI, note: str = "") 
 
 
 def run_stage3(mechanism_id: str, config: dict, client: OpenAI, note: str = "") -> str:
+    if config["dry_run"]:
+        print(f"    [Stage 3] {mechanism_id} → {config['models']['stage3']} [DRY RUN]")
+        return "[dry_run memo]"
     scenario = json.loads(
         (RUN_DIR / "stage2" / f"{mechanism_id}_scenario.json").read_text(encoding="utf-8")
     )
@@ -260,7 +270,7 @@ def run_stage3(mechanism_id: str, config: dict, client: OpenAI, note: str = "") 
         "SCENARIO_BRIEF": json.dumps(scenario, indent=2),
     })
     print(f"    [Stage 3] {mechanism_id} → {config['models']['stage3']}")
-    memo = call_llm(prompt, config["models"]["stage3"], client, config["dry_run"])
+    memo = call_llm(prompt, config["models"]["stage3"], client, dry_run=False)
     out = RUN_DIR / "stage3" / f"{mechanism_id}_memo.txt"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(memo, encoding="utf-8")
@@ -268,11 +278,14 @@ def run_stage3(mechanism_id: str, config: dict, client: OpenAI, note: str = "") 
 
 
 def run_stage5(mechanism_id: str, config: dict, client: OpenAI) -> dict:
+    if config["dry_run"]:
+        print(f"    [Stage 5] {mechanism_id} → {config['models']['stage5']} (leakage audit) [DRY RUN]")
+        return {"overall_leakage_score": 0.0, "voice_assessment": "team_advocacy", "dry_run": True}
     memo = (RUN_DIR / "stage3" / f"{mechanism_id}_memo.txt").read_text(encoding="utf-8")
     template = read_prompt("stage5_leakage_auditor.md")
     prompt = fill_placeholders(template, {"TASK_PROMPT": memo})
     print(f"    [Stage 5] {mechanism_id} → {config['models']['stage5']} (leakage audit)")
-    result = call_llm_json(prompt, config["models"]["stage5"], client, config["dry_run"])
+    result = call_llm_json(prompt, config["models"]["stage5"], client, dry_run=False)
     out = RUN_DIR / "stage5" / f"{mechanism_id}_audit.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -283,6 +296,9 @@ def run_stage5(mechanism_id: str, config: dict, client: OpenAI) -> dict:
 
 
 def run_stage4(mechanism_id: str, case_id: str, config: dict, client: OpenAI) -> dict:
+    if config["dry_run"]:
+        print(f"    [Stage 4] {mechanism_id} → {config['models']['stage4']} (metadata assembly) [DRY RUN]")
+        return {"case_id": case_id, "verifier_status": "pending", "dry_run": True}
     metadata_view = json.loads(
         (RUN_DIR / "stage1.5" / f"{mechanism_id}_metadata_view.json").read_text(encoding="utf-8")
     )
@@ -299,7 +315,7 @@ def run_stage4(mechanism_id: str, case_id: str, config: dict, client: OpenAI) ->
         "CASE_ID":             case_id,
     })
     print(f"    [Stage 4] {mechanism_id} → {config['models']['stage4']} (metadata assembly)")
-    result = call_llm_json(prompt, config["models"]["stage4"], client, config["dry_run"])
+    result = call_llm_json(prompt, config["models"]["stage4"], client, dry_run=False)
     out = RUN_DIR / "cases" / f"{mechanism_id}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -311,6 +327,10 @@ def run_stage4(mechanism_id: str, case_id: str, config: dict, client: OpenAI) ->
 # ---------------------------------------------------------------------------
 
 def run_smoke_test(mechanism_id: str, case: dict, config: dict, client: OpenAI) -> dict:
+    if config["dry_run"]:
+        print(f"    [Stage 6] {mechanism_id} → {config['models']['smoke']} (blind eval) [DRY RUN]")
+        print(f"    [Stage 6] {mechanism_id} → {config['models']['scorer']} (scoring) [DRY RUN]")
+        return {"mechanism_id": mechanism_id, "proxy_mean": 0.0, "gate_pass": True, "dry_run": True}
     task_prompt = case.get("task_prompt", "")
     scoring_targets = case.get("scoring_targets", {})
     planted_issues = case.get("planted_issues", [])
@@ -547,6 +567,9 @@ def run_case(
 # ---------------------------------------------------------------------------
 
 def assemble_batch(config: dict) -> None:
+    if config["dry_run"]:
+        print(f"\n[DRY RUN] Would assemble cases_batch{config['batch_number']}.json from pipeline/run/cases/")
+        return
     cases_dir = RUN_DIR / "cases"
     accepted = []
     recycled = []
