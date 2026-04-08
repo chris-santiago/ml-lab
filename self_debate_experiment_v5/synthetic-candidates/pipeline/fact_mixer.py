@@ -216,7 +216,7 @@ def validate_blueprint(blueprint: dict) -> list[str]:
     elif abi_id not in {f["fact_id"] for f in flaw_facts}:
         errors.append(f"{mech_id}: addressed_but_incorrectly_fact_id '{abi_id}' not in flaw_facts")
 
-    compound_ids = blueprint.get("compound_fact_ids", [])
+    compound_ids = blueprint.get("compound_fact_ids") or []
     if len(compound_ids) < 2:
         errors.append(f"{mech_id}: compound_fact_ids must have ≥2 entries")
 
