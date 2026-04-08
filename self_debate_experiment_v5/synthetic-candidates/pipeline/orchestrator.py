@@ -66,7 +66,12 @@ API_TIMEOUT = 180.0   # seconds per request before raising TimeoutError
 
 # Source catalog lives alongside this script
 sys.path.insert(0, str(PIPELINE_DIR))
-from source_catalog import select_sources, select_benchmark_assignments  # noqa: E402
+from source_catalog import (  # noqa: E402
+    select_sources,
+    select_benchmark_assignments,
+    CRITIQUE_SOURCES,
+    DEFENSE_PATTERNS,
+)
 
 # ---------------------------------------------------------------------------
 # Default model config
@@ -579,7 +584,7 @@ def recycle_action(audit: dict, smoke: dict | None) -> tuple[str | None, str, st
     Routing priority:
       voice issue    → Stage 3 (rewrite memo)
       leakage issue  → Stage 2 (new scenario)
-      smoke IDR=1.0  → Stage 2 (deeper mechanism — Stage 1 recycle is too expensive for v1)
+      smoke IDR=1.0  → Stage 1 (mechanism itself is too recognizable; new domain transposition)
       smoke FVC bad  → Stage 2 (restructure decoys)
       smoke general  → Stage 2 (general rework)
     """
@@ -612,12 +617,13 @@ def recycle_action(audit: dict, smoke: dict | None) -> tuple[str | None, str, st
 
         if idr == 1.0:
             return (
-                "stage2",
+                "stage1",
                 "difficulty_idr",
                 f"Smoke test IDR=1.0 (proxy_mean={smoke.get('proxy_mean', '?')}): all must-find issues "
-                "identified in a single pass. Redesign the scenario so the flaw requires domain-specific "
-                "knowledge to detect. Consider wrapping the mechanism in a regulatory or field-specific "
-                "context where the flaw is only recognisable with specialist knowledge.",
+                "identified in a single pass. The abstract mechanism is too recognizable through general "
+                "ML pattern-matching. Re-generate with a completely different target domain — the flaw "
+                "should only be detectable by someone with domain-specific expertise (regulatory standard, "
+                "field-specific measurement convention, or operational constraint), not general ML knowledge.",
             )
         if fvc == 1.0 and idr == 0.0:
             return (
@@ -640,6 +646,77 @@ def recycle_action(audit: dict, smoke: dict | None) -> tuple[str | None, str, st
 
 
 # ---------------------------------------------------------------------------
+# Stage 1 single-mechanism recycle
+# ---------------------------------------------------------------------------
+
+def run_stage1_recycle(
+    mechanism_id: str,
+    config: dict,
+    client: OpenAI,
+    note: str = "",
+) -> None:
+    """
+    Re-generate the Stage 1 blueprint for one mechanism, then re-run fact_mixer.
+
+    Used when IDR=1.0 persists after Stage 2 recycling — indicates the abstract
+    mechanism itself is too recognizable, not just the scenario framing.
+    Picks the same source but forces a completely different domain transposition.
+    """
+    blueprints_path = RUN_DIR / "stage1_blueprints.json"
+    blueprints: list[dict] = json.loads(blueprints_path.read_text(encoding="utf-8"))
+
+    current = next((bp for bp in blueprints if bp.get("mechanism_id") == mechanism_id), None)
+    if current is None:
+        raise RuntimeError(f"run_stage1_recycle: {mechanism_id} not found in stage1_blueprints.json")
+
+    # Look up original source from catalog
+    source_ref = current.get("source_reference", "")
+    all_sources = CRITIQUE_SOURCES + DEFENSE_PATTERNS
+    source_entry = next((s for s in all_sources if s["label"] == source_ref), None)
+
+    if source_entry is None:
+        raise RuntimeError(
+            f"run_stage1_recycle: cannot find source '{source_ref}' in catalog — "
+            "cannot re-run Stage 1 without the source text"
+        )
+
+    console.print(f"  S1↻ {mechanism_id} → {config['models']['stage1']} (Stage 1 recycle)")
+
+    operator_note = (
+        f"RECYCLE (IDR=1.0 after prior attempt): {note}\n\n"
+        "The previous domain transposition was too shallow — the mechanism remained "
+        "identifiable through general ML pattern-matching alone. Choose a completely "
+        "different target domain. The flaw must require domain-specific expertise to "
+        "detect, not general ML knowledge. Vocabulary, regulatory context, and "
+        "operational stakes must all be domain-specific enough to prevent pattern-matching."
+    )
+
+    template = read_prompt("stage1_mechanism_extractor.md")
+    prompt = fill_placeholders(template, {
+        "SOURCE_REFERENCE":     source_entry["text"] + f"\n\n**Operator note:** {operator_note}",
+        "CASE_TYPE":            current.get("case_type", "critique"),
+        "MECHANISM_ID":         mechanism_id,
+        "PREVIOUS_BATCH_USAGE": json.dumps(config["previous_batch_usage"]),
+    })
+
+    raw = call_llm_json(prompt, config["models"]["stage1"], client, dry_run=config.get("dry_run", False))
+    if isinstance(raw, list):
+        raw = raw[0] if raw else {}
+    raw["mechanism_id"] = mechanism_id
+    raw.setdefault("pipeline_source", config["extractor_source"])
+
+    # Update stage1_blueprints.json in-place
+    for i, bp in enumerate(blueprints):
+        if bp.get("mechanism_id") == mechanism_id:
+            blueprints[i] = raw
+            break
+    blueprints_path.write_text(json.dumps(blueprints, indent=2), encoding="utf-8")
+
+    console.print(f"  S1↻ {mechanism_id} blueprint updated → re-running fact_mixer")
+    run_fact_mixer(config)
+
+
+# ---------------------------------------------------------------------------
 # Full per-case pipeline
 # ---------------------------------------------------------------------------
 
@@ -655,8 +732,10 @@ def run_case(
 ) -> dict | None:
     """Run Stages 2→3→5→4→[6] for one case, with auto-recycling."""
     max_recycles = config["max_recycles"]
+    note_s1 = ""
     note_s2 = ""
     note_s3 = ""
+    next_recycle_stage = "stage2"  # default; updated after each attempt
 
     def _step(label: str) -> None:
         if progress is not None and case_task is not None:
@@ -672,6 +751,10 @@ def run_case(
             console.print(f"  [yellow]↻ {mechanism_id} recycle {attempt}/{max_recycles}[/yellow]")
             if progress is not None and case_task is not None:
                 progress.reset(case_task, total=stages_per_case)
+
+            if next_recycle_stage == "stage1":
+                run_stage1_recycle(mechanism_id, config, client, note=note_s1)
+                note_s2 = ""  # fresh blueprint — clear any prior stage2 note
 
         try:
             _step("S2 scenario architect")
@@ -715,7 +798,12 @@ def run_case(
             console.print(f"  [yellow]→ {mechanism_id} recycle → {stage}[/yellow] ({reason})")
             _archive(mechanism_id, attempt)
 
-            if stage == "stage3":
+            next_recycle_stage = stage
+            if stage == "stage1":
+                note_s1 = note
+                note_s2 = ""
+                note_s3 = ""
+            elif stage == "stage3":
                 note_s3 = note
             else:
                 note_s2 = note

@@ -20,6 +20,15 @@
 
 **Domain transposition:** Choose a target domain that is plausibly different from any example domains listed in the source's "Transpose to" guidance. The domain must have operational texture — include a regulatory constraint, business context, or field-specific norm.
 
+**Transposition depth requirement (critical):** The abstract mechanism must be embedded ≥2 layers deep in domain-specific context before it resembles a recognizable ML failure mode. Ask yourself: would a general ML practitioner recognize the flaw from the memo text without domain expertise? If yes, the transposition is too shallow.
+
+The flaw should only be detectable by someone who knows one of:
+- A regulatory or measurement standard specific to this domain (e.g., ICH E9(R1), CLSI EP09-A3, SR 11-7)
+- A field-specific data collection convention that makes the implicit assumption wrong
+- An operational constraint in this domain that creates the confound
+
+**Avoid shallow transpositions:** Proxy variable bias in healthcare is equally obvious in any other clinical prediction context. A model comparison flaw in RecSys is equally obvious in any other ranking domain. Cross the mechanism into a domain where its surface form looks fundamentally different — the vocabulary, the regulatory context, and the operational stakes should all be unfamiliar enough that a general ML reviewer cannot pattern-match to the abstract mechanism.
+
 ---
 
 ## Flaw Fact Phrasing Requirement

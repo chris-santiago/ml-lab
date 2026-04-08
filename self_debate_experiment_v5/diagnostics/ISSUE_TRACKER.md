@@ -172,3 +172,40 @@ If the pipeline is validated, a technical report should be written covering:
 5. **Threshold comparability caveat** — the smoke test acceptance threshold was raised from 0.4 to 0.55 in the refactored orchestrator; pass rates are not directly comparable to prior methods or versions without adjusting for this change; any cross-version comparison must account for the threshold delta
 
 **Next step:** If and only if the v5 benchmark run validates the pipeline, write the report to `self_debate_experiment_v5/diagnostics/CASE_GENERATION_METHODOLOGY.md`. All pass rate comparisons to previous pipeline versions must explicitly note the 0.4 → 0.55 threshold change.
+
+---
+
+## OPEN-10 — `difficulty_idr` recycle routed to Stage 2 when mechanism is the problem
+
+**Severity:** High — wrong recycle target wastes recycle budget without addressing root cause  
+**Source:** Batch 328–342 observations; mech_001 EXHAUSTED after 2 Stage 2 recycles at IDR=1.0  
+
+When IDR=1.0 fires, the previous routing sent the case to Stage 2 (new scenario) with a note asking for "deeper domain embedding." This is the wrong abstraction level: if the abstract mechanism extracted at Stage 1 is too recognizable (e.g., Obermeyer proxy-variable bias, Dacrema RecSys comparison), a new scenario framing around the same mechanism will still be IDR=1.0. The mechanism itself needs to be re-generated with a different domain transposition, not just re-staged.
+
+Evidence: mech_001 (Obermeyer et al.) exhausted 2 Stage 2 recycles and was dropped, all three attempts at IDR=1.0. mech_005, mech_007, mech_014 showed same pattern in the same batch.
+
+**Fix applied (2026-04-08):** `difficulty_idr` recycle now routes to Stage 1. Added `run_stage1_recycle()` to orchestrator — re-generates blueprint using same source but forces completely different domain transposition, then re-runs fact_mixer before continuing to Stage 2. `recycle_action()` routing updated; `run_case()` now handles `stage == "stage1"` at top of retry loop.
+
+---
+
+## OPEN-11 — Stage 1 transposition depth insufficient for well-known paper mechanisms
+
+**Severity:** High — root cause of persistent IDR=1.0 wall across batches 313–342  
+**Source:** Batches 313–327 (5/7 critique IDR=1.0) and 328–342 (similar pattern despite model swap)  
+
+The Stage 1 prompt instructed domain transposition but did not specify depth. Mechanisms from famous ML papers (Obermeyer et al. 2019, Dacrema et al. 2019, Ziegler et al. RLHF) are well-established failure modes that Haiku recognizes from a well-written description alone, even after domain relabeling. Transposing "proxy variable bias in healthcare" to "proxy variable bias in insurance" produces a memo that is equally obvious. The mechanism's surface form must change, not just its domain label.
+
+Swapping Stage 3 from GPT-5.4 to DeepSeek v3.2 did not improve IDR — confirming the problem is at Stage 1, not Stage 3.
+
+**Fix applied (2026-04-08):** Stage 1 prompt (`stage1_mechanism_extractor.md`) updated with explicit transposition depth requirement: ≥2 layers of domain-specific context, flaw detectable only via regulatory/field-specific knowledge, and explicit prohibition on shallow transpositions to adjacent ML application domains. Stage 1 recycle path (OPEN-10 fix) provides a retry mechanism when this requirement isn't met.
+
+---
+
+## OPEN-12 — Stage 2 fact placement has no positional constraints; flaw facts can surface early
+
+**Severity:** High — contributes to IDR=1.0 by allowing flaw facts in high-visibility paragraph positions  
+**Source:** Batch 313–342 recycle patterns; memo structure analysis  
+
+The Stage 2 prompt said "distribute facts across paragraphs" and "don't cluster all facts in one paragraph" — but imposed no hard positional constraint. The scenario architect frequently assigned methodologically significant facts (where flaws live) to paragraph 2 (the "addressing concerns" paragraph), which the memo writer then featured prominently. A fact described at the top of the memo is trivially findable; IDR=1.0 follows mechanically.
+
+**Fix applied (2026-04-08):** Stage 2 prompt (`stage2_scenario_architect.md`) updated with hard placement constraints: at most 2 facts in paragraphs 1–2 combined; at least 2 facts assigned to paragraph 4; model architecture / validation design / data preprocessing facts restricted to paragraphs 3–4 only; no two methodologically significant facts may be consecutive in the same paragraph.

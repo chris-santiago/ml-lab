@@ -38,7 +38,11 @@ You have received a list of methodology facts. For each fact, indicate:
 - Which paragraph of the memo it naturally belongs in (1, 2, 3, or 4)
 - How to present it naturally — what surrounding context makes it sound like a routine design decision
 
-The facts should be distributed: some in the "addressing concerns" paragraph, some in the "methodology details" paragraph, and some woven into the operational context. Do not cluster all facts in one paragraph.
+**Hard placement constraints (these are not suggestions — enforce them):**
+- **At most 2 facts total** may be assigned to paragraphs 1 or 2 combined. Paragraphs 1 and 2 carry the headline result and anticipated concerns — they must not crowd in technical methodology details.
+- **At least 2 facts must be assigned to paragraph 4** — the deepest methodology paragraph. This forces technical details to the back of the memo where they require reading through prior context to reach.
+- Facts describing model architecture, validation design, data preprocessing, or statistical choices belong in paragraphs 3 or 4 only. Facts describing business outcomes or high-level operational decisions may go in paragraphs 1 or 2.
+- Do not place two methodologically significant facts consecutively in the same paragraph. Interleave them with operational or contextual detail.
 
 ---
 
