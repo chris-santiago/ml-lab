@@ -33,9 +33,20 @@ pipeline/
 
 ## Running the Pipeline
 
+## Choosing a Stage 1 extractor
+
+| Use case | Stage 1 prompt |
+|---|---|
+| Real paper transpositions | `prompts/stage1_mechanism_extractor.md` |
+| Benchmark category cases | `prompts/stage1_benchmark_extractor.md` |
+
+Stages 2–5, `fact_mixer.py`, and the smoke test are identical for both. The only change is which Stage 1 prompt you run. Each extractor stamps `pipeline_source` into its output; `fact_mixer.py` validates this field and will error if blueprints from different extractors are mixed in the same batch.
+
+---
+
 ### Step 1 — Generate mechanism blueprints (Stage 1)
 
-Paste `prompts/stage1_mechanism_extractor.md` into your LLM with placeholders filled:
+Fill the placeholders in the appropriate Stage 1 prompt (`stage1_mechanism_extractor.md` or `stage1_benchmark_extractor.md`) and instruct an agent to read the file and execute it:
 - `{{BATCH_SIZE}}`: number of cases (e.g., 15)
 - `{{PREVIOUS_BATCH_USAGE}}`: JSON of sources/domains already used, or `{}`
 
@@ -48,14 +59,17 @@ cd self_debate_experiment_v5/synthetic-candidates
 uv run pipeline/fact_mixer.py \
   --input pipeline/run/stage1_blueprints.json \
   --output-dir pipeline/run/stage1.5/ \
-  --seed 42
+  --seed 42 \
+  --expected-source real_paper   # or: benchmark
 ```
+
+`--expected-source` is optional but recommended — it catches the case where the wrong Stage 1 prompt was used before you invest time in Stages 2–5.
 
 Produces per-case `writer_view` (no role labels) and `metadata_view` (with role labels) files.
 
 ### Step 3 — Scenario Architect (Stage 2, one per case)
 
-Paste `prompts/stage2_scenario_architect.md` with placeholders from the writer view:
+Fill the placeholders in `prompts/stage2_scenario_architect.md` and instruct an agent to read the file and execute it:
 - `{{TARGET_DOMAIN}}`, `{{DOMAIN_SPECIFIC_DETAIL}}`, `{{CATEGORY}}` — from `writer_view` fields
 - `{{WRITER_VIEW_FACTS}}` — the `facts` array from `mech_NNN_writer_view.json`
 
@@ -63,7 +77,7 @@ Save output to `pipeline/run/stage2/mech_NNN_scenario.json`.
 
 ### Step 4 — Memo Writer (Stage 3, one per case)
 
-Paste `prompts/stage3_memo_writer.md` with:
+Fill the placeholder in `prompts/stage3_memo_writer.md` and instruct an agent to read the file and execute it:
 - `{{SCENARIO_BRIEF}}` — full JSON from Stage 2 output
 
 Save the memo text to `pipeline/run/stage3/mech_NNN_memo.txt`.
@@ -72,14 +86,14 @@ Save the memo text to `pipeline/run/stage3/mech_NNN_memo.txt`.
 
 **Stage 5 first (keeps it truly blind):**
 
-Paste `prompts/stage5_leakage_auditor.md` with:
+Fill the placeholder in `prompts/stage5_leakage_auditor.md` and instruct an agent to read the file and execute it:
 - `{{TASK_PROMPT}}` — memo text from Stage 3
 
 Save to `pipeline/run/stage5/mech_NNN_audit.json`.
 
 **Stage 4:**
 
-Paste `prompts/stage4_metadata_assembler.md` with:
+Fill the placeholders in `prompts/stage4_metadata_assembler.md` and instruct an agent to read the file and execute it:
 - `{{MECHANISM_BLUEPRINT}}` — full metadata view from `mech_NNN_metadata_view.json`
 - `{{METADATA_VIEW}}` — same file
 - `{{LEAKAGE_AUDIT}}` — Stage 5 JSON output
