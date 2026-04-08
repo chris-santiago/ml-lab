@@ -73,9 +73,9 @@ from source_catalog import select_sources  # noqa: E402
 # ---------------------------------------------------------------------------
 
 DEFAULT_MODELS: dict[str, str] = {
-    "stage1": "deepseek/deepseek-v3.2",              # Mechanism extractor — DeepSeek; strong JSON compliance, different from Stage 5
+    "stage1": "openai/gpt-5.4",                      # Mechanism extractor — GPT-5.4; rich schema compliance, deep mechanism extraction
     "stage2": "qwen/qwen3-235b-a22b-2507",           # Scenario architect — Qwen3; structured output, cost-effective
-    "stage3": "openai/gpt-5.4",                      # Memo writer — OpenAI; critical quality stage; don't cut corners
+    "stage3": "deepseek/deepseek-v3.2",              # Memo writer — DeepSeek; less perceptive about flaw salience → lower IDR leakage
     "stage4": "qwen/qwen3-235b-a22b-2507",           # Metadata assembler — Qwen3; structured JSON, cost-effective
     "stage5": "anthropic/claude-sonnet-4.6",         # Leakage auditor — Claude; must match debate agent family
     "smoke":  "anthropic/claude-haiku-4.5",          # Smoke test — Claude; backward compat with prior calibration runs
