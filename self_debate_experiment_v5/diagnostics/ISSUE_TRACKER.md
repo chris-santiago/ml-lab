@@ -9,9 +9,9 @@
 
 - Smoke tests run: V1 (1xx) → V2 (2xx) → V3 (2xx + IDJ) → V4 (batch3, Lever A+B) → V5 (batch3, paragraphs removed) → **Pipeline batches 313–342 (pre-fix), 343–357 (post-fix), 358–372 (famous sources retired), 373–387 (first test of four prompt fixes)**
 - Gate result: **FLAT** — IDR=0.0 trend: 0/8 → 3/9 → 4/9 → 3/8 across last four batches; four prompt fixes (OPEN-16) did not improve IDR=0.0 rate
-- Infrastructure (scripts, phases, agents): **READY** — all preflight checks pass
-- Active blockers: (1) IDR=1.0 gate-slip pattern — IDR=1.0, IDP=0.0 cases (proxy=0.5) pass gate threshold (0.55) but are trivially easy for Haiku (OPEN-17); (2) Sources 7 and 9 exhausted twice — retirement candidates; (3) OPEN-15 (Haiku vs Sonnet gate gap) still unresolved
-- Next batch to run: 388–402 (`--start-case-id 388 --concurrency 25`) — after retiring Sources 7 and 9 and deciding on gate tightening
+- **PIPELINE REDESIGN DECISION (2026-04-08):** The entire case generation approach is being replaced. See ARCH-1 below. All previous batches (3xx) are superseded — wrong document type. No further batches will be run under the old pipeline.
+- Infrastructure (scripts, phases, agents): **READY** — will be repurposed for new pipeline
+- Active work: Design new two-node pipeline (ARCH-1)
 
 ---
 
@@ -340,3 +340,78 @@ The three sources that achieved IDR=0.0 (Ziegler, Dacrema, Caruana) are technica
 **Workaround:** Use `--resume` only when re-entering an interrupted run of the same batch (same `--start-case-id`). Never use it to start a new batch. Clear or archive `pipeline/run/` before starting a fresh batch if in doubt.
 
 **Fix needed:** Guard `--resume` skip logic with a case_id check: if the existing `mech_NNN.json` has a `case_id` that doesn't match the expected range for this batch, do not skip — treat as a miss and re-run.
+
+---
+
+## ARCH-1 — Pipeline redesign: replace advocacy memo generation with experiment design generation
+
+**Decision date:** 2026-04-08  
+**Status:** ACTIVE — supersedes all prior case generation work (batches 313–387)
+
+### Root cause of prior pipeline failure
+
+The prior pipeline generated **advocacy memos** — retrospective documents written in team voice describing completed ML work, with flaws planted in the text and obscured through language. The benchmark task was: "read this memo, find the hidden flaw."
+
+This was the wrong document type. When an LLM is asked to test a hypothesis, it does not produce an advocacy memo. It produces a **prospective experiment design** — a numbered plan describing what to do, what data to collect, how to validate, what metrics to use. The debate protocol operates on that plan, not on a retrospective report.
+
+The entire infrastructure built to obscure flaws in language (compound fact isolation, prominence inversion, authoritative wrong justification, leakage auditor, IDR=0.0 pursuit) was solving a problem created by the wrong document type. Flaws in a plan don't need to be hidden — they just require methodology expertise to identify.
+
+### New architecture: two-node design + corruption pipeline
+
+**Node 1 — Design node (capable model):**  
+Given a hypothesis, generates a sound, correct experiment design. This is the ground truth. No flaws are introduced here. The model is instructed only to produce a valid design.
+
+**Orchestrator (Python, probabilistic):**  
+Samples a corruption level for each case before passing to Node 2:
+- P(0 flaws) ≈ 0.25 → sound design, correct verdict is "defend/approve"
+- P(1 flaw) ≈ 0.35 → subtle single flaw
+- P(2 flaws) ≈ 0.25 → compound or independent flaws
+- P(many flaws) ≈ 0.15 → obvious/multiple errors, calibration anchor
+
+**Node 2 — Corruption node (powerful model):**  
+Takes the sound design and N as input. Replaces N design choices with plausible-but-wrong alternatives — flaws that look like natural LLM output from a model that didn't reason carefully about this choice. Returns: (a) corrupted design, (b) diff report (what changed, why it's wrong, what the correct version is).
+
+**Ground truth:**  
+The diff report from Node 2 is the ground truth. `must_find`, `correct_verdict`, and `corrected_design` are all byproducts of the corruption step — no separate engineering required.
+
+**Debate agents see:**  
+Hypothesis + corrupted design (or sound design if 0 corruptions). Never the diff report.
+
+### Why this is correct
+
+1. **Document type matches reality** — the cases look like what `ml-lab` actually produces when asked to design an experiment
+2. **Ground truth is automatic** — the pre-corruption design is always correct; the diff is always known
+3. **Difficulty is controlled by the orchestrator** — not by how well language obscures the flaw
+4. **No hiding machinery needed** — a wrong split strategy is wrong whether or not the language is persuasive; difficulty comes from methodology subtlety, not text opacity
+5. **Defense wins cases are trivial to generate** — 0 corruptions; correct verdict is "approve"
+6. **Calibration anchors included** — "many flaws" cases catch protocol failures regardless of difficulty tuning
+
+### Scope of hypothesis space
+
+Cases should span the full range of what `ml-lab` handles: any ML hypothesis that can be run or simulated on a computer. This includes classification, regression, ranking, generative modeling, reinforcement learning, time series, causal inference, and any domain (healthcare, finance, NLP, vision, scientific ML, etc.).
+
+### Pipeline stages (new)
+
+| Stage | Model | Task |
+|---|---|---|
+| 1 | Any | Hypothesis + domain generator |
+| 2 | Capable (Sonnet / GPT-4o) | Sound design writer — valid experiment plan |
+| 3 | Powerful (Opus / GPT-5 / o3) | Corruption node — insert N flaws, return diff |
+| 4 | Any | Ground truth assembler (structured from diff) |
+| 5 | Sonnet | Smoke test — single-pass evaluation; gate on discriminating range |
+
+### What is preserved from prior pipeline
+
+- Python orchestrator skeleton (ThreadPoolExecutor, recycle logic, progress bars)
+- Flaw taxonomy (broken baseline, metric mismatch, leakage, scope mismatch, hidden confounding, defense_wins)
+- Scoring dimensions (IDR, IDP, FVC, IDJ) — semantics unchanged, applied to new document type
+- Gate concept — filter cases where single-pass is already perfect (no lift possible) or completely wrong (too hard, noise)
+
+### What is replaced
+
+- Stage 1: mechanism extractor + source catalog → hypothesis generator
+- Stage 2: scenario architect → (eliminated; design node has no scenario context needed)
+- Stage 3: memo writer → design writer (sound experiment plan)
+- Stage 4 (new): corruption node
+- Stage 5: leakage auditor → (eliminated; no language hiding needed)
+- All cases in batches 313–387: wrong document type, not reusable
