@@ -94,11 +94,11 @@ def sample_corruption_level(rng: random.Random) -> int | str:
 # ---------------------------------------------------------------------------
 
 DEFAULT_MODELS: dict[str, str] = {
-    "stage1": "openai/gpt-5.4",                    # Hypothesis generator — diverse, creative
-    "stage2": "anthropic/claude-sonnet-4.6",        # Design writer — careful, methodologically sound
-    "stage3": "openai/gpt-5.4",                    # Corruption node — powerful; subtle, convincing flaws
-    "stage4": "qwen/qwen3-235b-a22b-2507",         # Ground truth assembler — structured JSON
-    "smoke":  "anthropic/claude-sonnet-4.6",        # Smoke test — same family as debate agents
+    "stage1": "openai/gpt-5.4-mini",               # Hypothesis generator — simple JSON, mini sufficient
+    "stage2": "anthropic/claude-haiku-4-5-20251001", # Design writer — structured narrative, haiku sufficient
+    "stage3": "openai/gpt-5.4",                    # Corruption node — KEEP powerful; subtle, convincing flaws
+    "stage4": "qwen/qwen3-235b-a22b-2507",         # Ground truth assembler — structured JSON, scoring labels
+    "smoke":  "anthropic/claude-sonnet-4.6",        # Smoke test — KEEP sonnet; proxy_mean calibrated to debate agents
     "scorer": "openai/gpt-5.4-mini",               # Binary score mapper — low-stakes JSON parsing
 }
 
