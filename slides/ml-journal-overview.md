@@ -142,15 +142,15 @@ ml-journal enforces a fixed schema per entry type. Claude infers the type from c
 | `issue` | description, severity | No |
 | `resolution` | description | No |
 | `decision` | description, rationale | Yes |
-| `discovery` | description | No |
-| `hypothesis` | description | No |
+| `discovery` | description | Yes |
+| `hypothesis` | description | Yes |
 | `experiment` | description, verdict | Yes |
 | `post_mortem` | description, what_failed, root_cause | Yes |
 | `memo` | description | No |
 | `checkpoint` | in_progress | Yes |
 | `git` | commit_hash, message, branch | Yes (via `/log-commit`) |
 
-High-stakes types (decisions, experiments, post-mortems) require confirmation before writing.
+Medium-stakes types (decisions, experiments, post-mortems, discoveries, hypotheses) require confirmation before writing.
 
 ---
 

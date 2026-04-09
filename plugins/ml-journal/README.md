@@ -167,8 +167,8 @@ Use `/research-note` for sharing what happened today. Use `/research-report` for
 |---|---|---|---|
 | `issue` | description, severity¹ | No | Light |
 | `resolution` | description | No | Light |
-| `discovery` | description | No | Light |
-| `hypothesis` | description | No | Light |
+| `discovery` | description | Yes | Medium |
+| `hypothesis` | description | Yes | Medium |
 | `lesson` | description | No | Light |
 | `memo` | description | No | Light |
 | `decision` | description, rationale | Yes | Medium |
@@ -181,7 +181,7 @@ Use `/research-note` for sharing what happened today. Use `/research-report` for
 ¹ `severity` must be one of: `low`, `moderate`, `high`, `critical`
 ² `verdict` must be one of: `confirmed`, `refuted`, `inconclusive`
 
-Light entries are logged immediately. Medium and heavy entries show a draft and ask for confirmation before writing.
+Light entries are logged immediately. Medium entries (including discoveries and hypotheses) show a draft and ask for confirmation before writing. Heavy entries do the same.
 
 ## Scripts
 

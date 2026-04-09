@@ -57,10 +57,10 @@ Extract relevant field values from the conversation. Do not invent details not p
 ## Step 3: Confirm or run
 
 **Confirm before logging** (show draft, ask `► Log this? (y/n)`):
-- `decision`, `post_mortem`, `experiment`, `summary`
+- `decision`, `post_mortem`, `experiment`, `summary`, `discovery`, `hypothesis`
 
 **Log directly** (no confirmation):
-- `issue`, `resolution`, `discovery`, `hypothesis`, `lesson`, `memo`
+- `issue`, `resolution`, `lesson`, `memo`
 
 Note: `git` entries are handled exclusively by `/journal-commit` (which always confirms). Do not pass `git` type through this skill.
 

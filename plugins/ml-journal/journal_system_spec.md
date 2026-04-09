@@ -435,8 +435,8 @@ All hooks:
 |---|---|
 | `issue` | No |
 | `resolution` | No |
-| `discovery` | No |
-| `hypothesis` | No |
+| `discovery` | Yes |
+| `hypothesis` | Yes |
 | `lesson` | No |
 | `memo` | No |
 | `git` | Yes (commit is irreversible) |
