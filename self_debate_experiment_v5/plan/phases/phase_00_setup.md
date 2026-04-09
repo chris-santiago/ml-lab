@@ -47,24 +47,11 @@ cp self_debate_experiment_v5/plan/scripts/log_entry.py self_debate_experiment_v5
 
 > **Script:** `plan/scripts/validate_cases.py` — validates case file schema, category distribution, must_find sizes, difficulty labels. Accepts `--lenient` to skip count assertions.
 
-**Merge both source files into benchmark_cases.json** (idempotent — safe to re-run if preflight already created it):
+**Copy selected cases from pipeline output into benchmark_cases.json** (idempotent — safe to re-run if preflight already created it):
 
 ```bash
-cd self_debate_experiment_v5 && uv run python -c "
-import json
-with open('synthetic-candidates/openai_benchmark_cases.json') as f:
-    main = json.load(f)
-with open('synthetic-candidates/real_paper_cases.json') as f:
-    supplement = json.load(f)
-main_ids = {c['case_id'] for c in main}
-supp_ids = {c['case_id'] for c in supplement}
-overlap = main_ids & supp_ids
-assert not overlap, f'Case ID collision: {overlap}'
-merged = main + supplement
-with open('benchmark_cases.json', 'w') as f:
-    json.dump(merged, f, indent=2)
-print(f'Merged {len(main)} + {len(supplement)} = {len(merged)} cases')
-"
+cd self_debate_experiment_v5 && cp synthetic-candidates/selected_cases_all.json benchmark_cases.json && \
+  uv run python -c "import json; cases=json.load(open('benchmark_cases.json')); print(f'Loaded {len(cases)} cases from pipeline output')"
 ```
 
 **Validate merged file (schema + composition assertions):**
@@ -77,8 +64,8 @@ cd self_debate_experiment_v5 && uv run plan/scripts/validate_cases.py benchmark_
 
 **Logging:**
 ```bash
-cd self_debate_experiment_v5 && uv run plan/scripts/log_entry.py --step 0 --cat workflow --action step_start --detail "Phase 0: setup complete, benchmark_cases merged from 2 source files, validate_cases passed"
-cd self_debate_experiment_v5 && uv run plan/scripts/log_entry.py --step 0 --cat exec --action validate_cases --detail "Merged 50+14=64 cases; composition validation passed" --artifact benchmark_cases.json
+cd self_debate_experiment_v5 && uv run plan/scripts/log_entry.py --step 0 --cat workflow --action step_start --detail "Phase 0: setup complete, benchmark_cases copied from pipeline selected_cases_all.json, validate_cases passed"
+cd self_debate_experiment_v5 && uv run plan/scripts/log_entry.py --step 0 --cat exec --action validate_cases --detail "Pipeline-selected cases copied; composition validation passed" --artifact benchmark_cases.json
 cd self_debate_experiment_v5 && uv run plan/scripts/log_entry.py --step 0 --cat workflow --action step_end --detail "Phase 0 complete"
 ```
 
@@ -86,5 +73,5 @@ cd self_debate_experiment_v5 && uv run plan/scripts/log_entry.py --step 0 --cat 
 ```bash
 git add self_debate_experiment_v5/log_entry.py \
         self_debate_experiment_v5/benchmark_cases.json
-git commit -m "v5 Phase 0: log_entry.py, benchmark_cases merged (50 main + 14 real-paper = 64)"
+git commit -m "v5 Phase 0: log_entry.py, benchmark_cases from pipeline selected_cases_all.json"
 ```

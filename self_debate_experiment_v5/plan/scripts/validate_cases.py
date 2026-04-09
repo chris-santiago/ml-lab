@@ -78,7 +78,7 @@ hard_mixed_eta = sum(1 for c in cases
 print(f'Hard mixed empirical_test_agreed cases: {hard_mixed_eta} (target >= 8 per case gen prompt)')
 
 if not args.lenient:
-    assert len(cases) >= 60, 'Need at least 60 cases (64 expected: 50 main + 14 real-paper supplement)'
+    assert len(cases) >= 60, 'Need at least 60 cases (selected by pipeline select_cases.py)'
     assert mixed >= 12, 'Need at least 12 mixed-position cases'
     assert large_mf >= 20, 'Need at least 20 cases with 3+ must_find items'
     print('\nValidation passed.')

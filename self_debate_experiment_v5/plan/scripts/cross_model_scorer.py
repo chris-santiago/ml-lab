@@ -10,7 +10,7 @@ Cross-vendor per-dimension validation.
 v5 changes from v4:
 - Uses OpenAI-compatible API (not Anthropic SDK) — fixes MiniMax ThinkingBlock parse failures
 - Strips <think>...</think> tags from responses
-- Scores ALL dimensions (IDR, IDP, DRQ, FVC), not just IDR
+- Scores IDR, IDP, FVC (external model does not score DRQ or IDJ)
 - Runs on ALL cases (not just non-defense_wins)
 """
 import json, os, re

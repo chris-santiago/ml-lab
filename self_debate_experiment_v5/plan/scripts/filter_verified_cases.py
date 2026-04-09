@@ -19,7 +19,7 @@ print(f'Keep: {len(keep)} | Mixed: {mixed} | Defense_wins: {dw}')
 
 if len(keep) < 50:
     print(f'\nERROR: Only {len(keep)} cases passed verification (need >= 40).')
-    raise SystemExit('Insufficient cases (need >= 50 from 64 candidates) — operator must re-run external LLM generation before proceeding')
+    raise SystemExit('Insufficient cases (need >= 50) — operator must re-run pipeline case generation before proceeding')
 
 if mixed < 10:
     print(f'\nERROR: Only {mixed} mixed-position cases passed (need >= 10).')

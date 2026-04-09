@@ -29,9 +29,7 @@ For each baseline response, score the following inline (do not invoke self_debat
 - IDR: Did the response identify all must_find_issue_ids?
 - IDP: Was at least one issue description substantively correct?
 - FVC: Is the verdict (or implied resolution) in acceptable_resolutions?
-- IDJ: For each issue in issues_found that has a stated justification in the memo — did the response specifically argue that justification is wrong? (For defense_wins cases or cases with no addressed_but_incorrectly issues: IDJ=N/A)
-
-Compute a preliminary baseline mean for each case from the applicable scores (IDR, IDP, FVC, IDJ where applicable). IDJ is N/A for defense_wins cases and cases with no addressed_but_incorrectly issues; exclude N/A dimensions from the denominator.
+Compute a preliminary baseline mean for each case from the applicable scores (IDR, IDP, FVC). Exclude N/A dimensions (defense_wins cases: IDR/IDP = N/A) from the denominator.
 
 **Preliminary Spearman check (on the 15-case stratified pilot):**
 Rank the 15 cases by difficulty (easy=1, medium=2, hard=3) and by their baseline means. Compute Spearman rho between rank-difficulty and baseline scores. If rho > 0 (hard cases scoring HIGHER than easy ones — inverted correlation), flag as a warning and present to LEAD before proceeding. This is an early warning for the Issue 15 pattern observed in v4.

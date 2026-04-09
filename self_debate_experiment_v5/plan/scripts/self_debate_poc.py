@@ -11,7 +11,7 @@ Key changes from v3:
 - Single canonical ETD output schema: condition/supports_critique_if/supports_defense_if/ambiguous_if
 - 5 conditions: isolated_debate, multiround, forced_multiround, ensemble, baseline
 - DRQ NOT capped for any condition (DC=N/A removes need for structural override)
-- Fair-comparison lift (IDR/IDP/IDJ/DRQ/FVC) as primary metric
+- Fair-comparison lift (IDR/IDP/DRQ/FVC) as primary metric
 - forced_multiround runs on hard cases only
 - DC demoted to diagnostic-only: excluded from per-case mean and pass/fail criterion.
   Kept in scores dict for reporting and failure attribution. DC/FVC delta computed
@@ -34,8 +34,8 @@ RESULTS_FILE = OUTPUT_DIR / args.output
 EVAL_RESULTS_FILE = OUTPUT_DIR / args.output.replace('.json', '_eval.json')
 
 CONDITIONS = ['isolated_debate', 'multiround', 'forced_multiround', 'ensemble', 'baseline']
-FAIR_COMPARISON_DIMS = ['IDR', 'IDP', 'IDJ', 'DRQ', 'FVC']
-PRIMARY_SCORING_DIMS = ['IDR', 'IDP', 'IDJ', 'DRQ', 'ETD', 'FVC']  # DC excluded — diagnostic-only
+FAIR_COMPARISON_DIMS = ['IDR', 'IDP', 'DRQ', 'FVC']
+PRIMARY_SCORING_DIMS = ['IDR', 'IDP', 'DRQ', 'ETD', 'FVC']  # DC excluded — diagnostic-only
 
 
 def load_cases():
@@ -65,21 +65,6 @@ def compute_idp(all_issues_raised, must_find_ids, must_not_claim):
         return 0.5
     return 0.0
 
-
-def compute_idj(must_find_ids, addressed_but_incorrectly_ids, justifications_challenged):
-    """
-    IDJ = fraction of addressed_but_incorrectly must_find issues where
-    model correctly challenged the stated justification.
-    N/A if no addressed_but_incorrectly issues in this case.
-    """
-    abi = [i for i in must_find_ids if i in addressed_but_incorrectly_ids]
-    if not abi:
-        return None
-    challenged = [i for i in abi if i in justifications_challenged]
-    frac = len(challenged) / len(abi)
-    if frac >= 0.9: return 1.0
-    elif frac >= 0.5: return 0.5
-    return 0.0
 
 
 def compute_fvc(verdict, acceptable_resolutions, ideal_resolution):
@@ -180,11 +165,6 @@ def score_run(case, output, condition):
     issues_found = output.get('issues_found', [])
     all_issues_raised = output.get('all_issues_raised', [])
     empirical_test = output.get('empirical_test')
-    addressed_but_incorrectly_ids = [
-        p['issue_id'] for p in case.get('planted_issues', [])
-        if p.get('addressed_but_incorrectly')
-    ]
-    justifications_challenged = output.get('justifications_challenged', [])
 
     scores = {}
     if correct_position == 'defense':
@@ -199,7 +179,6 @@ def score_run(case, output, condition):
     scores['DRQ'] = compute_drq(verdict, acceptable_resolutions, ideal_resolution)
     scores['ETD'] = compute_etd(empirical_test, ideal_resolution, condition)
     scores['FVC'] = compute_fvc(verdict, acceptable_resolutions, ideal_resolution)
-    scores['IDJ'] = compute_idj(must_find_ids, addressed_but_incorrectly_ids, justifications_challenged)
 
     # DC is diagnostic-only — excluded from primary mean and pass/fail criterion
     primary_vals = [scores[d] for d in PRIMARY_SCORING_DIMS if scores.get(d) is not None]
@@ -219,7 +198,7 @@ def score_run(case, output, condition):
 
 
 def fair_comparison_mean(runs, dims=FAIR_COMPARISON_DIMS):
-    """Mean across fair-comparison dimensions only (IDR, IDP, IDJ, DRQ, FVC)."""
+    """Mean across fair-comparison dimensions only (IDR, IDP, DRQ, FVC)."""
     vals = [run['scores'].get(d) for run in runs for d in dims if run['scores'].get(d) is not None]
     return round(sum(vals) / len(vals), 4) if vals else None
 
@@ -293,7 +272,7 @@ def main():
     ensemble_means = [r['ensemble']['mean'] for r in all_results]
     baseline_means = [r['baseline']['mean'] for r in all_results]
 
-    # Fair-comparison means (IDR/IDP/IDJ/DRQ/FVC only)
+    # Fair-comparison means (IDR/IDP/DRQ/FVC only)
     isolated_fc = [r['isolated_debate']['fair_comparison_mean'] for r in all_results if r['isolated_debate']['fair_comparison_mean'] is not None]
     baseline_fc = [r['baseline']['fair_comparison_mean'] for r in all_results if r['baseline']['fair_comparison_mean'] is not None]
     fc_lift = round(sum(isolated_fc) / len(isolated_fc) - sum(baseline_fc) / len(baseline_fc), 4) if isolated_fc and baseline_fc else None
@@ -353,7 +332,7 @@ def main():
         json.dump(eval_results, f, indent=2)
 
     print("=" * 80)
-    print("V4 BENCHMARK SUMMARY")
+    print("V5 BENCHMARK SUMMARY")
     print("=" * 80)
     print(f"{'Case':<32} {'Iso':>5} {'MR':>5} {'FM*':>5} {'Ens':>5} {'Base':>5} Pass")
     print("-" * 80)
@@ -365,7 +344,7 @@ def main():
     print("-" * 80)
     print(f"{'BENCHMARK':<32} {bm_isolated:>5.3f} {bm_multiround:>5.3f} {'N/A':>5} {bm_ensemble:>5.3f} {bm_baseline:>5.3f}")
     print(f"\n* forced_multiround: hard cases only")
-    print(f"\nFair-comparison lift (IDR/IDP/IDJ/DRQ/FVC): {fc_lift:+.4f}" if fc_lift else "\nFair-comparison lift: N/A")
+    print(f"\nFair-comparison lift (IDR/IDP/DRQ/FVC): {fc_lift:+.4f}" if fc_lift else "\nFair-comparison lift: N/A")
     print(f"Raw lift isolated vs baseline:           {bm_isolated - bm_baseline:+.4f}")
     print(f"Isolated debate pass rate: {d_pass_count}/{n} ({d_pass_frac:.1%})")
     print(f"\nBENCHMARK OVERALL: {'PASSES' if benchmark_passes else 'FAILS'}")

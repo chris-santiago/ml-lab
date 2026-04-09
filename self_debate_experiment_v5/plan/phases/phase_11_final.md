@@ -64,7 +64,7 @@ print(f'{len(forced_mr)} forced_multiround outputs; mean rounds={sum(mr_rounds)/
 "
 
 git add -A
-git commit -m "Self-debate protocol v5: complete experiment — 64 cases, 5 conditions, fair-comparison lift primary"
+git commit -m "Self-debate protocol v5: complete experiment — 5 conditions, fair-comparison lift primary"
 
 uv run log_entry.py --step 11 --cat gate --action artifact_verification_passed --detail "All required artifacts present, forced_multiround outputs verified >= 2 rounds"
 uv run log_entry.py --step 11 --cat workflow --action step_end --detail "Phase 11 complete — experiment committed"
