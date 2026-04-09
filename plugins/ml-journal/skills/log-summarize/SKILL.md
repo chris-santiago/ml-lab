@@ -1,6 +1,6 @@
 ---
 name: log-summarize
-description: Synthesize a prose summary of all journal entries of a requested type. Use when the user says "summarize decisions", "what decisions have we made", "give me a summary of open issues", "synthesize our experiments", "what have we discovered", or any phrasing asking for a narrative synthesis of logged entries.
+description: Synthesize a prose summary of all journal entries of a requested type. Use when the user says "summarize decisions", "what decisions have we made", "give me a summary of open issues", "synthesize our experiments", "what have we discovered", or any phrasing asking for a narrative synthesis of logged entries. Also handles cross-category requests like "summarize recent entries" or "what happened recently".
 ---
 
 ## Step 1: Check journal exists
@@ -13,15 +13,25 @@ If `.project-log/journal.jsonl` does not exist, say: "No journal found in this r
 
 From user phrasing, identify the entry type to summarize. Valid types: `issue`, `resolution`, `decision`, `discovery`, `hypothesis`, `experiment`, `post_mortem`, `summary`, `checkpoint`, `git`.
 
+If the user asks for **recent entries across all types** (e.g. "recent entries", "what happened recently", "summarize recent activity", "show me the last N entries"), treat type as `recent` and go to Step 3a.
+
 If ambiguous, ask.
 
-## Step 3: Load entries
+## Step 3: Load entries (single type)
 
 ```bash
-python3 <repo-root>/.project-log/journal_query.py --list <type>
+uv run <repo-root>/.project-log/journal_query.py --list <type>
 ```
 
 If no entries of that type: say so and stop.
+
+## Step 3a: Load recent entries (cross-category)
+
+Infer N from the user's phrasing (e.g. "last 10", "recent 5"). Default to 10 if unspecified.
+
+```bash
+uv run <repo-root>/.project-log/journal_query.py --recent <N>
+```
 
 ## Step 4: Synthesize prose summary
 
@@ -35,6 +45,7 @@ From the structured entry output, write a coherent prose summary appropriate to 
 **experiment** — summarize what was tried, what verdicts came back, what patterns emerge
 **post_mortem** — synthesize root causes and lessons; note recurring themes
 **checkpoint** — trace how the work state has evolved session over session
+**recent** — group by type, narrate chronologically, highlight anything unresolved or actionable
 
 Keep the summary grounded in the actual logged entries — do not speculate or add information not present in the journal.
 
