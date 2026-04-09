@@ -241,24 +241,11 @@ Proactive logging rules chain entry types together. Claude proposes each step at
 
 **Bug fix** — three entries, one event chain:
 
-```mermaid
-flowchart LR
-    A[Bug identified] -->|auto-propose| B[issue]
-    B --> C[Fix verified]
-    C -->|auto-propose| D[resolution]
-    D --> E[Root cause clear]
-    E -->|auto-propose| F[lesson]
-```
+![bug fix chain](diagrams/chain-bug-fix.svg)
 
 **Investigation** — hypothesis → experiment → outcome:
 
-```mermaid
-flowchart LR
-    A[hypothesis] --> B[experiment\nverdict]
-    B -->|unexpected| C[discovery]
-    B -->|direction confirmed| D[decision]
-    B -->|inconclusive| A
-```
+![investigation chain](diagrams/chain-investigation.svg)
 
 ---
 
@@ -266,22 +253,11 @@ flowchart LR
 
 **Session boundary** — state survives compaction:
 
-```mermaid
-flowchart LR
-    A[session entries] --> B[/checkpoint]
-    B -.->|next session| C[/resume]
-    B -->|optional| D[/research-note]
-```
+![session chain](diagrams/chain-session.svg)
 
 **Synthesis ladder** — from raw entries to shareable artifacts:
 
-```mermaid
-flowchart LR
-    J[journal.jsonl] --> S[/log-summarize]
-    S -->|day scope| N[research-note\nPR-ready]
-    J -->|end of phase| R[/research-report\nreport-drafter agent]
-    R --> P[RESEARCH_REPORT.md]
-```
+![synthesis chain](diagrams/chain-synthesis.svg)
 
 ---
 
