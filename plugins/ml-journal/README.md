@@ -10,6 +10,8 @@ Claude Code sessions are stateless. When context compacts or a new session start
 
 ## Installation
 
+**Via plugin (recommended):**
+
 ```bash
 # Install the plugin (once, user-scoped)
 claude plugin install ml-journal@ml-debate-lab
@@ -17,6 +19,28 @@ claude plugin install ml-journal@ml-debate-lab
 # Initialize in any git repo (once per repo)
 /log-init
 ```
+
+**Manual option 1 — copy the plugin directory into your repo:**
+
+```bash
+cp -r plugins/ml-journal /your/repo/plugins/ml-journal
+```
+
+Then register it in your repo's `.claude-plugin/marketplace.json` and run `claude plugin install ml-journal@your-repo`. Skills are auto-discovered from `plugins/ml-journal/skills/`.
+
+**Manual option 2 — copy skills directly into `~/.claude/`:**
+
+```bash
+# Copy all skills into your global Claude Code skills directory
+cp -r plugins/ml-journal/skills/* ~/.claude/skills/
+
+# Copy the report-drafter agent
+cp plugins/ml-journal/report-drafter.md ~/.claude/agents/
+```
+
+Skills copied to `~/.claude/skills/` are available globally across all repos without any plugin install step. Run `/log-init` in any repo to initialize the journal.
+
+---
 
 `/log-init` creates `.project-log/` at the repo root, copies the query scripts, and writes a verification entry.
 
