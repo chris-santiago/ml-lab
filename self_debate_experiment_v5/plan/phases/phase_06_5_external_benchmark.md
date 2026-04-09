@@ -1,5 +1,7 @@
 ## Phase 6.5 — External Benchmark Evaluation
 
+> **⚠ SKIP FOR V5 RUN — `external_cases_v5.json` was never created. Decision logged: journal issue bfe958a1 / decision 9723bed9. External benchmark deferred to a future experiment. Proceed directly to Phase 6.75.**
+
 > **Reminders (cross-cutting rules)**
 > - All script invocations use `uv run`. Never `python` or `python3` directly.
 > - Agents dispatched by name only. Do not read any file from `agents/`.
