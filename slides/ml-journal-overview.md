@@ -235,6 +235,56 @@ Two synthesis skills for different audiences and scopes.
 
 ---
 
+# Chain Workflows — Bug Fix & Investigation
+
+Proactive logging rules chain entry types together. Claude proposes each step at the right moment.
+
+**Bug fix** — three entries, one event chain:
+
+```mermaid
+flowchart LR
+    A[Bug identified] -->|auto-propose| B[issue]
+    B --> C[Fix verified]
+    C -->|auto-propose| D[resolution]
+    D --> E[Root cause clear]
+    E -->|auto-propose| F[lesson]
+```
+
+**Investigation** — hypothesis → experiment → outcome:
+
+```mermaid
+flowchart LR
+    A[hypothesis] --> B[experiment\nverdict]
+    B -->|unexpected| C[discovery]
+    B -->|direction confirmed| D[decision]
+    B -->|inconclusive| A
+```
+
+---
+
+# Chain Workflows — Session & Synthesis
+
+**Session boundary** — state survives compaction:
+
+```mermaid
+flowchart LR
+    A[session entries] --> B[/checkpoint]
+    B -.->|next session| C[/resume]
+    B -->|optional| D[/research-note]
+```
+
+**Synthesis ladder** — from raw entries to shareable artifacts:
+
+```mermaid
+flowchart LR
+    J[journal.jsonl] --> S[/log-summarize]
+    S -->|day scope| N[research-note\nPR-ready]
+    J -->|end of phase| R[/research-report\nreport-drafter agent]
+    R --> P[RESEARCH_REPORT.md]
+```
+
+---
+
 # Optional Hooks
 
 Two hook scripts enable automatic checkpoint/resume without manual invocation.

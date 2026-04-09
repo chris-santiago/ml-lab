@@ -20,6 +20,7 @@ claude plugin install ml-journal@ml-debate-lab
 
 ```
 judgment layer     →  Claude skills (extract, classify, construct args)
+agent layer        →  Subagents (isolated context ingestion for heavy synthesis)
 mechanical layer   →  Python scripts (validate, serialize, write)
 storage            →  .project-log/journal.jsonl (per-repo, append-only)
 ```
@@ -44,6 +45,55 @@ Periodic:
   /log-summarize      ← prose synthesis of a specific entry type
   /log-status         ← quick overview of the journal state
   /research-report    ← full retrospective at end of phase or project
+```
+
+## Chain Workflows
+
+Proactive logging rules (injected into `CLAUDE.md` by `/log-init`) define how entry types chain together naturally during a session. Claude auto-proposes each step at the right moment — you confirm or decline.
+
+### Bug Fix
+
+```mermaid
+flowchart LR
+    A[Bug identified\nand explained] -->|auto-propose| B[log: issue\nseverity]
+    B --> C[Fix implemented\nand verified]
+    C -->|auto-propose| D[log: resolution]
+    D --> E[Root cause\nunderstood]
+    E -->|auto-propose| F[log: lesson]
+```
+
+### Investigation
+
+```mermaid
+flowchart LR
+    A[Hypothesis formed] -->|manual| B[log: hypothesis]
+    B --> C[Experiment run\nverdict clear]
+    C -->|auto-propose| D[log: experiment\nconfirmed/refuted/inconclusive]
+    D --> E{outcome}
+    E -->|unexpected finding| F[log: discovery\nauto-propose]
+    E -->|direction confirmed| G[log: decision\nauto-propose]
+    E -->|inconclusive| B
+```
+
+### Session Boundary
+
+```mermaid
+flowchart LR
+    A[Active session\nentries logged] -->|end of session| B[/checkpoint]
+    B -->|optional| C[/research-note\nRESEARCH_NOTE_date.md]
+    D[New session] -->|start of session| E[/resume]
+    E --> F[Continue work]
+    B -.->|persists across| D
+```
+
+### Synthesis Ladder
+
+```mermaid
+flowchart TB
+    J[journal.jsonl] --> S[/log-summarize\nprose by type]
+    S -->|reused as input| N[/research-note\nsession-scoped note]
+    J -->|end of phase| R[/research-report\ndispatches report-drafter]
+    R --> RP[RESEARCH_REPORT.md]
 ```
 
 ## Skills
