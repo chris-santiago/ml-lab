@@ -20,13 +20,13 @@ This installs all seven agent files to `~/.claude/agents/` automatically.
 **Manual install:**
 
 ```bash
-cp agents/ml-lab.md ~/.claude/agents/
-cp agents/ml-critic.md ~/.claude/agents/
-cp agents/ml-defender.md ~/.claude/agents/
-cp agents/research-reviewer.md ~/.claude/agents/
-cp agents/research-reviewer-lite.md ~/.claude/agents/
-cp agents/readme-rewriter.md ~/.claude/agents/
-cp agents/report-writer.md ~/.claude/agents/
+cp plugins/ml-lab/ml-lab.md ~/.claude/agents/
+cp plugins/ml-lab/ml-critic.md ~/.claude/agents/
+cp plugins/ml-lab/ml-defender.md ~/.claude/agents/
+cp plugins/ml-lab/research-reviewer.md ~/.claude/agents/
+cp plugins/ml-lab/research-reviewer-lite.md ~/.claude/agents/
+cp plugins/ml-lab/readme-rewriter.md ~/.claude/agents/
+cp plugins/ml-lab/report-writer.md ~/.claude/agents/
 ```
 
 Once installed, Claude Code will make `ml-lab` available as a spawnable agent. Invoke it by describing an ML hypothesis — it will ask you to sharpen it into a falsifiable claim before starting the investigation.
@@ -208,7 +208,7 @@ uv run log_entry.py --step 5 --cat gate --action gate_experiment_plan_approved \
   --meta '{"empirical_tests":4,"conceded_points":2}'
 ```
 
-The full schema, rhythm rules, and `log_entry.py` source are in [`agents/ml-lab.md`](agents/ml-lab.md).
+The full schema, rhythm rules, and `log_entry.py` source are in [`plugins/ml-lab/ml-lab.md`](plugins/ml-lab/ml-lab.md).
 
 ---
 
@@ -327,7 +327,7 @@ The clearest illustration is the five *false-positive critique traps* — valid 
 > - *Fault detection (IDR):* 10 cases drawn from published ML evaluation failures (Dacrema 2019, Obermeyer 2019, DeGrave 2021, and others) — real papers with real flaws, ground truth from the published record, no designer involvement in case construction. Tests whether the protocol finds issues it wasn't designed around. Result: debate IDR = 0.95, meeting the ≥ 0.85 pre-specified threshold. The ensemble was not re-run on these cases; this benchmark specifically validates issue detection, not the full scoring rubric. See [`external_benchmark/`](external_benchmark/).
 > - *Exoneration (defense_wins):* 3 cases from peer-reviewed ML work (BERT/SQuAD 1.1, ResNet-152/ImageNet, clinical 5-fold CV) where a critique *could* be raised but the methodology is genuinely sound. Tests whether the protocol avoids wrongly condemning valid work when external ground truth says it's correct. Result: debate 3/3 pass (mean 0.875); baseline 0/3 rubric pass (DC=0.0 structural rule) but 3/3 correct verdict label. Note: critics raised plausible-but-wrong concerns (IDP=0.5) on all 3 external cases — the "clean exoneration" tendency observed on 3/5 internal cases did not replicate. See [`self_debate_experiment_v2/external_exoneration_results.json`](self_debate_experiment_v2/external_exoneration_results.json).
 
-One case failed: a healthcare triage scenario where the Defender correctly identified all critical flaws in its analysis but then labeled the verdict "the work is valid." Correct reasoning, wrong label — a calibration failure in output structure, not a reasoning failure. Fixed by a two-pass Defender prompt (analysis before verdict selection). See [`agents/ml-defender.md`](agents/ml-defender.md).
+One case failed: a healthcare triage scenario where the Defender correctly identified all critical flaws in its analysis but then labeled the verdict "the work is valid." Correct reasoning, wrong label — a calibration failure in output structure, not a reasoning failure. Fixed by a two-pass Defender prompt (analysis before verdict selection). See [`plugins/ml-lab/ml-defender.md`](plugins/ml-lab/ml-defender.md).
 
 Full results, per-case scores, and post-experiment analyses are in [`self_debate_experiment_v2/`](self_debate_experiment_v2/).
 
@@ -412,13 +412,13 @@ Then paste the contents of `multi-agent-prompt.md` as your first message.
 
 Yes. ml-lab is a Claude Code agent — it requires Claude Code to be installed. The plugin copies agent definition files to `~/.claude/agents/`; Claude Code then makes them available as spawnable agents.
 
-**Are all six agent files required, or can I use a subset?**
+**Are all seven agent files required, or can I use a subset?**
 
-`ml-lab.md`, `ml-critic.md`, and `ml-defender.md` are required for the core workflow. `research-reviewer.md` and `research-reviewer-lite.md` are only needed if you want the Step 10 peer review loop. `readme-rewriter.md` is only needed for the optional Step 13 README rewrite. If you skip optional steps, install only the files you need — but the plugin installs all six by default.
+`ml-lab.md`, `ml-critic.md`, and `ml-defender.md` are required for the core workflow. `research-reviewer.md` and `research-reviewer-lite.md` are only needed if you want the Step 10 peer review loop. `readme-rewriter.md` is only needed for the optional Step 13 README rewrite. `report-writer.md` is only needed for the optional Step 12 report generation. If you skip optional steps, install only the files you need — but the plugin installs all seven by default.
 
 **Is manual installation equivalent to the plugin?**
 
-Yes — both copy the same six agent files to `~/.claude/agents/`. The plugin method automates the copy and surfaces updates when you run `/plugin marketplace update ml-debate-lab`. Manual install gives you direct control but requires manual updates.
+Yes — both copy the same seven agent files to `~/.claude/agents/`. The plugin method automates the copy and surfaces updates when you run `/plugin marketplace update ml-debate-lab`. Manual install gives you direct control but requires manual updates.
 
 **If I uninstall the plugin, what happens to my investigation data?**
 
@@ -470,7 +470,7 @@ Two rubric dimensions score structurally differently for the debate vs. baseline
 
 **The experiment had one failed case — what happened, and has it been fixed?**
 
-A healthcare triage scenario where the Defender correctly identified all critical flaws in its analysis but then labeled the verdict "the work is valid." Correct reasoning, wrong label — a calibration failure in output structure, not a reasoning failure. Fixed by restructuring the Defender prompt into two mandatory passes: complete the full analysis before selecting any verdict labels. The fix is in [`agents/ml-defender.md`](agents/ml-defender.md).
+A healthcare triage scenario where the Defender correctly identified all critical flaws in its analysis but then labeled the verdict "the work is valid." Correct reasoning, wrong label — a calibration failure in output structure, not a reasoning failure. Fixed by restructuring the Defender prompt into two mandatory passes: complete the full analysis before selecting any verdict labels. The fix is in [`plugins/ml-lab/ml-defender.md`](plugins/ml-lab/ml-defender.md).
 
 **The "clean exoneration" finding is described as "directional, internal only" — what does that mean?**
 
@@ -518,8 +518,7 @@ A compute-matched ensemble — three independent assessors plus a synthesizer, n
 | Location | Contents |
 |----------|----------|
 | [`TECHNICAL_REPORT.md`](TECHNICAL_REPORT.md) | **Definitive technical report** — all findings, decomposition, external validation, limitations |
-| [`agents/`](agents/) | Reference copies of ml-lab, ml-critic, and ml-defender agent definitions |
-| [`agents/README.md`](agents/README.md) | Installation instructions and agent interaction diagram |
+| [`plugins/ml-lab/`](plugins/ml-lab/) | Plugin source: all seven agent definitions, install config, and flow diagram |
 | [`multi-agent-prompt.md`](multi-agent-prompt.md) | Bootstrap prompt for the full multi-agent harness |
 | [`self_debate_experiment/`](self_debate_experiment/) | Phase 1: frozen transcripts, contaminated + isolated protocol, 11–15 cases |
 | [`self_debate_experiment_v2/`](self_debate_experiment_v2/) | Phase 2: live API, isolated protocol, 20 cases, full results |
@@ -539,3 +538,19 @@ A compute-matched ensemble — three independent assessors plus a synthesizer, n
 | `INVESTIGATION_LOG.jsonl` | Append-only audit trail of every action taken during an ml-lab investigation (written to the working directory at runtime) |
 
 </details>
+
+---
+
+## ml-journal — Session Audit Trail
+
+[`plugins/ml-journal/`](plugins/ml-journal/) provides a persistent, JSONL-based audit trail for Claude Code sessions. It captures decisions, issues, discoveries, experiments, and session state in an append-only log that survives compaction and session boundaries.
+
+**Skills (9):** `/log-init`, `/log-entry`, `/checkpoint`, `/resume`, `/log-status`, `/log-list`, `/log-summarize`, `/log-commit`, `/research-note`
+
+**Install:**
+
+```shell
+/plugin install claude-ml-journal@ml-debate-lab
+```
+
+No agents — ml-journal is entirely skill-based. Optional hooks enable auto-checkpoint before `/compact` and auto-resume on session start. See the [plugin README](plugins/ml-journal/README.md) for full setup, entry types, and hook configuration.
