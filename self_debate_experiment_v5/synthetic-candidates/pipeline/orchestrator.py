@@ -371,6 +371,7 @@ def run_stage4(
     result.setdefault("verifier_status", "pending")
     # Embed pipeline metadata
     result["_pipeline"] = {
+        "mechanism_id": mechanism_id,
         "num_corruptions": corruption_report.get("num_corruptions_requested"),
         "corruption_ids": [c.get("corruption_id") for c in corruption_report.get("corruptions", [])],
     }
@@ -710,6 +711,13 @@ def assemble_batch(config: dict) -> None:
         if "_attempt_" in f.name:
             continue
         case = json.loads(f.read_text(encoding="utf-8"))
+        # Embed smoke scores for post-hoc selection
+        mech_id = case.get("_pipeline", {}).get("mechanism_id") or f.stem
+        smoke_file = RUN_DIR / "stage5" / f"{mech_id}_smoke.json"
+        if smoke_file.exists():
+            smoke_data = json.loads(smoke_file.read_text(encoding="utf-8"))
+            case["_pipeline"]["proxy_mean"] = smoke_data.get("proxy_mean")
+            case["_pipeline"]["smoke_scores"] = smoke_data.get("scores", {})
         status = case.get("verifier_status", "pending")
         if status == "exhausted":
             exhausted.append(case)
