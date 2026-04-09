@@ -53,7 +53,7 @@ chmod +x <repo-root>/.project-log/journal_query.py
 ## Step 6: Verify
 
 ```bash
-python3 <repo-root>/.project-log/journal_log.py --type discovery --description "Journal initialized" --source "log-init skill"
+python3 <repo-root>/.project-log/journal_log.py --type memo --description "Journal initialized"
 python3 <repo-root>/.project-log/journal_query.py --status
 ```
 
