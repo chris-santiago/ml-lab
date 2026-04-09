@@ -30,22 +30,27 @@ For each case validate:
 7. Defense_wins justification in prompt — for defense cases, justification explicitly stated
 8. Mixed-position genuinely two-sided — both positions defensible from task_prompt alone
 9. Hard cases require genuine domain expertise — for hard non-defense_wins cases, verify the
-   must-find flaw requires knowledge beyond general ML intuition. If a hard case's flaw is
-   discoverable by standard ML reasoning alone, mark for REVISE.
+   must-find flaw requires knowledge beyond general ML intuition. NOTE: ideal_critique is
+   empty for all ARCH-1 cases — use planted_issues[].description and the task_prompt itself
+   to assess whether the flaw requires genuine domain expertise or is findable by standard
+   ML pattern-matching alone. If findable by pattern-matching, mark for REVISE.
 10. Critique cases have red herring features — for non-defense_wins cases, verify the scenario
-    contains at least one feature that looks suspicious but is actually valid. Cases without
-    must_not_claim are weaker — note this.
+    contains at least one feature that looks suspicious but is actually valid. Read
+    scoring_targets.must_not_claim_details (list of {id, claim, why_wrong} dicts) for the
+    full claim descriptions — do NOT rely on scoring_targets.must_not_claim which contains
+    only opaque IDs. Verify each claim in must_not_claim_details is plausibly present as a
+    suspicious-but-valid feature in the task_prompt.
 11. Defense_wins external grounding — at least 3 defense_wins cases should be grounded in
     externally verifiable ML methodology. Flag if fewer than 3 — not a REJECT condition.
-12. Difficulty label validation (v5 NEW) — difficulty is defined by expected rubric performance
-    on a single-pass baseline, not by how buried the flaw is. Verify:
-    - Easy cases: flaw is directly stated or implied; a single-pass assessor should achieve
-      >= 0.85 mean across applicable rubric dimensions
-    - Medium cases: flaw requires connecting two signals; expected baseline mean 0.55-0.85
-    - Hard cases: flaw requires multi-step reasoning or domain knowledge; a single-pass
-      assessor is expected to fail on AT LEAST TWO rubric dimensions (IDR, DRQ, ETD, DC, IDP).
-      If a hard case's flaw is findable by standard single-pass reasoning, mark for REVISE
-      with note explaining which rubric dimensions would not actually be failed.
+12. Difficulty label validation (v5 NEW) — difficulty labels are derived empirically from
+    _pipeline.proxy_mean (Sonnet single-pass smoke test). Treat the label as authoritative.
+    Only mark REVISE when the label is grossly inconsistent with the task_prompt — i.e., when
+    a "hard" case's flaw is so directly named or described in the task_prompt that no
+    methodology expertise is required to find it. Do NOT re-judge difficulty from first
+    principles; the empirical proxy score is the ground truth for difficulty calibration.
+    - hard (proxy_mean < 0.55): flaw requires multi-step reasoning or domain knowledge
+    - medium (0.55 ≤ proxy_mean < 0.85): flaw requires connecting two signals
+    - easy (proxy_mean ≥ 0.85): flaw directly stated or implied
 
 Assign keep | revise | reject. Write benchmark_verification.json.
 
