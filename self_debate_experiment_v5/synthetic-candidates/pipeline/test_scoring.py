@@ -9,12 +9,17 @@ Run with:
     uv run pipeline/test_scoring.py
 
 Tests compute_smoke_scores() and recycle_action() without any LLM calls.
+
+Scoring semantics:
+  IDR  — fraction of must_find_ids found (None if no must_find_ids)
+  IDP  — fraction of must_not_claim items NOT raised (None if no must_not_claim)
+  FVC  — 1.0 if verdict correct, 0.0 otherwise (always applicable)
+  proxy_mean — mean of whichever metrics are not None
 """
 
 import sys
 from pathlib import Path
 
-# Import pure functions from orchestrator (no API calls made at import time)
 sys.path.insert(0, str(Path(__file__).parent))
 from orchestrator import compute_smoke_scores, recycle_action
 
@@ -44,14 +49,19 @@ def section(title: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Helpers to build minimal case/scorer dicts
+# Case / scorer helpers
 # ---------------------------------------------------------------------------
 
-def defense_wins_case(task_prompt: str = "A valid experiment design.") -> dict:
+def mnc_items(n: int) -> list:
+    """Build n must_not_claim dicts."""
+    return [{"claim": f"claim_{i}", "why_wrong": "legitimate choice"} for i in range(n)]
+
+
+def defense_wins_case(mnc_count: int = 3, task_prompt: str = "A valid design.") -> dict:
     return {
         "correct_verdict": "defense_wins",
         "must_find_issue_ids": [],
-        "must_not_claim": [],
+        "must_not_claim": mnc_items(mnc_count),
         "_pipeline": {"num_corruptions": 0},
         "task_prompt": task_prompt,
     }
@@ -60,14 +70,15 @@ def defense_wins_case(task_prompt: str = "A valid experiment design.") -> dict:
 def critique_case(
     num_corruptions: int = 1,
     must_find_ids: list | None = None,
-    task_prompt: str = "A flawed experiment design.",
+    mnc_count: int = 0,
+    task_prompt: str = "A flawed design.",
 ) -> dict:
     if must_find_ids is None:
         must_find_ids = [f"issue_{i:03d}" for i in range(1, num_corruptions + 1)]
     return {
         "correct_verdict": "critique",
         "must_find_issue_ids": must_find_ids,
-        "must_not_claim": [],
+        "must_not_claim": mnc_items(mnc_count),
         "_pipeline": {"num_corruptions": num_corruptions},
         "task_prompt": task_prompt,
     }
@@ -86,256 +97,265 @@ def scorer_out(
 
 
 # ---------------------------------------------------------------------------
-# Test: FVC normalization (the critical regression)
+# FVC normalization
 # ---------------------------------------------------------------------------
 
 section("FVC normalization — approve vs defense_wins")
 
-# Sonnet correctly approves a sound design → FVC must be 1.0
-scores = compute_smoke_scores(
-    scored=scorer_out(verdict="approve"),
-    case=defense_wins_case(),
-    task_prompt="A valid experiment design.",
-)
-check("approve + defense_wins correct_verdict → FVC=1.0", scores["FVC"], 1.0)
-check("approve + defense_wins: proxy=1.0 (IDR=None excluded)", scores["proxy_mean"], 1.0)
-check("approve + defense_wins: gate_pass=True", scores["gate_pass"], True)
+scores = compute_smoke_scores(scorer_out("approve"), defense_wins_case(), "Valid design.")
+check("approve + defense_wins → FVC=1.0", scores["FVC"], 1.0)
 
-# Sonnet correctly critiques a flawed design → FVC must be 1.0
-scores = compute_smoke_scores(
-    scored=scorer_out(verdict="critique", found=["issue_001"]),
-    case=critique_case(1),
-    task_prompt="A flawed experiment design.",
-)
+scores = compute_smoke_scores(scorer_out("critique", found=["issue_001"]), critique_case(1), "Flawed design.")
 check("critique + critique correct_verdict → FVC=1.0", scores["FVC"], 1.0)
 
-# Wrong verdict: Sonnet approves a flawed design
-scores = compute_smoke_scores(
-    scored=scorer_out(verdict="approve", found=[]),
-    case=critique_case(1),
-    task_prompt="A flawed experiment design.",
-)
+scores = compute_smoke_scores(scorer_out("approve"), critique_case(1), "Flawed design.")
 check("approve + critique correct_verdict → FVC=0.0", scores["FVC"], 0.0)
 
-# Unclear verdict
-scores = compute_smoke_scores(
-    scored=scorer_out(verdict="unclear"),
-    case=defense_wins_case(),
-    task_prompt="A valid experiment design.",
-)
-check("unclear + defense_wins → FVC=0.0", scores["FVC"], 0.0)
+scores = compute_smoke_scores(scorer_out("unclear"), defense_wins_case(), "Valid design.")
+check("unclear verdict → FVC=0.0", scores["FVC"], 0.0)
 
 # ---------------------------------------------------------------------------
-# Test: IDR (Issue Detection Rate)
+# IDR — partial credit
 # ---------------------------------------------------------------------------
 
-section("IDR — issue detection rate")
+section("IDR — partial credit (fraction of must_find_ids found)")
 
-# No must_find_ids (defense_wins) → IDR=None
+# No must_find_ids → IDR=None
+scores = compute_smoke_scores(scorer_out("approve"), defense_wins_case(), "Valid design.")
+check("0-corruption case → IDR=None", scores["IDR"], None)
+
+# All found → IDR=1.0
 scores = compute_smoke_scores(
-    scored=scorer_out(verdict="approve"),
-    case=defense_wins_case(),
-    task_prompt="Valid design.",
+    scorer_out("critique", found=["issue_001", "issue_002"]),
+    critique_case(2),
+    "Flawed design.",
 )
-check("defense_wins (no must_find_ids) → IDR=None", scores["IDR"], None)
+check("2/2 found → IDR=1.0", scores["IDR"], 1.0)
 
-# All must_find_ids found → IDR=1.0
+# 1 of 2 found → IDR=0.5 (partial credit, not 0.0)
 scores = compute_smoke_scores(
-    scored=scorer_out(verdict="critique", found=["issue_001", "issue_002"]),
-    case=critique_case(2),
-    task_prompt="Flawed design.",
+    scorer_out("critique", found=["issue_001"]),
+    critique_case(2),
+    "Flawed design.",
 )
-check("all must_find_ids found → IDR=1.0", scores["IDR"], 1.0)
+check("1/2 found → IDR=0.5", scores["IDR"], 0.5)
 
-# Only one of two found → IDR=0.0
+# 2 of 5 found → IDR=0.4
 scores = compute_smoke_scores(
-    scored=scorer_out(verdict="critique", found=["issue_001"]),
-    case=critique_case(2),
-    task_prompt="Flawed design.",
+    scorer_out("critique", found=["issue_001", "issue_003"]),
+    critique_case(5),
+    "Flawed design.",
 )
-check("partial must_find_ids found → IDR=0.0", scores["IDR"], 0.0)
+check("2/5 found → IDR=0.4", scores["IDR"], 0.4)
 
-# None found → IDR=0.0
-scores = compute_smoke_scores(
-    scored=scorer_out(verdict="critique", found=[]),
-    case=critique_case(1),
-    task_prompt="Flawed design.",
-)
-check("no must_find_ids found → IDR=0.0", scores["IDR"], 0.0)
+# 0 found → IDR=0.0
+scores = compute_smoke_scores(scorer_out("critique"), critique_case(1), "Flawed design.")
+check("0/1 found → IDR=0.0", scores["IDR"], 0.0)
 
-# Extra found IDs that are NOT in must_find_ids don't count
+# Finding non-required IDs doesn't count
 scores = compute_smoke_scores(
-    scored=scorer_out(verdict="critique", found=["issue_999"]),
-    case=critique_case(1, must_find_ids=["issue_001"]),
-    task_prompt="Flawed design.",
+    scorer_out("critique", found=["issue_999"]),
+    critique_case(1, must_find_ids=["issue_001"]),
+    "Flawed design.",
 )
 check("only non-required ID found → IDR=0.0", scores["IDR"], 0.0)
 
-# ---------------------------------------------------------------------------
-# Test: IDP (Issue Detection Precision — no false alarms)
-# ---------------------------------------------------------------------------
-
-section("IDP — false alarm rate")
-
-# No false alarms → IDP=1.0
+# 1 of 1 found → IDR=1.0
 scores = compute_smoke_scores(
-    scored=scorer_out(verdict="approve", raised_bad=[]),
-    case=defense_wins_case(),
-    task_prompt="Valid design.",
+    scorer_out("critique", found=["issue_001"]),
+    critique_case(1),
+    "Flawed design.",
 )
-check("no false alarms → IDP=1.0", scores["IDP"], 1.0)
-
-# Any false alarm → IDP=0.0
-scores = compute_smoke_scores(
-    scored=scorer_out(verdict="critique", raised_bad=["The temporal split looks unbalanced"]),
-    case=defense_wins_case(),
-    task_prompt="Valid design.",
-)
-check("one false alarm → IDP=0.0", scores["IDP"], 0.0)
-
-# Sonnet correctly approves AND raises false alarm → IDP=0.0, FVC=1.0
-scores = compute_smoke_scores(
-    scored=scorer_out(verdict="approve", raised_bad=["Claimed the split was wrong"]),
-    case=defense_wins_case(),
-    task_prompt="Valid design.",
-)
-check("approve with false alarm: FVC=1.0", scores["FVC"], 1.0)
-check("approve with false alarm: IDP=0.0", scores["IDP"], 0.0)
+check("1/1 found → IDR=1.0", scores["IDR"], 1.0)
 
 # ---------------------------------------------------------------------------
-# Test: proxy_mean (average of applicable metrics)
+# IDP — partial credit
 # ---------------------------------------------------------------------------
 
-section("proxy_mean — weighted average")
+section("IDP — partial credit (fraction of must_not_claim NOT raised)")
 
-# defense_wins, correctly approved: IDR=None (excluded), IDP=1.0, FVC=1.0 → proxy=1.0
+# No must_not_claim → IDP=None (can't penalize for undefined false alarms)
 scores = compute_smoke_scores(
-    scored=scorer_out(verdict="approve"),
-    case=defense_wins_case(),
-    task_prompt="Valid design.",
+    scorer_out("critique", raised_bad=["some claim"]),
+    critique_case(1, mnc_count=0),
+    "Flawed design.",
 )
+check("no must_not_claim → IDP=None", scores["IDP"], None)
+
+# 0 raised out of 3 → IDP=1.0
+scores = compute_smoke_scores(scorer_out("approve"), defense_wins_case(mnc_count=3), "Valid design.")
+check("0/3 raised → IDP=1.0", scores["IDP"], 1.0)
+
+# 1 raised out of 3 → IDP=0.6667 (not 0.0)
+scores = compute_smoke_scores(
+    scorer_out("critique", raised_bad=["claim_0"]),
+    defense_wins_case(mnc_count=3),
+    "Valid design.",
+)
+check("1/3 raised → IDP=0.6667", scores["IDP"], round(2/3, 4))
+
+# 2 raised out of 3 → IDP=0.3333
+scores = compute_smoke_scores(
+    scorer_out("critique", raised_bad=["claim_0", "claim_1"]),
+    defense_wins_case(mnc_count=3),
+    "Valid design.",
+)
+check("2/3 raised → IDP=0.3333", scores["IDP"], round(1/3, 4))
+
+# All raised → IDP=0.0
+scores = compute_smoke_scores(
+    scorer_out("critique", raised_bad=["claim_0", "claim_1", "claim_2"]),
+    defense_wins_case(mnc_count=3),
+    "Valid design.",
+)
+check("3/3 raised → IDP=0.0", scores["IDP"], 0.0)
+
+# 5 false accusations on a sound design (all 5 must_not_claim raised)
+scores = compute_smoke_scores(
+    scorer_out("critique", raised_bad=[f"claim_{i}" for i in range(5)]),
+    defense_wins_case(mnc_count=5),
+    "Valid design.",
+)
+check("5/5 raised on sound design → IDP=0.0", scores["IDP"], 0.0)
+
+# 1 of 5 raised → IDP=0.8 (much better than 5/5)
+scores = compute_smoke_scores(
+    scorer_out("critique", raised_bad=["claim_0"]),
+    defense_wins_case(mnc_count=5),
+    "Valid design.",
+)
+check("1/5 raised → IDP=0.8", scores["IDP"], 0.8)
+
+# IDP clamps at 0.0 (raised_bad can't exceed must_not_claim in practice, but guard)
+scores = compute_smoke_scores(
+    scorer_out(raised_bad=["x", "x", "x", "x"]),
+    defense_wins_case(mnc_count=2),
+    "Valid design.",
+)
+check("raised_bad > must_not_claim → IDP clamped to 0.0", scores["IDP"], 0.0)
+
+# ---------------------------------------------------------------------------
+# proxy_mean — None exclusion
+# ---------------------------------------------------------------------------
+
+section("proxy_mean — applicable metrics only (None excluded)")
+
+# defense_wins, perfect: IDR=None, IDP=1.0, FVC=1.0 → proxy=(1+1)/2=1.0
+scores = compute_smoke_scores(scorer_out("approve"), defense_wins_case(mnc_count=2), "Valid design.")
 check("defense_wins perfect → proxy=1.0", scores["proxy_mean"], 1.0)
+check("defense_wins perfect → IDR=None (excluded)", scores["IDR"], None)
 
-# defense_wins, incorrectly critiqued with false alarm: IDR=None, IDP=0.0, FVC=0.0 → proxy=0.0
+# defense_wins, 1/3 MNC raised, wrong verdict: IDR=None, IDP=0.6667, FVC=0.0 → proxy=0.3333
 scores = compute_smoke_scores(
-    scored=scorer_out(verdict="critique", raised_bad=["bad claim"]),
-    case=defense_wins_case(),
-    task_prompt="Valid design.",
+    scorer_out("critique", raised_bad=["claim_0"]),
+    defense_wins_case(mnc_count=3),
+    "Valid design.",
 )
-check("defense_wins wrongly critiqued → proxy=0.0", scores["proxy_mean"], 0.0)
+check(
+    "defense_wins: 1/3 MNC raised, wrong verdict → proxy=(0.6667+0.0)/2=0.3333",
+    scores["proxy_mean"],
+    round((round(2/3, 4) + 0.0) / 2, 4),
+)
 
-# critique (1 flaw): IDR=0.0, IDP=1.0, FVC=1.0 → proxy=0.667
+# critique, 2/5 flaws found, no MNC defined, correct verdict:
+# IDR=0.4, IDP=None, FVC=1.0 → proxy=(0.4+1.0)/2=0.7
 scores = compute_smoke_scores(
-    scored=scorer_out(verdict="critique", found=[]),
-    case=critique_case(1),
-    task_prompt="Flawed design.",
+    scorer_out("critique", found=["issue_001", "issue_002"]),
+    critique_case(5, mnc_count=0),
+    "Flawed design.",
 )
-check("missed flaw, correct verdict → proxy=0.6667", scores["proxy_mean"], round(2/3, 4))
+check("2/5 flaws found, no MNC, correct verdict → proxy=(0.4+1.0)/2=0.7", scores["proxy_mean"], 0.7)
 
-# critique (1 flaw): IDR=1.0, IDP=1.0, FVC=1.0 → proxy=1.0
+# critique, 0/1 found, no MNC, correct verdict: IDR=0.0, IDP=None, FVC=1.0 → proxy=0.5
 scores = compute_smoke_scores(
-    scored=scorer_out(verdict="critique", found=["issue_001"]),
-    case=critique_case(1),
-    task_prompt="Flawed design.",
+    scorer_out("critique"),
+    critique_case(1, mnc_count=0),
+    "Flawed design.",
 )
-check("found flaw, correct verdict → proxy=1.0", scores["proxy_mean"], 1.0)
+check("0/1 found, correct verdict → proxy=(0.0+1.0)/2=0.5", scores["proxy_mean"], 0.5)
 
-# mech_001 pattern: IDR=0.0, IDP=1.0, FVC=1.0 → proxy=0.667 (from live run)
+# critique, 1/2 found, 1/2 MNC raised, correct verdict:
+# IDR=0.5, IDP=0.5, FVC=1.0 → proxy=(0.5+0.5+1.0)/3=0.6667
 scores = compute_smoke_scores(
-    scored=scorer_out(verdict="critique", found=[], raised_bad=[]),
-    case=critique_case(2),
-    task_prompt="Flawed design.",
+    scorer_out("critique", found=["issue_001"], raised_bad=["claim_0"]),
+    critique_case(2, mnc_count=2),
+    "Flawed design.",
 )
-check("mech_001 pattern (IDR=0,IDP=1,FVC=1) → proxy=0.6667", scores["proxy_mean"], round(2/3, 4))
+check(
+    "1/2 IDR, 1/2 IDP raised, correct verdict → proxy=0.6667",
+    scores["proxy_mean"],
+    round((0.5 + 0.5 + 1.0) / 3, 4),
+)
+
+# All None except FVC: IDR=None, IDP=None, FVC=1.0 → proxy=1.0
+scores = compute_smoke_scores(
+    scorer_out("approve"),
+    {
+        "correct_verdict": "defense_wins",
+        "must_find_issue_ids": [],
+        "must_not_claim": [],
+        "_pipeline": {"num_corruptions": 0},
+    },
+    "Valid design.",
+)
+check("IDR=None, IDP=None → proxy=FVC alone", scores["proxy_mean"], 1.0)
 
 # ---------------------------------------------------------------------------
-# Test: gate_pass
+# gate_pass — structural gate only (unchanged)
 # ---------------------------------------------------------------------------
 
 section("gate_pass — permissive structural gate")
 
-# Valid defense_wins case → always pass
+# defense_wins → always pass (even with false alarms)
 scores = compute_smoke_scores(
-    scored=scorer_out(verdict="critique", raised_bad=["wrong claim"]),
-    case=defense_wins_case(),
-    task_prompt="Valid design.",
+    scorer_out("critique", raised_bad=["claim_0", "claim_1", "claim_2"]),
+    defense_wins_case(mnc_count=3),
+    "Valid design.",
 )
-check("defense_wins, Sonnet wrong → gate=True (debate candidate)", scores["gate_pass"], True)
+check("defense_wins, all MNC raised → gate=True (debate candidate)", scores["gate_pass"], True)
 
-# Valid critique case with must_find_ids → pass
-scores = compute_smoke_scores(
-    scored=scorer_out(verdict="approve"),
-    case=critique_case(1),
-    task_prompt="Flawed design.",
-)
-check("critique, Sonnet wrong verdict → gate=True (debate candidate)", scores["gate_pass"], True)
+# critique with must_find_ids → pass
+scores = compute_smoke_scores(scorer_out("approve"), critique_case(1), "Flawed design.")
+check("critique, Sonnet wrong verdict → gate=True", scores["gate_pass"], True)
 
-# Structural failure: empty task_prompt → gate=False
-scores = compute_smoke_scores(
-    scored=scorer_out(),
-    case=critique_case(1),
-    task_prompt="",
-)
-check("empty task_prompt → gate=False (structural failure)", scores["gate_pass"], False)
+# Structural failure: empty task_prompt
+scores = compute_smoke_scores(scorer_out(), critique_case(1), "")
+check("empty task_prompt → gate=False", scores["gate_pass"], False)
 
-# Structural failure: corruptions > 0 but no must_find_ids (Stage 4 output failure)
-bad_case = critique_case(1, must_find_ids=[])
+# Structural failure: corruptions > 0 but no must_find_ids
 scores = compute_smoke_scores(
-    scored=scorer_out(),
-    case=bad_case,
-    task_prompt="Flawed design.",
+    scorer_out(),
+    critique_case(1, must_find_ids=[]),
+    "Flawed design.",
 )
-check("corruptions=1, no must_find_ids → gate=False (Stage 4 failure)", scores["gate_pass"], False)
+check("corruptions=1, no must_find_ids → gate=False", scores["gate_pass"], False)
 
-# num_corruptions="many" with must_find_ids → pass
+# num_corruptions=0, no must_find_ids → gate=True
 scores = compute_smoke_scores(
-    scored=scorer_out(verdict="critique", found=["issue_001"]),
-    case={
-        "correct_verdict": "critique",
-        "must_find_issue_ids": ["issue_001", "issue_002"],
-        "_pipeline": {"num_corruptions": "many"},
-        "task_prompt": "Heavily flawed design.",
-    },
-    task_prompt="Heavily flawed design.",
+    scorer_out("approve"),
+    defense_wins_case(),
+    "Valid design.",
 )
-check("num_corruptions='many', must_find_ids present → gate=True", scores["gate_pass"], True)
-
-# num_corruptions=0 with no must_find_ids (correct for defense_wins) → pass
-scores = compute_smoke_scores(
-    scored=scorer_out(verdict="approve"),
-    case={
-        "correct_verdict": "defense_wins",
-        "must_find_issue_ids": [],
-        "_pipeline": {"num_corruptions": 0},
-        "task_prompt": "Valid design.",
-    },
-    task_prompt="Valid design.",
-)
-check("num_corruptions=0, no must_find_ids → gate=True (defense_wins)", scores["gate_pass"], True)
+check("num_corruptions=0, no must_find_ids → gate=True", scores["gate_pass"], True)
 
 # ---------------------------------------------------------------------------
-# Test: recycle_action
+# recycle_action — routing logic (unchanged)
 # ---------------------------------------------------------------------------
 
 section("recycle_action — routing logic")
 
-# gate_pass=True → accepted
 stage, reason, _ = recycle_action({"gate_pass": True}, num_corruptions=1)
-check("gate_pass=True → stage=None (accepted)", stage, None)
-check("gate_pass=True → reason=''", reason, "")
+check("gate_pass=True → accepted", stage, None)
 
-# gate_pass=False → structural_failure → stage4
 stage, reason, _ = recycle_action({"gate_pass": False}, num_corruptions=1)
 check("gate_pass=False → stage='stage4'", stage, "stage4")
-check("gate_pass=False → reason='structural_failure'", reason, "structural_failure")
+check("gate_pass=False → structural_failure", reason, "structural_failure")
 
-# smoke=None (no smoke test run) → accepted
 stage, reason, _ = recycle_action(None, num_corruptions=1)
-check("smoke=None → stage=None (accepted, no smoke = pass)", stage, None)
+check("smoke=None → accepted (no smoke = pass)", stage, None)
 
-# gate_pass missing from smoke dict → defaults to True → accepted
 stage, reason, _ = recycle_action({}, num_corruptions=0)
-check("gate_pass missing → stage=None (defaults to pass)", stage, None)
+check("gate_pass missing → accepted (defaults True)", stage, None)
 
 # ---------------------------------------------------------------------------
 # Summary

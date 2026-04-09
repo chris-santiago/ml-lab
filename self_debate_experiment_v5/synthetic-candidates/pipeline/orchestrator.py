@@ -403,13 +403,18 @@ def compute_smoke_scores(
     num_corruptions = case.get("_pipeline", {}).get("num_corruptions", None)
 
     found_ids: list = scored.get("must_find_found", [])
-    idr: float | None = (
-        None if not must_find_ids
-        else (1.0 if all(i in found_ids for i in must_find_ids) else 0.0)
-    )
+    if not must_find_ids:
+        idr: float | None = None
+    else:
+        n_found = sum(1 for i in must_find_ids if i in found_ids)
+        idr = round(n_found / len(must_find_ids), 4)
 
+    must_not_claim: list = case.get("must_not_claim", [])
     raised_bad: list = scored.get("must_not_claim_raised", [])
-    idp: float = 0.0 if raised_bad else 1.0
+    if not must_not_claim:
+        idp: float | None = None
+    else:
+        idp = round(max(0.0, 1.0 - len(raised_bad) / len(must_not_claim)), 4)
 
     verdict: str = scored.get("verdict_given", "unclear")
     correct_verdict: str = case.get("correct_verdict", "")

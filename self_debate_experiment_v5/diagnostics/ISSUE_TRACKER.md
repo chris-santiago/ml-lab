@@ -1,6 +1,6 @@
 # V5 Calibration Issue Tracker
 
-**Last updated:** 2026-04-08
+**Last updated:** 2026-04-08 (post-ARCH-1 scoring revision)
 **Purpose:** Canonical summary of all issues flagged during v5 pre-experiment calibration. Use this as the re-entry point when continuing work.
 
 ---
@@ -404,7 +404,7 @@ Cases should span the full range of what `ml-lab` handles: any ML hypothesis tha
 
 - Python orchestrator skeleton (ThreadPoolExecutor, recycle logic, progress bars)
 - Flaw taxonomy (broken baseline, metric mismatch, leakage, scope mismatch, hidden confounding, defense_wins)
-- Scoring dimensions (IDR, IDP, FVC, IDJ) — semantics unchanged, applied to new document type
+- Scoring dimensions (IDR, IDP, FVC) — applied to new document type; **semantics revised post-ARCH-1** (see RESOLVED-8, RESOLVED-9)
 - Gate concept — filter cases where single-pass is already perfect (no lift possible) or completely wrong (too hard, noise)
 
 ### What is replaced
@@ -415,3 +415,39 @@ Cases should span the full range of what `ml-lab` handles: any ML hypothesis tha
 - Stage 4 (new): corruption node
 - Stage 5: leakage auditor → (eliminated; no language hiding needed)
 - All cases in batches 313–387: wrong document type, not reusable
+
+---
+
+## RESOLVED-8 — FVC scoring bug: "approve" vs "defense_wins" string mismatch
+
+**Resolved:** 2026-04-08  
+**Affected code:** `compute_smoke_scores()` in `pipeline/orchestrator.py`
+
+The smoke wrapper instructed Sonnet to return `verdict: "approve" | "critique"`. Stage 4 stored `correct_verdict` as `"defense_wins" | "critique"`. The FVC comparison used string equality — so `"approve" == "defense_wins"` was always `False`, meaning FVC=0.0 for every defense_wins case regardless of whether Sonnet correctly approved the design.
+
+**Impact:** All 0-corruption cases showed FVC=0.0 even when Sonnet was correct. The old gate interpreted proxy=0.0 (IDR=None, IDP=??, FVC=0.0) as `defense_false_alarm` and recycled these cases unnecessarily, wasting recycle budget on valid cases.
+
+**Fix:** Normalize verdict before comparison: `verdict_normalized = "defense_wins" if verdict == "approve" else verdict`. Verified by unit test: `approve + defense_wins correct_verdict → FVC=1.0`.
+
+---
+
+## RESOLVED-9 — IDR and IDP were binary; magnitude not captured
+
+**Resolved:** 2026-04-08  
+**Affected code:** `compute_smoke_scores()` in `pipeline/orchestrator.py`
+
+**IDR (Issue Detection Recall)** was binary: `1.0` if ALL `must_find_ids` found, `0.0` otherwise. This collapsed "found 2 of 5 flaws" and "found 0 of 5 flaws" into the same score. A case where single-pass Sonnet finds 2 of 5 flaws is a strong debate candidate — the critic can surface the remaining 3, the defender can engage on the 2 already identified. Binary IDR mislabeled it as identical to a case where nothing was found.
+
+Additionally, Stage 4 capped `must_find_issue_ids` at 2 for "many-corruption" cases, making IDR for 5-corruption and 2-corruption cases indistinguishable from the gate's perspective — and potentially easier (the top 2 are the most prominent).
+
+**IDP (Issue Detection Precision)** was binary: `0.0` if any false accusation raised, `1.0` otherwise. Making 5 false accusations on a sound design was scored identically to making 1. The magnitude of false alarm behavior was lost.
+
+**Fix:** Both metrics converted to partial credit fractions:
+- `IDR = n_found / len(must_find_ids)` — fraction of required issues found; `None` if no must_find_ids
+- `IDP = 1 - n_raised / len(must_not_claim)` — fraction of protected choices not falsely accused; `None` if no must_not_claim defined; clamped to `[0.0, 1.0]`
+
+`proxy_mean` already excluded `None` metrics via the `applicable` filter — no change needed there.
+
+The `must_find_issue_ids` cap for "many-corruption" cases is no longer hardcoded in scoring but remains a Stage 4 prompt concern — Stage 4 should include all significant issues, not cap at 2, so that IDR reflects actual recall across the full flaw set.
+
+**Verified:** 36-test unit test suite in `pipeline/test_scoring.py` covers all partial-credit scenarios including magnitude differences, None exclusion, and proxy_mean recomputation.
