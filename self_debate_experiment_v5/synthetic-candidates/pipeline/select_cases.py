@@ -128,8 +128,14 @@ def select(
     min_proxy: float,
     max_proxy: float,
     seed: int,
+    tier_targets: dict[str, int] | None = None,
 ) -> list[dict]:
+    """
+    tier_targets maps tier label → target count, overriding per_stratum for that tier.
+    Keys: "0", "1", "2", "3+".  Set to 0 to skip a tier entirely.
+    """
     rng = random.Random(seed)
+    tier_targets = tier_targets or {}
 
     # Optional difficulty filter
     pool = [c for c in cases if min_proxy <= proxy_score(c) <= max_proxy]
@@ -146,7 +152,7 @@ def select(
         tier = corruption_tier(case)
         strata[(verdict, tier)].append(case)
 
-    # Determine per-stratum target
+    # Determine per-stratum default
     n_strata = len(strata)
     if per_stratum is None and n_total is not None:
         per_stratum = max(1, n_total // n_strata)
@@ -158,6 +164,11 @@ def select(
         verdict, tier = key
         stratum_cases = strata[key]
 
+        target = tier_targets.get(tier, per_stratum)
+        if target == 0:
+            console.print(f"  [dim]{verdict} / tier={tier}: skipped (--tier-{tier} 0)[/dim]")
+            continue
+
         # Sort by difficulty ascending (harder = lower proxy → debated more productively)
         stratum_cases.sort(key=proxy_score)
 
@@ -168,7 +179,7 @@ def select(
         for domain in by_domain:
             by_domain[domain] = interleave_by_task(by_domain[domain], rng)
 
-        chosen = round_robin_domains(by_domain, per_stratum, rng)
+        chosen = round_robin_domains(by_domain, target, rng)
         selected.extend(chosen)
 
         proxies = [proxy_score(c) for c in chosen]
@@ -306,7 +317,25 @@ def main() -> None:
         help="Maximum proxy_mean to include (1.0 = include all; 0.83 = exclude trivial cases)",
     )
     p.add_argument("--seed", type=int, default=42)
+    g = p.add_argument_group(
+        "per-tier overrides",
+        "Override --per-stratum for a specific tier. Set to 0 to skip that tier entirely.\n"
+        "  --tier-0      defense_wins (sound designs)\n"
+        "  --tier-1      critique, 1 flaw\n"
+        "  --tier-2      critique, 2 flaws\n"
+        "  --tier-many   critique, 3+ flaws",
+    )
+    g.add_argument("--tier-0",    type=int, default=None, metavar="N", dest="tier_0")
+    g.add_argument("--tier-1",    type=int, default=None, metavar="N", dest="tier_1")
+    g.add_argument("--tier-2",    type=int, default=None, metavar="N", dest="tier_2")
+    g.add_argument("--tier-many", type=int, default=None, metavar="N", dest="tier_many")
     args = p.parse_args()
+
+    tier_targets: dict[str, int] = {}
+    if args.tier_0    is not None: tier_targets["0"]  = args.tier_0
+    if args.tier_1    is not None: tier_targets["1"]  = args.tier_1
+    if args.tier_2    is not None: tier_targets["2"]  = args.tier_2
+    if args.tier_many is not None: tier_targets["3+"] = args.tier_many
 
     patterns = args.input or []
     cases, out_dir, auto_glob = load_inputs(patterns)
@@ -321,7 +350,7 @@ def main() -> None:
         console.print(f"  proxy_mean embedded in {has_proxy}/{len(cases)} cases")
 
     console.print()
-    selected = select(cases, args.per_stratum, args.n, args.min_proxy, args.max_proxy, args.seed)
+    selected = select(cases, args.per_stratum, args.n, args.min_proxy, args.max_proxy, args.seed, tier_targets)
     console.print()
     summary_table(selected, cases)
 
