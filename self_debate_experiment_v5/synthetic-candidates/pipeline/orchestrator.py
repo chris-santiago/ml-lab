@@ -217,7 +217,7 @@ def read_prompt(filename: str) -> str:
 def run_stage1_all(config: dict, client: OpenAI) -> list[dict]:
     """Generate one hypothesis per case, all concurrent."""
     n = config["batch_size"]
-    out = RUN_DIR / "stage1_hypotheses.json"
+    out = RUN_DIR / "stage1" / "hypotheses.json"
     out.parent.mkdir(parents=True, exist_ok=True)
 
     if config["dry_run"]:
@@ -444,8 +444,10 @@ def compute_smoke_scores(
     applicable = [s for s in [idr, idp, fvc] if s is not None]
     proxy_mean = round(sum(applicable) / len(applicable), 4) if applicable else 1.0
 
-    # Gate: permissive — accept almost everything.
-    # Structural failure only: Stage 4 produced no evaluable content.
+    # Structural validity check — not a difficulty gate.
+    # Difficulty filtering happens post-hoc in select_cases.py via --max-proxy.
+    # Only rejects cases where Stage 4 produced unevaluable output (empty task_prompt
+    # or no scoring targets). Almost every successful Stage 4 output passes.
     gate_pass = bool(task_prompt and (must_find_ids or num_corruptions == 0))
 
     return {
@@ -555,9 +557,10 @@ def recycle_action(smoke: dict | None, num_corruptions: int | str) -> tuple[str 
     """
     Returns (stage_to_restart_from, failure_reason, note) or (None, '', '') if accepted.
 
-    Gate is now nearly permissive — any case where single-pass Sonnet is wrong in any
-    direction is a valid debate candidate. Recycle only on structural failure: the pipeline
-    produced a case with no evaluable content (empty task_prompt or missing scoring targets).
+    This is a structural validity check, not a difficulty filter.
+    Difficulty filtering is done post-hoc via select_cases.py (--max-proxy flag).
+    Recycle only when Stage 4 produced unevaluable output (empty task_prompt or
+    missing scoring targets). In practice this is nearly always (None, '', '').
     """
     if smoke is None or smoke.get("gate_pass", True):
         return (None, "", "")
@@ -838,7 +841,7 @@ def main() -> None:
     client = get_client()
 
     # Stage 1 — hypothesis generation (all cases, concurrent)
-    hypotheses_path = RUN_DIR / "stage1_hypotheses.json"
+    hypotheses_path = RUN_DIR / "stage1" / "hypotheses.json"
     if config["resume"] and hypotheses_path.exists():
         console.print("[Stage 1] Resuming — loading existing hypotheses")
         hypotheses: list[dict] = json.loads(hypotheses_path.read_text(encoding="utf-8"))

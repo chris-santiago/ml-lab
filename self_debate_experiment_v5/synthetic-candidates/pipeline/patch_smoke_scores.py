@@ -28,9 +28,9 @@ def main() -> None:
     input_path = Path(args.input)
     cases: list[dict] = json.loads(input_path.read_text(encoding="utf-8"))
 
-    # Build case_id → mechanism_id from pipeline/run/cases/
+    # Build case_id → mechanism_id from pipeline/run/stage4/
     case_id_to_mech: dict[str, str] = {}
-    for f in (RUN_DIR / "cases").glob("mech_*.json"):
+    for f in (RUN_DIR / "stage4").glob("mech_*.json"):
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
             cid = data.get("case_id")
