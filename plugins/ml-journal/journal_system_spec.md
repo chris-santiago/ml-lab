@@ -346,14 +346,30 @@ If no checkpoint exists: "No checkpoint found in journal. Starting fresh."
 
 ### `/research-note`
 
-**Trigger:** "/research-note", "synthesize a research narrative", "write up what we've done"
+**Trigger:** "/research-note", "write a research note", "create a note from today's work", "summarize today as a note", "generate a shareable summary", "write up this session", "create an experiment note for this session"
+
+**Steps:**
+1. `git rev-parse --show-toplevel` — find repo root, check journal exists
+2. Determine scope from user phrasing (default: `1d`)
+3. Check conversation context for existing `log-summarize` output; if present, use as primary input
+4. If no existing summary: `journal_query.py --list <type> --since <scope>` for decision, discovery, experiment, issue, resolution, hypothesis, lesson
+5. Also gather: `journal_query.py --latest-checkpoint`, `--unresolved-issues`, `git log --oneline --since`
+6. Synthesize a 40–80 line note (Summary, Key Decisions, Discoveries & Results, Issues, Current State, Next Steps — omit empty sections)
+7. Show draft. Ask "► Save to RESEARCH_NOTE_<date>.md? (y/n)"
+8. Write to `<repo-root>/RESEARCH_NOTE_<date>.md`
+
+---
+
+### `/research-report`
+
+**Trigger:** "/research-report", "write a full research report", "end-of-project writeup", "document our full research history", "create a project report"
 
 **Steps:**
 1. `git rev-parse --show-toplevel` — find repo root
 2. Read full `.project-log/journal.jsonl`
 3. `git log --oneline` — commit timeline
 4. Glob for supplementary `.md` files at repo root + 2 levels deep matching patterns: `**/ISSUE*`, `**/lesson*`, `**/POST_MORTEM*`, `**/TODO*` — discover, don't hardcode
-5. Synthesize `RESEARCH_NARRATIVE.md` with sections:
+5. Synthesize `RESEARCH_REPORT.md` with sections:
    - Problem Statement
    - Timeline (chronological, from journal + git)
    - What Was Tried
@@ -363,7 +379,7 @@ If no checkpoint exists: "No checkpoint found in journal. Starting fresh."
    - Issues and Resolutions (linked pairs)
    - Current State (from latest `checkpoint`)
    - Open Questions (from `open_threads` across checkpoints)
-6. Show draft. Ask "► Write to RESEARCH_NARRATIVE.md? (y/n)" — overwrites, git has history.
+6. Show draft. Ask "► Write to RESEARCH_REPORT.md? (y/n)" — overwrites, git has history.
 
 ---
 
@@ -439,7 +455,8 @@ All hooks:
 5. `/checkpoint` and `/resume` skills — session continuity
 6. `/journal-commit` skill — git + log in one step
 7. `/journal-status`, `/journal-list`, `/journal-summarize` skills — query layer
-8. `/research-note` skill — narrative synthesis
+8. `/research-note` skill — session-scoped formatted note
+9. `/research-report` skill — full research report synthesis
 9. Hooks — optional, add last
 
 ---

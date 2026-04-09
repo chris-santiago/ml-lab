@@ -76,7 +76,7 @@ Claude Code sessions are stateless. When the context compacts or a new session s
 
 # What ml-journal Is
 
-A Claude Code plugin that maintains a **structured, append-only JSONL audit trail** for every session — with nine skills for logging, querying, and synthesizing the record.
+A Claude Code plugin that maintains a **structured, append-only JSONL audit trail** for every session — with ten skills for logging, querying, and synthesizing the record.
 
 | Layer | Component | Role |
 |-------|-----------|------|
@@ -92,7 +92,7 @@ No background daemons. No external dependencies beyond `python3` and `git`.
 
 ---
 
-# Nine Skills, Two Jobs
+# Ten Skills, Two Jobs
 
 Skills split cleanly into **write** (add to the journal) and **read** (query and synthesize).
 
@@ -106,7 +106,8 @@ Skills split cleanly into **write** (add to the journal) and **read** (query and
 | `/log-list` | List entries by type with optional time filter | Read |
 | `/log-summarize` | Prose synthesis of all entries of a given type | Read |
 | `/log-init` | One-time repo setup | Setup |
-| `/research-note` | Synthesize `RESEARCH_NARRATIVE.md` from journal + git history | Synthesis |
+| `/research-note` | Session/day-scoped formatted note — shareable, PR-ready | Synthesis |
+| `/research-report` | Synthesize `RESEARCH_REPORT.md` from full journal + git history | Synthesis |
 
 ---
 
@@ -215,20 +216,21 @@ Recent commits: fix: scorer bug in phase_score.py
 
 ---
 
-# Research Narrative Synthesis
+# Research Note vs. Research Report
 
-`/research-note` produces `RESEARCH_NARRATIVE.md` — a full prose reconstruction of the investigation from journal entries, git history, and supplementary markdown files.
+Two synthesis skills for different audiences and scopes.
 
-**What it draws from:**
-- All journal entries (decisions, discoveries, experiments, post-mortems)
-- `git log` — commit sequence and messages
-- Any `HYPOTHESIS.md`, `CONCLUSIONS.md`, `REPORT.md` in the repo
+**`/research-note`** — session or day scoped, shareable
+- Draws from recent journal entries (or an existing `log-summarize` output)
+- Produces `RESEARCH_NOTE_<date>.md` — 40–80 lines
+- Sections: Summary, Key Decisions, Discoveries & Results, Issues, Current State, Next Steps
+- Use after a work session, before a PR, or to share a daily update
 
-**What it produces:**
-- Chronological research narrative with rationale preserved
-- Decisions linked to the context that motivated them
-- Experiment outcomes tied to the hypotheses they tested
-- A document a new collaborator can read to understand *why* the project is in its current state
+**`/research-report`** — full project or phase scope
+- Draws from all journal entries, full `git log`, and supplementary markdown files
+- Produces `RESEARCH_REPORT.md` — comprehensive retrospective
+- Sections: Problem Statement, Timeline, What Was Tried/Failed/Worked, Key Decisions, Issues and Resolutions, Open Questions
+- Use at end of phase or project, or to onboard a new collaborator
 
 ---
 

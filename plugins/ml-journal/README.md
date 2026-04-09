@@ -24,7 +24,8 @@ No background daemons. No external dependencies beyond `python3`, `git`, and `jq
 | `/log-list` | List entries by type with optional time filter (`--since 7d`) |
 | `/log-summarize` | Prose synthesis of entries by type |
 | `/log-commit` | Git commit + journal log in one step |
-| `/research-note` | Synthesize `RESEARCH_NARRATIVE.md` from journal, git history, and supplementary docs |
+| `/research-note` | Generate a session or day-scoped formatted markdown note — shareable, PR-ready |
+| `/research-report` | Synthesize `RESEARCH_REPORT.md` — full research report from journal, git history, and supplementary docs |
 
 ## Entry Types
 
@@ -83,7 +84,7 @@ To enable, add to `.claude/settings.local.json` (per-machine, gitignored):
 ```
 plugins/ml-journal/
   journal_system_spec.md      # full system specification
-  all_skills.md               # all 9 skill definitions (source for SKILL.md split)
+  all_skills.md               # all 10 skill definitions (source for SKILL.md split)
   journal_log.py              # entry writer
   journal_query.py            # entry reader / querier
   journal-precompact.sh       # optional PreCompact hook

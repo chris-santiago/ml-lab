@@ -1,6 +1,6 @@
 ---
-name: research-note
-description: Synthesize a full research narrative from the project journal, git history, and supplementary markdown files. Produces RESEARCH_NARRATIVE.md at the repo root. Use when the user says /research-note, "synthesize a research narrative", "write up what we've done", "create a project summary", or "document our research history".
+name: research-report
+description: Synthesize a full research report from the project journal, git history, and supplementary markdown files. Produces RESEARCH_REPORT.md at the repo root. Use when the user says /research-report, "write a full research report", "end-of-project writeup", "document our full research history", "create a project report", or "document our research history".
 ---
 
 ## Step 1: Find repo root and check journal
@@ -28,15 +28,15 @@ find <repo-root> -maxdepth 3 -name "*.md" | grep -iE "(ISSUE|lesson|POST_MORTEM|
 ```
 Do not hardcode paths. Read any matches and incorporate if relevant.
 
-### Existing RESEARCH_NARRATIVE.md
+### Existing RESEARCH_REPORT.md
 Check if one already exists — note it to the user but do not let it constrain the new synthesis.
 
 ## Step 3: Synthesize narrative
 
-Write `RESEARCH_NARRATIVE.md` with the following sections. Include only sections that have content — omit empty sections rather than writing placeholder text.
+Write `RESEARCH_REPORT.md` with the following sections. Include only sections that have content — omit empty sections rather than writing placeholder text.
 
 ```markdown
-# Research Narrative — <project name>
+# Research Report — <project name>
 
 *Generated <date> from <N> journal entries and <N> commits.*
 
@@ -74,12 +74,12 @@ Be specific — reference actual entry content, not vague summaries. Quote descr
 
 Show the full draft to the user.
 
-Ask: `► Write to RESEARCH_NARRATIVE.md? This will overwrite any existing file. (y/n)`
+Ask: `► Write to RESEARCH_REPORT.md? This will overwrite any existing file. (y/n)`
 
 (Git has history — overwriting is safe.)
 
 ## Step 5: Write file
 
-Write to `<repo-root>/RESEARCH_NARRATIVE.md`.
+Write to `<repo-root>/RESEARCH_REPORT.md`.
 
-Confirm: "RESEARCH_NARRATIVE.md written — <N> lines."
+Confirm: "RESEARCH_REPORT.md written — <N> lines."

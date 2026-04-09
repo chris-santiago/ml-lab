@@ -545,7 +545,7 @@ A compute-matched ensemble — three independent assessors plus a synthesizer, n
 
 [`plugins/ml-journal/`](plugins/ml-journal/) provides a persistent, JSONL-based audit trail for Claude Code sessions. It captures decisions, issues, discoveries, experiments, and session state in an append-only log that survives compaction and session boundaries.
 
-**Skills (9):** `/log-init`, `/log-entry`, `/checkpoint`, `/resume`, `/log-status`, `/log-list`, `/log-summarize`, `/log-commit`, `/research-note`
+**Skills (10):** `/log-init`, `/log-entry`, `/checkpoint`, `/resume`, `/log-status`, `/log-list`, `/log-summarize`, `/log-commit`, `/research-note`, `/research-report`
 
 **Install:**
 

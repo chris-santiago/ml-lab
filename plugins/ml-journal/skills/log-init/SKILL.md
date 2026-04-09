@@ -64,4 +64,4 @@ If either fails, show the error and stop.
 Tell the user:
 - Journal initialized at `.project-log/journal.jsonl`
 - One initialization entry logged
-- Available skills: `/journal-entry`, `/checkpoint`, `/resume`, `/journal-status`, `/journal-list`, `/journal-summarize`, `/journal-commit`, `/research-note`
+- Available skills: `/log-entry`, `/checkpoint`, `/resume`, `/log-status`, `/log-list`, `/log-summarize`, `/log-commit`, `/research-note`, `/research-report`
