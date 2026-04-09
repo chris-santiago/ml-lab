@@ -1,6 +1,6 @@
 ---
 name: sync-ml-lab-docs
-description: Propagate ml-lab.md changes to the two downstream artifacts that must stay in sync with it — plugins/ml-lab/ML_LAB_FLOW.md (mermaid flowchart) and README.md (mermaid copy + investigation logging section + Gate prose). Agent distribution is handled by the plugin system — run `claude plugin reinstall claude-ml-lab` after edits.
+description: Propagate ml-lab.md changes to the two downstream artifacts that must stay in sync with it — plugins/ml-lab/ML_LAB_FLOW.md (mermaid flowchart) and README.md (mermaid copy + investigation logging section + Gate prose).
 user-invocable: true
 ---
 
@@ -12,8 +12,6 @@ You are executing the `sync-ml-lab-docs` skill. Your job is to propagate any cha
 |------|----------------------|
 | `plugins/ml-lab/ML_LAB_FLOW.md` | The mermaid flowchart — must match the workflow structure, node labels, gate labels, and LOG node caption in ml-lab.md |
 | `README.md` | Mermaid block under `### The Full Workflow` + any prose sections that describe or summarize workflow content from ml-lab.md (gates, logging, example runs, etc.) |
-
-Agent files in `plugins/ml-lab/` are distributed via the plugin system. After editing any agent `.md` file, remind the user to run `claude plugin reinstall claude-ml-lab` to push the updated snapshot to the plugin cache.
 
 ## Steps
 

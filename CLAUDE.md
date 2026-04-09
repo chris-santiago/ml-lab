@@ -61,6 +61,6 @@ When `.project-log/journal.jsonl` exists, propose logging at natural pauses — 
 **Rules:** One proposal per event. Don't re-propose if declined. Chain issue→resolution→lesson at completion, not as three interruptions.
 
 ## Agent Sync
-After editing any file in `plugins/ml-lab/` — run `claude plugin reinstall claude-ml-lab` to push the updated snapshot to the plugin cache.
+Plugin cache is kept in sync automatically via a PostToolUse hook (`.claude/hooks/sync-plugin-cache.sh`). Any edit to `plugins/ml-lab/` or `plugins/ml-journal/` is rsynced to the cache immediately — no manual reinstall needed.
 
 
