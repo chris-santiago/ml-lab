@@ -553,7 +553,7 @@ A compute-matched ensemble — three independent assessors plus a synthesizer, n
 /plugin install claude-ml-journal@ml-debate-lab
 ```
 
-No agents — ml-journal is entirely skill-based. Optional hooks enable auto-checkpoint before `/compact` and auto-resume on session start. See the [plugin README](plugins/ml-journal/README.md) for full setup, entry types, and hook configuration.
+**Agents (1):** `report-drafter` — dispatched by `/research-report` to handle full journal + git history ingestion in an isolated subcontext. Optional hooks enable auto-checkpoint before `/compact` and auto-resume on session start. See the [plugin README](plugins/ml-journal/README.md) for full setup, entry types, and hook configuration.
 
 ---
 

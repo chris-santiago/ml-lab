@@ -15,9 +15,10 @@ If `.project-log/journal.jsonl` does not exist, say: "No journal found. Run `/jo
 git status --short
 git diff --stat HEAD
 git branch --show-current
+git log --oneline -5
 ```
 
-Show the output to the user so they can see what will be committed.
+Show the status and diff stat to the user so they can see what will be committed.
 
 If nothing is staged or modified, say so and stop.
 
@@ -38,6 +39,7 @@ git add -A
 From the conversation context and the diff stat, write a commit message:
 - First line: imperative mood, ≤72 characters, describes *what* changed
 - Optional second paragraph (after blank line): *why*, if non-obvious
+- Match the prefix style (e.g. `feat:`, `fix:`, `chore:`, `docs:`) used in recent commits from `git log`
 
 Do not use generic messages like "update files" or "wip".
 
