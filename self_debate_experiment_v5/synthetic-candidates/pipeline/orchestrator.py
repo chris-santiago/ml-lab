@@ -381,6 +381,61 @@ def run_stage4(
 
 
 # ---------------------------------------------------------------------------
+# Stage 5 — Smoke scoring (pure, no I/O — testable without LLM calls)
+# ---------------------------------------------------------------------------
+
+def compute_smoke_scores(
+    scored: dict,
+    case: dict,
+    task_prompt: str,
+) -> dict:
+    """
+    Compute IDR, IDP, FVC, proxy_mean, and gate_pass from scorer output + case metadata.
+
+    Args:
+        scored:      Scorer LLM output: {must_find_found, must_not_claim_raised, verdict_given}
+        case:        Case metadata: {correct_verdict, must_find_issue_ids, _pipeline.num_corruptions}
+        task_prompt: Non-empty string = case is structurally valid
+
+    Returns dict with keys: IDR, IDP, FVC, proxy_mean, gate_pass
+    """
+    must_find_ids: list = case.get("must_find_issue_ids", [])
+    num_corruptions = case.get("_pipeline", {}).get("num_corruptions", None)
+
+    found_ids: list = scored.get("must_find_found", [])
+    idr: float | None = (
+        None if not must_find_ids
+        else (1.0 if all(i in found_ids for i in must_find_ids) else 0.0)
+    )
+
+    raised_bad: list = scored.get("must_not_claim_raised", [])
+    idp: float = 0.0 if raised_bad else 1.0
+
+    verdict: str = scored.get("verdict_given", "unclear")
+    correct_verdict: str = case.get("correct_verdict", "")
+    # SMOKE_WRAPPER asks Sonnet to return "approve"/"critique";
+    # Stage 4 stores correct_verdict as "defense_wins"/"critique".
+    # Normalize before comparing so defense_wins cases score correctly.
+    verdict_normalized = "defense_wins" if verdict == "approve" else verdict
+    fvc: float = 1.0 if verdict_normalized == correct_verdict else 0.0
+
+    applicable = [s for s in [idr, idp, fvc] if s is not None]
+    proxy_mean = round(sum(applicable) / len(applicable), 4) if applicable else 1.0
+
+    # Gate: permissive — accept almost everything.
+    # Structural failure only: Stage 4 produced no evaluable content.
+    gate_pass = bool(task_prompt and (must_find_ids or num_corruptions == 0))
+
+    return {
+        "IDR": idr,
+        "IDP": idp,
+        "FVC": fvc,
+        "proxy_mean": proxy_mean,
+        "gate_pass": gate_pass,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Stage 5 — Smoke Test
 # ---------------------------------------------------------------------------
 
@@ -442,32 +497,12 @@ Return JSON only:
     except ValueError:
         scored = {"must_find_found": [], "must_not_claim_raised": [], "verdict_given": "unclear"}
 
-    found_ids: list = scored.get("must_find_found", [])
-    idr: float | None = (
-        None if not must_find_ids
-        else (1.0 if all(i in found_ids for i in must_find_ids) else 0.0)
-    )
-
-    raised_bad: list = scored.get("must_not_claim_raised", [])
-    idp: float = 0.0 if raised_bad else 1.0
-
-    verdict: str = scored.get("verdict_given", "unclear")
-    correct_verdict: str = case.get("correct_verdict", "")
-    fvc: float = 1.0 if verdict == correct_verdict else 0.0
-
-    applicable = [s for s in [idr, idp, fvc] if s is not None]
-    proxy_mean = round(sum(applicable) / len(applicable), 4) if applicable else 1.0
-
-    # Gate: accept almost everything. Any case where single-pass Sonnet is wrong in any
-    # direction — missed flaws, wrong verdict, false accusations — is a candidate for debate.
-    # The defender corrects false accusations. The critic surfaces missed flaws. Wrong verdicts
-    # get reversed. All of these are the signal we want to measure.
-    #
-    # The only structural rejection: if Stage 4 produced a case with no task_prompt or no
-    # scoring targets at all (pipeline failure, not a difficulty signal).
-    # Trivially correct cases are accepted as calibration anchors — they test that debate
-    # does not degrade performance when there is nothing to fix.
-    gate_pass = bool(task_prompt and (must_find_ids or num_corruptions == 0))
+    scores = compute_smoke_scores(scored, case, task_prompt)
+    idr = scores["IDR"]
+    idp = scores["IDP"]
+    fvc = scores["FVC"]
+    proxy_mean = scores["proxy_mean"]
+    gate_pass = scores["gate_pass"]
 
     result = {
         "mechanism_id": mechanism_id,
