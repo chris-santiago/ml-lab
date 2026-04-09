@@ -79,11 +79,12 @@ CORRUPTION_LEVELS = [0, 1, 2, "many"]
 CORRUPTION_PROBS  = [0.25, 0.35, 0.25, 0.15]  # must sum to 1.0
 
 
-def sample_corruption_level(rng: random.Random) -> int | str:
+def sample_corruption_level(rng: random.Random, probs: list[float] | None = None) -> int | str:
     """Sample number of corruptions to inject. Called once per case by the orchestrator."""
+    probs = probs or CORRUPTION_PROBS
     r = rng.random()
     cumulative = 0.0
-    for level, prob in zip(CORRUPTION_LEVELS, CORRUPTION_PROBS):
+    for level, prob in zip(CORRUPTION_LEVELS, probs):
         cumulative += prob
         if r < cumulative:
             return level
@@ -782,6 +783,11 @@ def parse_args() -> argparse.Namespace:
     for stage in ["stage1", "stage2", "stage3", "stage4", "smoke", "scorer"]:
         p.add_argument(f"--{stage}-model", default=None,
                        help=f"Model override for {stage}")
+    p.add_argument(
+        "--corruption-probs", default=None,
+        help="Comma-separated probs for [0, 1, 2, many] corruptions, must sum to 1.0. "
+             f"Default: {','.join(str(p) for p in CORRUPTION_PROBS)}"
+    )
     return p.parse_args()
 
 
@@ -794,6 +800,15 @@ def build_config(args: argparse.Namespace) -> dict:
         if override:
             models[stage] = override
 
+    corruption_probs = CORRUPTION_PROBS
+    if args.corruption_probs:
+        parsed = [float(x) for x in args.corruption_probs.split(",")]
+        if len(parsed) != 4:
+            raise ValueError("--corruption-probs requires exactly 4 values (0, 1, 2, many)")
+        if abs(sum(parsed) - 1.0) > 1e-6:
+            raise ValueError(f"--corruption-probs must sum to 1.0, got {sum(parsed):.4f}")
+        corruption_probs = parsed
+
     return {
         "batch_size":           args.batch_size,
         "start_case_id":        args.start_case_id,
@@ -805,6 +820,7 @@ def build_config(args: argparse.Namespace) -> dict:
         "resume":               args.resume,
         "concurrency":          args.concurrency,
         "models":               models,
+        "corruption_probs":     corruption_probs,
     }
 
 
@@ -849,7 +865,7 @@ def main() -> None:
         hypotheses = run_stage1_all(config, client)
 
     # Sample corruption levels for each case (Python controls this, not the LLM)
-    corruption_levels = [sample_corruption_level(rng) for _ in range(len(hypotheses))]
+    corruption_levels = [sample_corruption_level(rng, config["corruption_probs"]) for _ in range(len(hypotheses))]
     console.print(f"\n[Corruption plan] {corruption_levels}")
 
     # Per-case stages — concurrent across cases, sequential within each case
