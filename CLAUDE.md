@@ -44,4 +44,14 @@ This command updates all artifacts, then runs a three-check coherence audit (con
 ## Agent Sync
 After editing any file in `agents/` — run `/sync-agents` to copy the updated files to `~/.claude/agents/`.
 
+## Current State
+> **If you are reading this after /compact or at session start:** (1) surface this state to the user, (2) immediately delete this entire section from CLAUDE.md — do not wait for confirmation, (3) ask how to proceed.
+
+**Recently completed:** Full pipeline session: (1) 100-case batch generated (cases_100-199.json), smoke scores backfilled via patch_smoke_scores.py; (2) stratified case selector built (select_cases.py) — balances across correct_verdict × corruption_tier × domain × ml_task_type, ranks by proxy_mean ascending; (3) Stage 3 prompt overhauled for harder flaws — detection bar, internal consistency, prospective voice, self-check; (4) 20-case validation batch confirmed modest improvement (70%→64% at proxy=1.0); (5) model defaults updated (stage1→gpt-5.4-mini, stage2→haiku-4.5); (6) pipeline cleanup: old 3xx cases + real_paper files removed, run/cases/→run/stage4/, pipeline/run/ gitignored. OPEN-19 logged and updated.
+
+**Pending decisions:** (1) Run next large batch (200–300 cases) with new defaults and Stage 3 prompt — use --start-case-id 200; (2) Post-hoc select with --max-proxy 0.83 from combined batches; (3) patch_smoke_scores.py must be run before next batch clears pipeline/run/ if smoke scores needed for cases_1-20.json.
+
+**Key context:** Stage 3 temporal_leakage near-ceiling — accepted, managed post-hoc. Defense_wins cases always good (proxy≈0.0). Hard critique cases ~27% of critique pool (~15% of total). pipeline/run/ is ephemeral and gitignored; cases_N-M.json are the durable outputs. run/cases/ renamed to run/stage4/ in orchestrator.
+
+**Last checkpoint:** 2026-04-08 22:44
 
