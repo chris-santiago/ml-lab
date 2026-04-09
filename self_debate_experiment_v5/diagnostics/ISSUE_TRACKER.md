@@ -1,6 +1,6 @@
 # V5 Calibration Issue Tracker
 
-**Last updated:** 2026-04-08 (post-ARCH-1 scoring revision)
+**Last updated:** 2026-04-08 (post-ARCH-1 scoring revision; OPEN-18 added)
 **Purpose:** Canonical summary of all issues flagged during v5 pre-experiment calibration. Use this as the re-entry point when continuing work.
 
 ---
@@ -415,6 +415,29 @@ Cases should span the full range of what `ml-lab` handles: any ML hypothesis tha
 - Stage 4 (new): corruption node
 - Stage 5: leakage auditor → (eliminated; no language hiding needed)
 - All cases in batches 313–387: wrong document type, not reusable
+
+---
+
+## OPEN-18 — IDP only covers must_not_claim list; invented false accusations outside the list score IDP=1.0
+
+**Severity:** Moderate — IDP is misleading when Sonnet fabricates novel concerns not in `must_not_claim`  
+**Source:** Scoring logic analysis, 2026-04-08
+
+The scorer is asked to match Sonnet's `issues_found` against the pre-defined `must_not_claim` list and return `must_not_claim_raised`. IDP is then computed as `1 - n_raised / len(must_not_claim)`. This only penalizes false accusations that overlap with the finite set of "protected choices" Stage 4 defined.
+
+If Sonnet invents concerns entirely outside that list — fabricating flaws that Stage 4 did not anticipate — they are invisible to IDP. For a 0-corruption case where Sonnet invents 4 novel false accusations:
+
+- If none match `must_not_claim`: `raised_bad = []` → IDP = 1.0 (misleadingly clean)
+- FVC = 0.0 still fires (wrong verdict), so proxy still flags the case as a debate candidate
+- But the magnitude of false alarm behavior — 4 invented flaws vs. 1 — is not captured
+
+**Consequence:** IDP understates false alarm rate when Sonnet fabricates concerns outside the expected universe. The gate doesn't fail silently (FVC catches the wrong verdict), but IDP is an incomplete precision metric.
+
+**Potential fix:** Require the scorer to evaluate Sonnet's raw `issues_found` against the design soundness directly — not just match against a list. This is harder: the scorer would need to reason about whether each raised concern is legitimate, which requires it to understand the design. Alternatively, Stage 4 could generate a more exhaustive `must_not_claim` list covering the full space of plausible false accusations for each case.
+
+**Current mitigation:** FVC=0.0 is the primary signal when Sonnet invents flaws on a sound design (wrong verdict). IDP provides supplementary precision signal only for anticipated false accusation types. Cases are still correctly flagged as debate candidates via FVC.
+
+**Next step:** Monitor in live batches — if IDP=1.0, FVC=0.0 cases are common, the misleading IDP score may need to be addressed before reporting.
 
 ---
 
