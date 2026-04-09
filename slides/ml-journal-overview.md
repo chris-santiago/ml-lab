@@ -111,6 +111,28 @@ Skills split cleanly into **write** (add to the journal) and **read** (query and
 
 ---
 
+# Invoking Skills — Two Ways
+
+Skills can be invoked explicitly with a slash command, or in plain conversation.
+
+**Slash command:**
+```
+You: /checkpoint
+You: /log-summarize decisions
+You: /research-note
+```
+
+**Natural language — Claude recognises the intent:**
+```
+You: save our progress before I compact
+You: what decisions have we made so far?
+You: write up today's work as a shareable note
+```
+
+Both routes invoke the same skill. Slash commands are convenient shortcuts — they're not required.
+
+---
+
 # Entry Types
 
 ml-journal enforces a fixed schema per entry type. Claude infers the type from conversation context — you don't have to label it.
@@ -152,6 +174,33 @@ ml-journal: decision | "Use cosine similarity for document embeddings"
  "description": "Use cosine similarity for document embeddings",
  "rationale": "embedding magnitudes vary by document length"}
 ```
+
+---
+
+# Proactive Logging via CLAUDE.md
+
+`/log-init` optionally injects logging rules into your repo's `CLAUDE.md`:
+
+```
+► Add proactive journal logging rules to your CLAUDE.md? (y/n)
+```
+
+If accepted, Claude auto-proposes entries at natural pauses — without being asked:
+
+| Pattern | Proposed type |
+|---------|--------------|
+| User confirms a direction | `decision` |
+| Unexpected finding changes approach | `discovery` |
+| Bug identified and explained | `issue` |
+| Fix confirmed working | `resolution` |
+| Root cause understood | `lesson` |
+| Experiment verdict clear | `experiment` |
+
+**Rules:** one proposal per event — not mid-investigation. Never re-proposes if declined. Chains `issue → resolution → lesson` at completion, not as three interruptions.
+
+<div class="hero">
+Without CLAUDE.md rules, logging is always explicit. With them, Claude surfaces the right entry type at the right moment.
+</div>
 
 ---
 
