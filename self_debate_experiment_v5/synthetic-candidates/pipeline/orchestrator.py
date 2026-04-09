@@ -375,7 +375,7 @@ def run_stage4(
         "num_corruptions": corruption_report.get("num_corruptions_requested"),
         "corruption_ids": [c.get("corruption_id") for c in corruption_report.get("corruptions", [])],
     }
-    out = RUN_DIR / "cases" / f"{mechanism_id}.json"
+    out = RUN_DIR / "stage4" / f"{mechanism_id}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=2), encoding="utf-8")
     return result
@@ -583,7 +583,7 @@ def _archive(mechanism_id: str, attempt: int, recycle_stage: str) -> None:
     """
     pairs = [
         (RUN_DIR / "stage3" / f"{mechanism_id}_corruption.json", f"{mechanism_id}_attempt_{attempt}_corruption.json"),
-        (RUN_DIR / "cases"  / f"{mechanism_id}.json",            f"{mechanism_id}_attempt_{attempt}_case.json"),
+        (RUN_DIR / "stage4"  / f"{mechanism_id}.json",            f"{mechanism_id}_attempt_{attempt}_case.json"),
         (RUN_DIR / "stage5" / f"{mechanism_id}_smoke.json",      f"{mechanism_id}_attempt_{attempt}_smoke.json"),
     ]
     if recycle_stage == "stage2":
@@ -668,7 +668,7 @@ def run_case(
                 )
                 case["verifier_status"] = "exhausted"
                 case["recycle_failure_reason"] = reason
-                (RUN_DIR / "cases" / f"{mechanism_id}.json").write_text(
+                (RUN_DIR / "stage4" / f"{mechanism_id}.json").write_text(
                     json.dumps(case, indent=2), encoding="utf-8"
                 )
                 return case
@@ -701,9 +701,9 @@ def assemble_batch(config: dict) -> None:
     end = start + config["batch_size"] - 1
     out_name = f"cases_{start}-{end}.json"
     if config["dry_run"]:
-        console.print(f"\n[dim][DRY RUN] Would assemble {out_name} from pipeline/run/cases/[/dim]")
+        console.print(f"\n[dim][DRY RUN] Would assemble {out_name} from pipeline/run/stage4/[/dim]")
         return
-    cases_dir = RUN_DIR / "cases"
+    cases_dir = RUN_DIR / "stage4"
     accepted = []
     exhausted = []
 
@@ -816,7 +816,7 @@ def main() -> None:
 
     # Clear run dir for fresh batch (don't mix cases from previous runs)
     if not config["resume"]:
-        for subdir in ["stage2", "stage3", "stage4", "stage5", "cases"]:
+        for subdir in ["stage2", "stage3", "stage4", "stage5"]:
             d = RUN_DIR / subdir
             if d.exists():
                 for f in d.glob("*.json"):
@@ -859,7 +859,7 @@ def main() -> None:
             continue
         mechanism_id = f"mech_{i+1:03d}"
         case_id = f"eval_scenario_{config['start_case_id'] + i}"
-        case_out = RUN_DIR / "cases" / f"{mechanism_id}.json"
+        case_out = RUN_DIR / "stage4" / f"{mechanism_id}.json"
         if config["resume"] and case_out.exists():
             existing = json.loads(case_out.read_text(encoding="utf-8"))
             if existing.get("verifier_status") == "pending":

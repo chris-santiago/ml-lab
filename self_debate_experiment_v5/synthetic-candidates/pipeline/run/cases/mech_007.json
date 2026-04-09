@@ -1,0 +1,112 @@
+{
+  "case_id": "eval_scenario_7",
+  "hypothesis": "For hospital sepsis prediction, a temporally aware model that uses irregularly sampled vital-sign trajectories and recent lab trends will predict 6-hour sepsis onset more accurately than a static feature baseline built from the latest-charted values and summary statistics, as measured by out-of-time AUROC and early-warning recall.",
+  "domain": "Clinical acute care: ICU and emergency department sepsis risk prediction from electronic health records",
+  "ml_task_type": "Binary classification",
+  "task_prompt": "## Experiment Design: Temporal Vital-Sign Trajectories for Sepsis Prediction\n\nTo test the hypothesis that temporally aware models outperform static baselines in 6-hour sepsis prediction, we propose the following rigorous experiment design.\n\n### 1. Data and Labels\n\nWe will use retrospective EHR data spanning 36 months from a large hospital system (ICU and ED). The dataset will include all timestamped vital signs (heart rate, blood pressure, respiratory rate, temperature, O2 saturation), lab results (lactate, WBC, CRP, blood cultures), medication administrations, and clinical diagnoses. We will include at least 50,000 patient encounters.\n\nSepsis labels are defined using clinical adjudication: a patient is labeled positive if sepsis onset occurs within 6 hours of a reference observation time T. Onset is marked as the earliest of (a) charted sepsis diagnosis with supporting SIRS or qSOFA criteria, (b) blood culture followed by broad-spectrum antibiotics within a 6-hour window, or (c) clinical review adjudication. Critically, all information used to define the label is timestamped and locked; no information after time T is accessible to the model, and no information after the 6-hour window is backfilled into the label. This prevents leakage and ensures we predict future onset, not already-declared sepsis.\n\n### 2. Data Partitioning and Site Stratification\n\nData will be partitioned at the encounter level into training, validation, and test sets using site-aware stratified sampling across the full 36-month collection window, targeting the same sepsis prevalence and ICU/ED mix in each split. Patients will remain unique to a single split, and site membership will be balanced so that no hospital disproportionately contributes to any one partition. This allocation is intended to reduce variance in model comparison by ensuring that differences between splits are not driven by unusually severe seasonal waves, temporary workflow changes, or transient documentation spikes concentrated in a single calendar block. This stratification also allows us to detect site-specific confounds (e.g., documentation practices, sepsis detection thresholds).\n\n### 3. Feature Engineering: Two Matched Cohorts\n\n**Treatment group (temporal-aware features):** For each vital and lab, we compute (a) the most recent value at time T, (b) the rate of change (slope) over the prior 6 hours, (c) time since last measurement, (d) variability (standard deviation) in the prior 6 hours, (e) a binary flag for missingness, and (f) the frequency of measurements (as a proxy for clinical vigilance). We also include static features: age, sex, admission type, Charlson comorbidity score, and current medications. All features use data up to and including time T only.\n\n**Control group (static-baseline features):** The most recent value of each vital and lab (within 24 hours of T), summary statistics over the prior 24 hours (min, max, mean), and the same static covariates. This group has no trajectory or rate-of-change information.\n\nTo keep feature scaling and category definitions stable across sites and care settings, preprocessing parameters will be established once from the full corpus of extracted encounters before model fitting and then frozen for all subsequent train, validation, and test runs. For continuous vitals and labs, normalization constants will be derived from the complete set of non-missing observations so that rare but clinically important extremes are placed on a consistent scale even if they are concentrated in a smaller partition. For categorical variables such as admission source, the encoding map will likewise be fixed up front to avoid split-specific sparsity patterns. Missing values are flagged (not imputed), and the flags themselves become features.\n\n### 4. Model and Baseline\n\n**Temporal model:** An LSTM or temporal convolutional network trained on irregularly sampled 12-hour sequences. The input is each vital and lab measurement at its actual EHR timestamp; missing measurements are masked. The network learns temporal patterns and outputs a probability of sepsis within 6 hours. Training uses focal loss or class-weighted cross-entropy to handle class imbalance (~5\u201315% positive rate). Hyperparameters (hidden size, dropout, learning rate, batch size) are tuned via random search (50 configurations), and the best configuration (highest validation AUROC) is selected.\n\n**Baseline:** Logistic regression with L2 regularization trained on static features and 24-hour summaries. We will keep the baseline specification fixed rather than extensively tuning it, so that it functions as a stable clinical reference model rather than a separately optimized competitor. Both models receive identical class-weighting, but the baseline is intentionally kept as a conventional snapshot-based risk score rather than expanded into a family of optimized static variants.\n\n### 5. Evaluation and Model Selection\n\nThe validation set is used to select hyperparameters during model development. The test partition remains outside the main tuning loop.\n\n**Primary metric:** AUROC on the test set. AUROC is threshold-independent, robust to class imbalance, and clinically meaningful (it ranks sepsis-positive patients higher, allowing clinicians to apply their own alert thresholds). We test the hypothesis with a DeLong test for AUROC difference (\u03b1 = 0.05); the temporal model succeeds if \u0394 AUROC \u2265 0.02\u20130.03.\n\n**Secondary metrics:** (1) Recall at fixed false-positive rates (e.g., 5%, 10%, 20%), reflecting alert volume constraints; (2) calibration (Brier score, calibration plots); (3) stratified performance by site, admission type, and alternate sepsis definitions; (4) temporal stability (AUROC by month within the test set); (5) negative control (AUROC with shuffled labels, should \u2248 0.5).\n\nAfter selecting the leading configuration, we will run a single confirmation pass on the test set to verify that the chosen model preserves its margin over the baseline under the final evaluation protocol before locking the training recipe for the full report. This check is intended to guard against selecting a configuration that is unusually well matched to the validation split alone. Once that confirmation is complete, the finalized model specification will be fixed and the full suite of primary and secondary metrics will be reported on the same held-out encounters.\n\n### 6. Confound Controls\n\n**Label-timing artifacts:** We will recompute performance with 3-hour and 12-hour windows to confirm gains are not artifacts of the chosen window.\n\n**Missingness confounds:** We will train an oracle that sees only missingness indicators and compare its AUROC to the full temporal model. If the full model only marginally exceeds the oracle, gains are driven by missingness patterns, not true trajectories.\n\n**Definition robustness:** We will replicate the analysis under two independent sepsis definitions (qSOFA vs. culture + antibiotic). Consistent gains across definitions rule out label artifacts.\n\n**Calibration and fairness:** We will inspect calibration plots and compute stratified performance by age, sex, and admission type. Poor calibration or subgroup disparity suggests spurious learning.\n\n**Site-specific effects:** We will report performance separately for each site and test for site-model interactions.\n\nThis design directly tests whether temporal trajectories improve prediction while controlling for confounds and maintaining consistent evaluation across sites and encounter types.",
+  "correct_verdict": "critique",
+  "num_corruptions": 4,
+  "planted_issues": [
+    {
+      "issue_id": "issue_001",
+      "corruption_id": "c001",
+      "flaw_type": "temporal_leakage",
+      "description": "The design uses site-aware stratified sampling across all 36 months for data partitioning, rather than a strict temporal split. This allows data from later months to influence the training set and earlier months to appear in validation/test, creating temporal leakage. Since clinical practices and sepsis epidemiology evolve, this inflates performance estimates and undermines the test of prospective generalization, which is essential for evaluating real-world deployment readiness.",
+      "severity": "high",
+      "detectability": "moderate",
+      "compound": false,
+      "requires_combination_of": null
+    },
+    {
+      "issue_id": "issue_002",
+      "corruption_id": "c002",
+      "flaw_type": "preprocessing_leakage",
+      "description": "Preprocessing parameters (normalization constants, categorical encoding maps) are computed on the full dataset, including validation and test data. This leaks distributional information from the future into model development, violating the assumption of truly held-out evaluation. In a temporal setting, this can artificially stabilize model performance and mask overfitting to specific site practices or measurement patterns, leading to optimistic bias.",
+      "severity": "high",
+      "detectability": "subtle",
+      "compound": true,
+      "requires_combination_of": [
+        "c001"
+      ]
+    },
+    {
+      "issue_id": "issue_003",
+      "corruption_id": "c003",
+      "flaw_type": "broken_baseline",
+      "description": "The baseline model (logistic regression) is not hyperparameter-tuned, while the temporal model undergoes extensive random search. This imbalance means performance gains could stem from better optimization of the complex model rather than the value of temporal features. A fair comparison requires equivalent tuning effort to isolate the impact of temporal modeling.",
+      "severity": "high",
+      "detectability": "obvious",
+      "compound": false,
+      "requires_combination_of": null
+    },
+    {
+      "issue_id": "issue_004",
+      "corruption_id": "c004",
+      "flaw_type": "evaluation_contamination",
+      "description": "The test set is used for a 'confirmation pass' to verify the model's margin before finalizing the configuration. This means the test set influences model selection indirectly, violating the principle of one-time evaluation. Reusing these test encounters for final reporting introduces optimistic bias and invalidates the statistical confidence of the reported AUROC difference.",
+      "severity": "high",
+      "detectability": "moderate",
+      "compound": false,
+      "requires_combination_of": null
+    }
+  ],
+  "must_find_issue_ids": [
+    "issue_001",
+    "issue_002",
+    "issue_003",
+    "issue_004"
+  ],
+  "must_not_claim": [
+    {
+      "claim": "The use of site-aware stratification is problematic because it balances site proportions across splits.",
+      "why_wrong": "Site stratification is appropriate and recommended to avoid confounding by site-specific documentation practices or sepsis detection policies. The flaw is not the stratification, but the lack of temporal ordering \u2014 correct design combines site stratification with chronological split."
+    },
+    {
+      "claim": "Using a fixed regularization strength for the baseline is reasonable to prevent over-tuning.",
+      "why_wrong": "While the intent is commendable, it breaks methodological parity. The sound design mandates equivalent tuning effort (CV for baseline, random search for temporal model) to ensure a fair comparison; under-tuning the baseline biases the experiment in favor of the temporal model."
+    },
+    {
+      "claim": "Computing normalization from the full dataset improves stability for rare clinical extremes.",
+      "why_wrong": "While intuitively plausible, this introduces preprocessing leakage. Only training data should inform normalization parameters in temporal settings; any use of future data risks inflating performance. Stability must be achieved without violating temporal boundaries."
+    }
+  ],
+  "acceptable_resolutions": [
+    {
+      "resolution_id": "res_001",
+      "description": "The critic identifies that the training-validation-test split uses random stratification over time instead of a chronological split, leading to temporal data leakage.",
+      "supports_critique_if": "The critic demonstrates that mixing temporal folds allows future-looking information to leak into training, undermining generalization to future periods.",
+      "supports_defense_if": "The design had preserved a strict temporal split (e.g., months 1\u201324 for train, 25\u201330 for val, 31\u201336 for test), which validly tests prospective performance generalization."
+    },
+    {
+      "resolution_id": "res_002",
+      "description": "The critic exposes that preprocessing parameters (scaling, encoding) are derived from the full dataset, including hold-out periods.",
+      "supports_critique_if": "Evidence shows that test-set distributional information leaks into training through normalization or encoding, biasing evaluation.",
+      "supports_defense_if": "Preprocessing is fit solely on the training set and applied to validation and test, preserving temporal integrity."
+    },
+    {
+      "resolution_id": "res_003",
+      "description": "The critic shows that the baseline model is not subject to the same hyperparameter tuning effort as the temporal model, invalidating the fairness of the comparison.",
+      "supports_critique_if": "The temporal model is tuned via random search while the baseline uses a fixed or nominal C value, giving one model an unfair advantage.",
+      "supports_defense_if": "Both models undergo equivalent tuning effort (e.g., baseline uses 5-fold CV on training data, temporal model selection on validation set) ensuring performance differences reflect architecture, not optimization."
+    },
+    {
+      "resolution_id": "res_004",
+      "description": "The critic establishes that the test set is reused in a 'confirmation pass', compromising its role as a held-out set.",
+      "supports_critique_if": "The test set is used not just for evaluation but to inform model selection confidence, violating the one-time use principle.",
+      "supports_defense_if": "The test set is only accessed after full model training and tuning are complete, with no further configuration decisions influenced by its results."
+    }
+  ],
+  "sound_design_reference": "## Experiment Design: Temporal Vital-Sign Trajectories for Sepsis Prediction\n\nTo test the hypothesis that temporally aware models outperform static baselines in 6-hour sepsis prediction, we propose the following rigorous experiment design.\n\n### 1. Data and Labels\n\nWe will use retrospective EHR data spanning 36 months from a large hospital system (ICU and ED). The dataset will include all timestamped vital signs (heart rate, blood pressure, respiratory rate, temperature, O2 saturation), lab results (lactate, WBC, CRP, blood cultures), medication administrations, and clinical diagnoses. We will include at least 50,000 patient encounters.\n\nSepsis labels are defined using clinical adjudication: a patient is labeled positive if sepsis onset occurs within 6 hours of a reference observation time T. Onset is marked as the earliest of (a) charted sepsis diagnosis with supporting SIRS or qSOFA criteria, (b) blood culture followed by broad-spectrum antibiotics within a 6-hour window, or (c) clinical review adjudication. Critically, all information used to define the label is timestamped and locked; no information after time T is accessible to the model, and no information after the 6-hour window is backfilled into the label. This prevents leakage and ensures we predict future onset, not already-declared sepsis.\n\n### 2. Temporal Split and Site Stratification\n\nData are divided chronologically: months 1\u201324 for training, months 25\u201330 for validation, and months 31\u201336 for held-out testing. This temporal split is essential because (1) it prevents leakage of future information into training, (2) it tests whether the model generalizes under changing clinical practices and sepsis epidemiology, and (3) it mirrors realistic prospective deployment. Within each temporal fold, patient encounters are grouped by clinical site and kept together; no patient appears in multiple splits. This stratification allows us to detect site-specific confounds (e.g., documentation practices, sepsis detection thresholds).\n\n### 3. Feature Engineering: Two Matched Cohorts\n\n**Treatment group (temporal-aware features):** For each vital and lab, we compute (a) the most recent value at time T, (b) the rate of change (slope) over the prior 6 hours, (c) time since last measurement, (d) variability (standard deviation) in the prior 6 hours, (e) a binary flag for missingness, and (f) the frequency of measurements (as a proxy for clinical vigilance). We also include static features: age, sex, admission type, Charlson comorbidity score, and current medications. All features use data up to and including time T only.\n\n**Control group (static-baseline features):** The most recent value of each vital and lab (within 24 hours of T), summary statistics over the prior 24 hours (min, max, mean), and the same static covariates. This group has no trajectory or rate-of-change information.\n\nAll preprocessing (z-score scaling, categorical encoding) is fit on the training set only and applied uniformly to validation and test sets. Missing values are flagged (not imputed), and the flags themselves become features.\n\n### 4. Model and Baseline\n\n**Temporal model:** An LSTM or temporal convolutional network trained on irregularly sampled 12-hour sequences. The input is each vital and lab measurement at its actual EHR timestamp; missing measurements are masked. The network learns temporal patterns and outputs a probability of sepsis within 6 hours. Training uses focal loss or class-weighted cross-entropy to handle class imbalance (~5\u201315% positive rate). Hyperparameters (hidden size, dropout, learning rate, batch size) are tuned via random search (50 configurations) on the training set, and the best configuration (highest validation AUROC) is selected.\n\n**Baseline:** Logistic regression with L2 regularization trained on static features and 24-hour summaries. Regularization strength C is tuned via 5-fold cross-validation on the training set using AUROC. Both models receive identical class-weighting and tuning effort; the baseline is not deliberately under-tuned.\n\n### 5. Evaluation and Model Selection\n\nThe validation set (months 25\u201330) is used only to select hyperparameters. The test set (months 31\u201336) is locked and touched exactly once, after all tuning is complete.\n\n**Primary metric:** AUROC on the test set. AUROC is threshold-independent, robust to class imbalance, and clinically meaningful (it ranks sepsis-positive patients higher, allowing clinicians to apply their own alert thresholds). We test the hypothesis with a DeLong test for AUROC difference (\u03b1 = 0.05); the temporal model succeeds if \u0394 AUROC \u2265 0.02\u20130.03.\n\n**Secondary metrics:** (1) Recall at fixed false-positive rates (e.g., 5%, 10%, 20%), reflecting alert volume constraints; (2) calibration (Brier score, calibration plots); (3) stratified performance by site, admission type, and alternate sepsis definitions; (4) temporal stability (AUROC by month within the test set); (5) negative control (AUROC with shuffled labels, should \u2248 0.5).\n\n### 6. Confound Controls\n\n**Label-timing artifacts:** We will recompute performance with 3-hour and 12-hour windows to confirm gains are not artifacts of the chosen window.\n\n**Missingness confounds:** We will train an oracle that sees only missingness indicators and compare its AUROC to the full temporal model. If the full model only marginally exceeds the oracle, gains are driven by missingness patterns, not true trajectories.\n\n**Definition robustness:** We will replicate the analysis under two independent sepsis definitions (qSOFA vs. culture + antibiotic). Consistent gains across definitions rule out label artifacts.\n\n**Calibration and fairness:** We will inspect calibration plots and compute stratified performance by age, sex, and admission type. Poor calibration or subgroup disparity suggests spurious learning.\n\n**Site-specific effects:** We will report performance separately for each site and test for site-model interactions.\n\nThis design directly tests whether temporal trajectories improve prediction while controlling for confounds and preventing leakage.",
+  "difficulty_justification": "This case is highly challenging due to multiple subtle and interacting corruptions \u2014 particularly the combination of temporal leakage and preprocessing leakage, which compound to create misleading stability. The corruptions include both obvious methodological flaws and subtle violations of time-series integrity that require deep domain understanding to detect and correctly interpret.",
+  "verifier_status": "pending",
+  "_pipeline": {
+    "mechanism_id": "mech_007",
+    "num_corruptions": "many",
+    "corruption_ids": [
+      "c001",
+      "c002",
+      "c003",
+      "c004"
+    ]
+  }
+}

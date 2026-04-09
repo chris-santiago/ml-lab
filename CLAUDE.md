@@ -44,3 +44,4 @@ This command updates all artifacts, then runs a three-check coherence audit (con
 ## Agent Sync
 After editing any file in `agents/` — run `/sync-agents` to copy the updated files to `~/.claude/agents/`.
 
+
