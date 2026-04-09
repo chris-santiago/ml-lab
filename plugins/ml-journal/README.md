@@ -59,7 +59,13 @@ Periodic:
 | `/log-summarize` | Prose synthesis of all entries of a given type |
 | `/log-commit` | Git commit + journal log in one step |
 | `/research-note` | Generate a session or day-scoped formatted markdown note — shareable, PR-ready |
-| `/research-report` | Synthesize `RESEARCH_REPORT.md` — full retrospective from journal, git history, and supplementary docs |
+| `/research-report` | Synthesize `RESEARCH_REPORT.md` — dispatches `report-drafter` agent to read full journal + git history |
+
+## Agents
+
+| Agent | Dispatched by | Description |
+|---|---|---|
+| `report-drafter` | `/research-report` | Reads full journal, git history, and supplementary docs; synthesizes 9-section draft. Never writes files. |
 
 ## Entry Types
 
@@ -177,6 +183,7 @@ plugins/ml-journal/
     log-commit/SKILL.md
     research-note/SKILL.md
     research-report/SKILL.md
+  report-drafter.md               # agent — drafts RESEARCH_REPORT.md (dispatched by /research-report)
   journal_log.py                  # top-level copy (used at runtime from .project-log/)
   journal_query.py
   journal-precompact.sh           # optional PreCompact hook

@@ -365,21 +365,13 @@ If no checkpoint exists: "No checkpoint found in journal. Starting fresh."
 **Trigger:** "/research-report", "write a full research report", "end-of-project writeup", "document our full research history", "create a project report"
 
 **Steps:**
-1. `git rev-parse --show-toplevel` — find repo root
-2. Read full `.project-log/journal.jsonl`
-3. `git log --oneline` — commit timeline
-4. Glob for supplementary `.md` files at repo root + 2 levels deep matching patterns: `**/ISSUE*`, `**/lesson*`, `**/POST_MORTEM*`, `**/TODO*` — discover, don't hardcode
-5. Synthesize `RESEARCH_REPORT.md` with sections:
-   - Problem Statement
-   - Timeline (chronological, from journal + git)
-   - What Was Tried
-   - What Failed (from `issue` + `post_mortem` entries)
-   - What Worked (from `experiment` verdicts, `resolution` entries)
-   - Key Decisions (from `decision` entries)
-   - Issues and Resolutions (linked pairs)
-   - Current State (from latest `checkpoint`)
-   - Open Questions (from `open_threads` across checkpoints)
-6. Show draft. Ask "► Write to RESEARCH_REPORT.md? (y/n)" — overwrites, git has history.
+1. `git rev-parse --show-toplevel` — find repo root, check journal exists
+2. Check if `RESEARCH_REPORT.md` already exists; note to user if so
+3. Dispatch `report-drafter` agent with repo root, project name, and existing-report flag — agent reads full journal, git log, and supplementary markdown files; synthesizes and returns the full draft
+4. Show draft. Ask "► Write to RESEARCH_REPORT.md? (y/n)" — overwrites, git has history.
+5. Write to `<repo-root>/RESEARCH_REPORT.md`
+
+**Agent:** `report-drafter` — handles all context ingestion (full journal, git history, supplementary docs) in an isolated subcontext. Produces a 9-section draft (Problem Statement, Timeline, What Was Tried, What Failed, What Worked, Key Decisions, Issues and Resolutions, Current State, Open Questions). Never writes files directly.
 
 ---
 

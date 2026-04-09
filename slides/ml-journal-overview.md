@@ -227,6 +227,7 @@ Two synthesis skills for different audiences and scopes.
 - Use after a work session, before a PR, or to share a daily update
 
 **`/research-report`** — full project or phase scope
+- Dispatches `report-drafter` subagent to isolate heavy context ingestion from the main session
 - Draws from all journal entries, full `git log`, and supplementary markdown files
 - Produces `RESEARCH_REPORT.md` — comprehensive retrospective
 - Sections: Problem Statement, Timeline, What Was Tried/Failed/Worked, Key Decisions, Issues and Resolutions, Open Questions

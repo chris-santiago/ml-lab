@@ -554,3 +554,18 @@ A compute-matched ensemble — three independent assessors plus a synthesizer, n
 ```
 
 No agents — ml-journal is entirely skill-based. Optional hooks enable auto-checkpoint before `/compact` and auto-resume on session start. See the [plugin README](plugins/ml-journal/README.md) for full setup, entry types, and hook configuration.
+
+---
+
+## Project Skills
+
+Four project-local slash commands (defined in [`.claude/skills/`](.claude/skills/)) automate maintenance and experiment prep:
+
+| Skill | Purpose |
+|-------|---------|
+| `/artifact-sync` | Sync all artifacts after any experiment, analysis step, or issue resolution; updates open issues, ensemble analysis, conclusions, report, and README, then runs a coherence audit |
+| `/new-issue` | Scaffold a new numbered post-mortem issue and append it to POST\_MORTEM.md; invokes the issue-drafter agent |
+| `/preflight` | Pre-execution readiness check for any experiment version; verifies uv, PEP 723 headers, phase files, step-number consistency, agent installation, and script syntax; reports PASS/WARN/FAIL + READY/BLOCKED |
+| `/sync-ml-lab-docs` | Propagate ml-lab.md changes to downstream artifacts (ML\_LAB\_FLOW.md mermaid flowchart and README.md) |
+
+Plugin skills: [`/ml-lab`](#install) (investigation workflow, see Part 1) and [10 ml-journal skills](#ml-journal--session-audit-trail) (session audit trail, see above).
