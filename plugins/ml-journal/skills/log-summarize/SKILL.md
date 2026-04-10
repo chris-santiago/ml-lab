@@ -20,7 +20,7 @@ If ambiguous, ask.
 ## Step 3: Load entries (single type)
 
 ```bash
-uv run <repo-root>/.project-log/journal_query.py --list <type>
+python3 <repo-root>/.project-log/journal_query.py --list <type>
 ```
 
 If no entries of that type: say so and stop.
@@ -30,7 +30,7 @@ If no entries of that type: say so and stop.
 Infer N from the user's phrasing (e.g. "last 10", "recent 5"). Default to 10 if unspecified.
 
 ```bash
-uv run <repo-root>/.project-log/journal_query.py --recent <N>
+python3 <repo-root>/.project-log/journal_query.py --recent <N>
 ```
 
 ## Step 4: Synthesize prose summary

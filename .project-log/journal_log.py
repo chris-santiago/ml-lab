@@ -91,7 +91,7 @@ def build_entry(args):
         "timestamp":  datetime.now(timezone.utc).isoformat(),
         "type":       entry_type,
         "project":    get_repo_name(),
-        "session_id": os.environ.get("CLAUDE_SESSION_ID"),
+        "session_id": os.environ.get("CLAUDE_SESSION_ID") or str(os.getppid()),
     }
 
     # Collect all known fields for this type
