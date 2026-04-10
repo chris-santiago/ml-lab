@@ -53,7 +53,7 @@ Intentional divergences from the standard ml-lab workflow. This section exists s
 | ETD output schema | Flexible | Canonical: condition/supports_critique_if/supports_defense_if/ambiguous_if | v3 had dual-schema branching as v3-only technical debt; v5 standardizes |
 | Micro/macro iteration | Steps 6-7 iterate; max 3 macro-cycles | Single-pass benchmark, no iteration | Benchmark cases have fixed ground truth |
 | TECHNICAL_REPORT.md | Optional Step 11 | Included; results mode without "limitations as design properties" framing | Benchmark warrants publication-ready output; framing norm updated per v3 Issue 17 |
-| Peer review cap | 3 rounds (1 Opus + 2 Haiku) | 2 rounds (1 Opus + 1 Haiku) | Deterministic scoring; quantitative errors caught by coherence audits before report |
+| Peer review cap | 3 rounds (1 Opus + 2 Haiku) | 2 rounds max (Round 1: Opus; Round 2: Haiku, only if Round 1 had MAJOR issues) | Deterministic scoring; quantitative errors caught by coherence audits before report |
 | Named experiment script | `[domain]_experiment{N}.py` | Scoring engine + analysis scripts distributed | Functionality split across `self_debate_poc.py`, analysis scripts |
 
 ---
@@ -202,6 +202,7 @@ All scripts reside in `plan/scripts/`. Invoke with `uv run plan/scripts/<name>.p
 | Script | Purpose | Phase |
 |--------|---------|-------|
 | `log_entry.py` | Structured INVESTIGATION_LOG.jsonl writer | 0+ (all phases) |
+| `normalize_cases.py` | Normalize synthetic candidates to benchmark_cases.json schema | 0 |
 | `validate_cases.py` | Case schema and distribution validation | 0 |
 | `filter_verified_cases.py` | Keep/revise/reject filter post-verification | 1 |
 | `write_preregistration.py` | Pre-registration + rubric writer | 3 |
