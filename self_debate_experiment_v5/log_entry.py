@@ -44,7 +44,7 @@ else:
 if args.case_id:
     meta['case_id'] = args.case_id
 
-log_file = Path('INVESTIGATION_LOG.jsonl')
+log_file = Path(__file__).parent / 'INVESTIGATION_LOG.jsonl'
 seq = 1
 if log_file.exists():
     lines = [l for l in log_file.read_text().splitlines() if l.strip()]

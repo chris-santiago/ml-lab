@@ -27,7 +27,7 @@
 
 1. **Script invocations:** All Python scripts — whether invoked by the orchestrator, a subagent, or as an inline one-liner — must use `uv run`. Never use `python` or `python3` directly. For inline one-liners: use `uv run python -c '...'` not `python3 -c '...'`. For multi-line inline scripts, use heredoc style (`python3 - << 'PYEOF' ... PYEOF`) — multi-line `-c` strings containing `#` trigger Claude Code's path validation scanner. Silent dependency resolution failures occur when PEP 723 metadata is skipped.
 
-2. **Agent invocation:** Agents (`ml-critic`, `ml-defender`, `research-reviewer`, `research-reviewer-lite`, `readme-rewriter`, `report-writer`) are invoked by name via the Agent tool. Source files in `agents/` are reference copies only. Do not read any file from `agents/` during execution.
+2. **Agent invocation:** Agents (`ml-critic`, `ml-defender`, `research-reviewer`, `research-reviewer-lite`, `report-writer`) are invoked by name via the Agent tool. Source files in `agents/` are reference copies only. Do not read any file from `agents/` during execution.
 
 3. **Log entries:** Never write log entries manually via `echo` or direct file append. Always use `uv run log_entry.py` (canonical source: `plan/scripts/log_entry.py`, copied to experiment root in Phase 0). This enforces schema compliance and seq monotonicity.
 
