@@ -72,7 +72,7 @@ The top-level object MUST be a dict with a single `"cases"` key containing an ar
 
 Do not run the experiment. Do not score outputs. Validate only.
 
-> **Script:** `plan/scripts/filter_verified_cases.py` — filters cases by verification status; enforces minimums (≥50 keep, ≥10 mixed, ≥8 defense_wins).
+> **Script:** `plan/scripts/filter_verified_cases.py` — filters cases by verification status; enforces minimums (≥50 keep, ≥8 defense_wins). Note: mixed=0 is expected for ARCH-1 — no minimum enforced.
 
 ```bash
 uv run plan/scripts/filter_verified_cases.py
@@ -89,7 +89,6 @@ uv run log_entry.py --step 1 --cat workflow --action step_end --detail "Phase 1 
 **Phase 1 commit:**
 ```bash
 git add self_debate_experiment_v5/benchmark_verification.json \
-        self_debate_experiment_v5/benchmark_cases_verified.json \
-        self_debate_experiment_v5/filter_verified_cases.py
+        self_debate_experiment_v5/benchmark_cases_verified.json
 git commit -m "v5 Phase 1: CASE_VERIFIER complete, benchmark_cases_verified.json locked"
 ```
