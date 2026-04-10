@@ -26,7 +26,7 @@ REPORTING NORMS (apply to all artifacts in this phase):
    - Per-case scoring table: all 5 conditions (forced_multiround shows N/A for non-hard cases)
    - Dimension-level aggregate tables:
      Table A: debate vs ensemble (IDR/IDP/DRQ/FVC only — ETD and DC excluded; see note)
-     Table B: debate conditions vs each other (all dims including ETD and DC)
+     Table B: debate conditions vs each other (IDR/IDP/DC/DRQ/FVC — ETD excluded; inapplicable to all ARCH-1 cases)
    - Benchmark pass/fail criteria table with results
    - Hypothesis verdicts: all primary and secondary
    - Forced multiround analysis: hard cases only — does forced exchange improve DRQ and IDR?
@@ -63,8 +63,8 @@ REPORTING NORMS (apply to all artifacts in this phase):
      - Secondary table: include hollow-round cases with note
      - If hollow_rate > 0.5: lead with finding ("majority of hard cases converged in round 1 — forced_multiround provides weak mechanism evidence"); do NOT present primary results as definitive
    - **DC/FVC divergence diagnostic section (required):**
-     - DC is diagnostic-only and excluded from primary scoring (PRIMARY_SCORING_DIMS = IDR/IDP/DRQ/ETD/FVC)
-     - For each condition, report: n_comparable_runs, mean_abs_delta (DC vs FVC), divergent_run_count (|delta| > 0.2), divergence_rate
+     - DC is diagnostic-only and excluded from primary scoring (PRIMARY_SCORING_DIMS = IDR/IDP/DRQ/FVC — ETD also excluded; inapplicable to all ARCH-1 cases)
+     - For each condition, report: n_comparable_runs, mean_abs_delta (DC vs FVC), divergent_runs (|delta| > 0.2), divergence_rate
      - Source: `dc_fvc_diagnostic` key in `v5_results.json`
      - If any condition shows divergence_rate > 0.1: flag as "DC adds independent signal on this condition — investigate cases"
      - If all conditions show mean_abs_delta < 0.05: note "DC redundant with FVC — empirically confirmed for v5 cases"

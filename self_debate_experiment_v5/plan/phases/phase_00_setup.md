@@ -30,8 +30,8 @@ cd self_debate_experiment_v5 && grep -q '"action": "preflight_complete"' INVESTI
 
 ```bash
 # Install agents (invoked by name — source files not read during execution)
-cp agents/ml-critic.md ~/.claude/agents/
-cp agents/ml-defender.md ~/.claude/agents/
+cp plugins/ml-lab/ml-critic.md ~/.claude/agents/
+cp plugins/ml-lab/ml-defender.md ~/.claude/agents/
 ```
 
 ```bash

@@ -37,7 +37,7 @@ Generate the final artifacts. Reporting norms apply throughout:
    - Primary metric: fair-comparison lift
    - Two comparison tables:
      Table A: debate vs ensemble on IDR/IDP/DRQ/FVC — include ETD exclusion rationale
-     Table B: isolated vs multiround vs forced_multiround on all dims
+     Table B: isolated vs multiround vs forced_multiround on IDR/IDP/DC/DRQ/FVC (ETD excluded — inapplicable to all ARCH-1 cases; no empirical_test_agreed ground-truth cases)
    - Closed-loop scoring confound mitigation: cross_vendor_scores_v5.json (Phase 9)
 
 2. REPORT_ADDENDUM.md — production re-evaluation (orchestrator-written):

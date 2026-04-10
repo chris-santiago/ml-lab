@@ -55,8 +55,9 @@ As orchestrator, adjudicate:
     (Note: empirical_test_agreed here is a legitimate orchestrator verdict for contested cases.
      ARCH-1 has no ground-truth cases with ideal_debate_resolution.type == empirical_test_agreed,
      but the orchestrator may still assign this verdict during live adjudication. When scored,
-     the engine handles it via RESOLUTION_EQUIVALENT_PAIRS: DRQ=0.67, FVC=0.0 since it falls
-     outside acceptable_resolutions for critique_wins/defense_wins ground-truth cases.)
+     the engine scores it as an adjacent pair: DRQ=0.5, FVC=0.5, since it falls
+     outside acceptable_resolutions but is adjacent to critique_wins/defense_wins ground-truth cases.
+     There is no RESOLUTION_EQUIVALENT_PAIRS constant — the engine uses adjacent-pair logic in compute_drq/compute_fvc.)
 - If empirical_test_agreed, specify canonical schema:
     condition: [what to test]
     supports_critique_if: [result confirming critique]
