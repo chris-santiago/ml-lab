@@ -435,9 +435,16 @@ def fetch_rescience_c(max_articles: int = 100) -> list[dict]:
         if not title:
             title = f"MLRC {paper_dir}"
 
-        # Fetch content.tex as the report body (LaTeX; GPT-4o handles it well)
-        content_text = _fetch_github_file_content(f"{raw_base}/{paper_dir}/content.tex")
-        report_text = (content_text or meta_text)[:8000]  # cap at 8k chars
+        # Fetch report body (LaTeX; GPT-4o handles it well).
+        # Structure: {year}/{slug}/journal/metadata.yaml (entry point found by tree)
+        #            {year}/{slug}/journal/content.tex   (stub: \input{../openreview/content.tex})
+        #            {year}/{slug}/openreview/content.tex (actual full report — 20–40 KB)
+        # Try openreview/content.tex first (real content), then fall back to meta_text.
+        paper_root = "/".join(parts[:-2])  # strip "journal" + "metadata.yaml"
+        content_text = _fetch_github_file_content(f"{raw_base}/{paper_root}/openreview/content.tex")
+        if not content_text or len(content_text.strip()) < 100:
+            content_text = None  # don't use the stub
+        report_text = (content_text or meta_text)[:8000]  # cap at 8k chars for LLM
 
         if len(report_text.strip()) < 100:
             continue
