@@ -1,0 +1,29 @@
+{
+  "case_id": "eval_scenario_716",
+  "condition": "multiround",
+  "run_idx": 2,
+  "num_rounds": 2,
+  "critic_raw": "This transformer-based readmission prediction design has two critical issues.\n\nFirst, Section 3 explicitly states: 'To ensure stable parameter estimates, all preprocessing transformers (imputation, scaling, text tokenizers, vocabulary builders) are fit on the combined dataset before any split occurs.' This is data leakage \u2014 fitting tokenizers and vocabulary on the test set encodes test-set vocabulary into training. For a clinical NLP task where text vocabulary evolves over time (new drug names, updated diagnosis terminology), fitting the vocabulary on all 5 years of data and then evaluating on a test split that was included in vocabulary construction means the model's vocabulary is optimized for test-set language patterns, not just training patterns.\n\nSecond, the design uses stratified random sampling: 'Train: random sampling of 60% of records across years 1\u20135.' For a 5-year EHR dataset with evolving clinical practice, a random split creates temporal leakage \u2014 patients from year 5 appear in training, and year 1 patients appear in test. This is the same design flaw seen repeatedly across these experiments. The stated rationale ('preserves class distribution consistency') does not require a random split \u2014 temporal stratification can also preserve class distribution.\n\nThird, the BioBERT fine-tuning endpoint uses 'validation AUC-ROC (no improvement for 5 consecutive epochs)' as early stopping. However, the logistic regression is tuned with '5-fold cross-validation on the training set.' This is an asymmetric validation protocol: the transformer uses a held-out validation set for tuning while logistic regression uses cross-validation within training. Cross-validation typically provides more stable estimates and more training data per fold. This could favor either model depending on dataset size, but the protocols are not equivalent.",
+  "all_issues_raised": [
+    "Preprocessing leakage: tokenizers and vocabulary fit on combined dataset before splitting",
+    "Temporal leakage: random split on 5-year EHR dataset violates temporal ordering",
+    "Asymmetric tuning protocol: transformer uses held-out validation, logistic regression uses CV on training"
+  ],
+  "round_transcripts": [
+    {
+      "round": 1,
+      "critic": "This design has preprocessing leakage (vocabulary fit on full dataset), temporal leakage (random split on 5-year EHR), and asymmetric tuning protocol (transformer uses held-out validation, LR uses cross-validation).",
+      "defender": "On preprocessing leakage: Conceded. Fitting tokenizers and vocabulary on the full dataset before splitting leaks test-set vocabulary into training. For a clinical NLP task, this is particularly problematic as medical terminology evolves.\n\nOn temporal leakage: Conceded. The random split across years 1\u20135 creates temporal leakage for a time-series clinical prediction task. The stated rationale that this preserves class distribution is valid but does not require a random split \u2014 stratified temporal holdout achieves the same class balance without mixing future and past patients.\n\nOn asymmetric tuning: The transformer uses held-out validation for early stopping while logistic regression uses 5-fold CV. These are indeed different protocols. For logistic regression, CV on the training set is standard and appropriate. For the transformer, using a held-out validation set for early stopping is also standard. The protocols reflect the nature of each algorithm's tuning mechanism. However, using the same held-out validation set for transformer early stopping and for both models' final metric reporting creates the standard concern about validation set reuse. The asymmetry is a limitation worth flagging."
+    },
+    {
+      "round": 2,
+      "critic": "The defender concedes both preprocessing leakage and temporal leakage. Two confirmed unresolved issues. The tuning protocol asymmetry is a limitation. The design requires temporal holdout and train-only preprocessing fitting.",
+      "defender": "Confirmed. Two genuine flaws: preprocessing leakage and temporal leakage from random split."
+    }
+  ],
+  "all_issues_adjudicated": [
+    "Preprocessing leakage: vocabulary and tokenizers fit on full dataset before splitting",
+    "Temporal leakage: random split on 5-year EHR dataset violates deployment simulation"
+  ],
+  "verdict": "critique_wins"
+}

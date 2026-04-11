@@ -1,0 +1,50 @@
+{
+  "case_id": "eval_scenario_706",
+  "condition": "ensemble_3x",
+  "run_idx": 2,
+  "critic_raw": "1. The primary evaluation metric is Mean Absolute Error (MAE), which the design justifies for a continuous risk score. However, the primary outcome is described as \"30-day hospital readmission (binary).\" MAE as a primary metric for binary classification requires a continuous risk score as the target, but whether the design trains on the binary label or a continuous proxy is inconsistently specified: the model is trained with \"binary cross-entropy for 30-day readmission classification\" in one section and \"Adam optimizer to minimize MAE on a continuous readmission risk score\" in another. These are different training objectives producing fundamentally different model outputs. If the network is trained with cross-entropy, MAE on predicted probabilities vs. binary labels is a miscalibration metric, not a performance metric. If trained with MAE, the output is a real-valued score without a direct probabilistic interpretation. The ambiguity is unresolved and affects which model is actually being built.\n\n2. The preprocessing pipeline is fit on the entire 36-month dataset before splitting: \"the preprocessing transformers including tokenizer, sentiment annotation pipeline, numerical scaling, and imputation are fit on the entire 36-month dataset prior to creating train, validation, and test splits.\" For the TF-IDF baseline, vocabulary size and document frequencies are determined by the full corpus including test documents \u2014 test-period clinical terms and their frequencies influence the feature representation used during training. For the transformer embeddings, if the tokenizer was being re-fit (unlikely for a frozen BERT, but specified as part of the fit-transform strategy), this would inject test-set token statistics.\n\n3. Clinician sentiment annotations are excluded if missing (expected <5%), but the design does not analyze whether missingness is random or systematic. If clinicians are more likely to omit sentiment annotations for patients they believe are high-risk or for specific diagnostic categories, the excluded 5% is not a random subset. Excluding non-random missingness creates a selection bias that skews both training and test distributions toward cases where clinicians felt confident enough to annotate, potentially making the task appear easier than it is in deployment.\n\n4. The transformer embeddings are extracted from a frozen pre-trained clinical BERT. The design uses the [CLS] token embedding as the primary feature vector. The [CLS] token in BERT is designed for sentence-level classification tasks, but its utility as a universal sentence embedding for regression is not guaranteed \u2014 it was not explicitly trained for semantic similarity or risk score prediction. If the pre-training task (masked language modeling) does not align with what discharge summary information predicts readmission risk, the frozen embedding may be capturing irrelevant variation. Fine-tuning the full BERT model on the training set with the readmission objective would be a more principled approach, and comparing frozen versus fine-tuned is a material methodological choice.\n\n5. The dataset has 10,000 discharge episodes over 36 months from a single hospital system, but the transformer model has 256+128 hidden units trained on 768-dimensional BERT embeddings \u2014 approximately 460,000 parameters. With a typical 80/20 train/test split, the training set is ~8,000 episodes. The ratio of parameters to training examples (~58:1) is very high for a regression head, and the regularisation (20% dropout, single early stopping criterion) may be insufficient to prevent the shallow network from memorising the training set. Logistic regression with ridge regularisation will generalize more reliably at this sample size.",
+  "all_issues_raised": [
+    "Training objective (binary cross-entropy vs. MAE) is inconsistently specified, making it unclear which model is being built and rendering the MAE primary metric ambiguous",
+    "Full-dataset TF-IDF fitting before splitting injects test-period vocabulary and document frequencies into training features",
+    "Clinician sentiment annotation missingness is assumed random but may be systematically related to case complexity, creating non-random selection bias",
+    "Frozen BERT [CLS] embeddings not fine-tuned on readmission prediction may capture irrelevant variation; fine-tuning vs. frozen is an undisclosed methodological choice",
+    "~460,000 parameter regression head trained on ~8,000 examples has a high parameter-to-sample ratio with insufficient regularisation described",
+    "TF-IDF vocabulary, IDF weights, and all preprocessing transformers fit on full 36-month dataset including test period; new clinical terminology from the test period is embedded in the vocabulary used during training",
+    "Primary metric (MAE on continuous risk score) is inconsistent with the binary 30-day readmission outcome; design ambiguously specifies both regression and classification objectives without resolving which governs model selection",
+    "Comparison conflates pre-training data advantage (biomedical BERT vs. corpus-limited TF-IDF) with architectural advantage; frozen BERT embeddings are not architecture-equivalent to TF-IDF",
+    "Excluding patients with missing sentiment annotations biases toward complex high-risk cases if missingness is informative; the design does not test whether missingness is random",
+    "Patient-level isolation across train/validation/test splits is not specified; patients with admissions across all three time windows appear in multiple splits",
+    "Stratified random split on longitudinal HF episodes allows same patient's admissions in train and test \u2014 patient-specific language pattern leakage despite stated intent",
+    "TF-IDF vocabulary and preprocessing fit on full 36-month dataset \u2014 test-period clinical terminology evolves and this smoothing masks deployment-realistic vocabulary drift",
+    "MAE as primary metric for a binary outcome is ill-defined \u2014 design does not commit to binary or continuous formulation, making evaluation ambiguous",
+    "Pre-trained biomedical transformer (BioBERT/SciBERT) provides external training data advantage over TF-IDF \u2014 the comparison tests external pretraining, not representation method"
+  ],
+  "all_issues_adjudicated": [
+    "Training objective (binary cross-entropy vs. MAE) is inconsistently specified, making it unclear which model is being built and rendering the MAE primary metric ambiguous",
+    "Full-dataset TF-IDF fitting before splitting injects test-period vocabulary and document frequencies into training features",
+    "Clinician sentiment annotation missingness is assumed random but may be systematically related to case complexity, creating non-random selection bias",
+    "Frozen BERT [CLS] embeddings not fine-tuned on readmission prediction may capture irrelevant variation; fine-tuning vs. frozen is an undisclosed methodological choice",
+    "~460,000 parameter regression head trained on ~8,000 examples has a high parameter-to-sample ratio with insufficient regularisation described",
+    "TF-IDF vocabulary, IDF weights, and all preprocessing transformers fit on full 36-month dataset including test period; new clinical terminology from the test period is embedded in the vocabulary used during training",
+    "Primary metric (MAE on continuous risk score) is inconsistent with the binary 30-day readmission outcome; design ambiguously specifies both regression and classification objectives without resolving which governs model selection",
+    "Comparison conflates pre-training data advantage (biomedical BERT vs. corpus-limited TF-IDF) with architectural advantage; frozen BERT embeddings are not architecture-equivalent to TF-IDF",
+    "Excluding patients with missing sentiment annotations biases toward complex high-risk cases if missingness is informative; the design does not test whether missingness is random",
+    "Patient-level isolation across train/validation/test splits is not specified; patients with admissions across all three time windows appear in multiple splits",
+    "Stratified random split on longitudinal HF episodes allows same patient's admissions in train and test \u2014 patient-specific language pattern leakage despite stated intent",
+    "TF-IDF vocabulary and preprocessing fit on full 36-month dataset \u2014 test-period clinical terminology evolves and this smoothing masks deployment-realistic vocabulary drift",
+    "MAE as primary metric for a binary outcome is ill-defined \u2014 design does not commit to binary or continuous formulation, making evaluation ambiguous",
+    "Pre-trained biomedical transformer (BioBERT/SciBERT) provides external training data advantage over TF-IDF \u2014 the comparison tests external pretraining, not representation method"
+  ],
+  "verdict": "critique_wins",
+  "found": {},
+  "per_assessor_found": {
+    "assessor_1": {},
+    "assessor_2": {},
+    "assessor_3": {}
+  },
+  "assessor_verdicts": {
+    "assessor_1": "critique_wins",
+    "assessor_2": "critique_wins",
+    "assessor_3": "critique_wins"
+  }
+}

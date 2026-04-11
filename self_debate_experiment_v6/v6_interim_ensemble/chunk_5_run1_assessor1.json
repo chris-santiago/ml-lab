@@ -1,0 +1,422 @@
+[
+  {
+    "case_id": "eval_scenario_787",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. STRATIFIED RANDOM SPLIT VIOLATES TEMPORAL INTEGRITY. The design applies a stratified random split to HAM10000/ISIC data 'to preserve demographic consistency.' HAM10000 contains multiple images per patient taken over time; randomly splitting by image leaks patient identity across folds. The same patient's lesions appear in train and test, so the model learns patient-specific skin features rather than generalizable lesion features. Evidence: compare performance when splitting by patient ID vs. by image — AUROC should drop materially under patient-level split. This invalidates the hypothesis test entirely since the comparison baseline (traditional methods) does not benefit from the same leakage.\n\n2. RECALL OPTIMIZATION WITHOUT THRESHOLD CALIBRATION. The design selects models by maximizing Recall on the validation set, but Recall is threshold-dependent. Maximizing Recall trivially drives toward predicting 'malignant' for all samples, yielding Recall=1.0 at the cost of Precision approaching the prevalence rate (~20-30% in ISIC). Reporting 'improved Recall' without fixing a clinically meaningful operating point — or comparing AUROC/AP curves — conflates better threshold choice with better model quality. The traditional baseline may achieve the same Recall at any threshold if evaluated at the same specificity.\n\n3. IMPLICIT CLAIM THAT AUGMENTATION CLOSES THE DISTRIBUTION GAP. The design uses standard augmentation (flips, color jitter) and asserts this handles 'varying image quality and resolution.' ISIC data contains acquisition-device confounds: dermatoscopy vs. clinical photography, different scanner brands, varying zoom levels. Standard augmentation does not simulate these artifacts. The CNN may learn device-type as a shortcut correlated with malignancy labels (dermatoscopic images are disproportionately benign in some ISIC splits). Evidence: ablation comparing performance when stratifying test set by image acquisition type.\n\n4. BASELINE UNDERSPECIFICATION. 'Color histograms with equal tuning effort' is too vague to evaluate fairness. Traditional pipelines for dermatology (e.g., SVM + ABCD rule features + color histograms + LBP) significantly outperform raw color histograms. If the traditional baseline is deliberately weak, the claimed CNN advantage is inflated. A fair comparison requires at minimum a literature-traceable traditional pipeline, not an unnamed color histogram system. The hypothesis is 'CNN vs. traditional image processing' — the operationalization of 'traditional' determines whether the result is informative.",
+    "all_issues_raised": [
+      "Stratified random split by image rather than patient leaks patient identity across train/test, inflating CNN performance",
+      "Recall optimization without threshold calibration conflates threshold choice with model quality",
+      "Standard augmentation does not close acquisition-device distribution gap present in ISIC/HAM10000",
+      "Traditional baseline (color histograms) is underspecified and likely weaker than literature-standard traditional pipelines"
+    ],
+    "all_issues_adjudicated": [
+      "Stratified random split by image rather than patient leaks patient identity across train/test, inflating CNN performance",
+      "Recall optimization without threshold calibration conflates threshold choice with model quality",
+      "Standard augmentation does not close acquisition-device distribution gap present in ISIC/HAM10000",
+      "Traditional baseline (color histograms) is underspecified and likely weaker than literature-standard traditional pipelines"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_798",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. STRATIFIED RANDOM SPLIT DESTROYS THE TEMPORAL CLAIM. The hypothesis is explicitly about 'patient symptom timelines' and the model is selected as an RNN precisely because sequences matter. Yet the design applies a stratified random split 'reflecting the assumption that each patient's timeline is independent.' This assumption is self-contradictory: if temporal structure were negligible, the motivation for an RNN over logistic regression collapses. Moreover, randomly shuffling longitudinal records across patients means the test set may contain intermediate observations from the same patient whose early records are in the training set — a direct temporal leakage. The experiment cannot determine whether the RNN exploits genuine temporal signal or memorizes patient-level structure exposed by the bad split.\n\n2. MAE IS WRONG FOR THE STATED OUTCOME. The primary outcome is 'quality of life score improvement at 6 and 12 months,' yet the task_type is classified as regression. But the baseline is logistic regression — logistic regression cannot directly optimize MAE of a continuous outcome; it predicts class probabilities. Either the outcome is continuous (and logistic regression is the wrong baseline model) or it is binary/ordinal (and MAE is the wrong metric). This internal inconsistency means one comparison arm is fundamentally misspecified, making the comparison uninterpretable.\n\n3. DATASET SIZE IS TOO SMALL FOR AN RNN. With 1,500 patients and longitudinal records, the effective training set is approximately 1,000-1,100 patients after splitting. RNNs with attention require substantially more data to outperform logistic regression on tabular-style clinical data at this scale; the expected result from the literature is that regularized logistic regression wins at n<5,000. Framing RNN superiority as the expected outcome without power analysis or a sample-size justification is a fundamental design omission. Evidence for or against: ablation on synthetic sub-samples of 500 vs. 1,000 vs. 1,500 to show the learning curve slope.\n\n4. 'TOKENIZATION OF UNSTRUCTURED SYMPTOM NOTES' IS UNCONTROLLED. The RNN input includes NLP-encoded symptom notes while the logistic regression baseline uses 'demographic and static clinical features.' This is a data advantage for the RNN, not an architecture advantage. If the RNN wins, the result conflates the value of unstructured text features with the value of temporal modeling. A proper ablation requires a logistic regression baseline that also uses the same NLP-encoded features, to isolate the contribution of sequence modeling.",
+    "all_issues_raised": [
+      "Stratified random split contradicts the temporal premise of using RNNs and enables temporal leakage across patients",
+      "MAE metric is incompatible with logistic regression baseline, making the comparison internally inconsistent",
+      "Dataset size of 1,500 patients is likely too small for RNN to outperform regularized logistic regression",
+      "RNN receives unstructured text features that logistic regression baseline does not, confounding architecture vs. data-source comparison"
+    ],
+    "all_issues_adjudicated": [
+      "Stratified random split contradicts the temporal premise of using RNNs and enables temporal leakage across patients",
+      "MAE metric is incompatible with logistic regression baseline, making the comparison internally inconsistent",
+      "Dataset size of 1,500 patients is likely too small for RNN to outperform regularized logistic regression",
+      "RNN receives unstructured text features that logistic regression baseline does not, confounding architecture vs. data-source comparison"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_821",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. TEMPORAL AUTOCORRELATION IN SATELLITE IMAGERY IS NOT WEAK. Sentinel-2 imagery is acquired on a 5-10 day revisit cycle; land cover for any given spatial pixel is temporally correlated across months within a season and year. A random spatial-image split will place images of the same geographic tile acquired at different times into train and test sets — the model sees the same field in August during training and is tested on the same field in October. This is spatial-temporal leakage, not handled by stratification on class labels. The design's claim that 'temporal autocorrelation is weak given the years-spanning dataset' is incorrect for continuous land cover which changes slowly; the model learns location-specific appearance rather than generalizable land cover patterns. Evidence: compare performance when splitting by geographic tile vs. by individual image.\n\n2. OVERALL ACCURACY IS AN INAPPROPRIATE PRIMARY METRIC. Land cover datasets have severe class imbalance — urban areas and water bodies are typically far outnumbered by vegetation classes. Optimizing and reporting overall accuracy will reflect majority-class performance and can be maximized by near-uniform prediction of dominant classes. The claim of CNN superiority based on overall accuracy may hold only because the CNN better fits the majority class; on rare classes (urban expansion, wetlands) the random forest may be competitive or superior. The F1/confusion matrix reported as secondary metrics should be primary, but they are not used for model selection.\n\n3. DATA AUGMENTATION TEMPORAL CONFOUND. Rotations and color adjustments are defensible for synthetic invariance. However, color adjustments applied to multispectral satellite bands introduce physically implausible spectral relationships — NDVI and other vegetation indices depend on specific band ratios that color jitter disrupts. If the CNN learns spectral indices implicitly, augmentation that corrupts those ratios during training may degrade rather than improve generalization. This is not a standard RGB image problem and the augmentation strategy is borrowed from computer vision without justification for the multispectral case.\n\n4. RANDOM FOREST BASELINE LACKS SPATIAL FEATURES. A well-tuned random forest on satellite imagery standardly includes spatial context features (texture, superpixel statistics, neighboring pixel features). The design specifies only a 'well-tuned random forests model' without indicating whether it receives equivalent spatial feature engineering. A pixel-wise random forest with spectral features only is substantially weaker than the standard practice, inflating the apparent CNN advantage.",
+    "all_issues_raised": [
+      "Stratified random split by image rather than geographic tile enables spatial-temporal leakage",
+      "Overall accuracy is inappropriate primary metric for class-imbalanced land cover data",
+      "Color augmentation applied to multispectral bands corrupts physically meaningful spectral ratios like NDVI",
+      "Random forest baseline likely lacks spatial context features, making comparison unfair"
+    ],
+    "all_issues_adjudicated": [
+      "Stratified random split by image rather than geographic tile enables spatial-temporal leakage",
+      "Overall accuracy is inappropriate primary metric for class-imbalanced land cover data",
+      "Color augmentation applied to multispectral bands corrupts physically meaningful spectral ratios like NDVI",
+      "Random forest baseline likely lacks spatial context features, making comparison unfair"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_796",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. ANOMALY DETECTION OPERATIONALIZED AS SUPERVISED CLASSIFICATION. The hypothesis is framed as 'anomaly detection' but the design describes a fully supervised binary classification setup with labeled defect types. Supervised classification and anomaly detection are distinct problem formulations with different evaluation regimes. The traditional 'image processing techniques' baseline for anomaly detection (e.g., autoencoders, statistical thresholding on hand-crafted features) would not be correctly operationalized as a supervised classifier. If the baseline uses traditional supervised classification, the comparison is CNN-supervised vs. traditional-supervised — not anomaly detection at all. If the baseline uses unsupervised anomaly detection methods, it is receiving fewer labels than the CNN, making the comparison unfair.\n\n2. PRECISION AS PRIMARY METRIC CONFLICTS WITH STRATIFIED SPLIT RATIONALE. The design uses stratified random split 'to address class imbalance' but then reports Precision as the primary metric with the motivation 'minimizing false positives.' In a heavily imbalanced anomaly detection setting (defects are rare), stratification artificially inflates the defect proportion in train/test relative to the true operational distribution. A model tuned and evaluated on balanced data will have an artificially deflated false positive rate compared to production. Precision reported on a balanced test set does not reflect operational Precision at the true prior defect rate.\n\n3. TEMPORAL CONTAMINATION FROM OPERATIONAL DATA. The images are 'captured over two years' from an 'operational shipping facility.' Defect patterns in shipping containers change over time due to aging container fleets, seasonal load patterns, and changing inspection protocols. A random split across two years places future defect patterns into training and past patterns into test, or vice versa. The design notes seasonal stratification as a confound check but does not use temporal splitting as the primary strategy, meaning the main evaluation may be contaminated even if the subgroup check is clean.\n\n4. ABSENCE OF OPEN-SET / NOVEL DEFECT EVALUATION. An industrial anomaly detection system must handle defect types not seen during training. The design trains and evaluates on 'all identified defect types' with no held-out defect category test. This means the experiment cannot address the most operationally important claim: does the CNN generalize to novel defects? The traditional method may be more robust to novel defect types precisely because it does not memorize appearance-based categories.",
+    "all_issues_raised": [
+      "Anomaly detection framing is inconsistent with fully supervised binary classification design, making baseline comparison ambiguous",
+      "Stratified split inflates defect proportion relative to operational prior, making Precision on test set non-representative of production",
+      "Random split across two years enables temporal contamination from evolving defect patterns and inspection protocols",
+      "No held-out novel defect category test, which is the most operationally critical evaluation"
+    ],
+    "all_issues_adjudicated": [
+      "Anomaly detection framing is inconsistent with fully supervised binary classification design, making baseline comparison ambiguous",
+      "Stratified split inflates defect proportion relative to operational prior, making Precision on test set non-representative of production",
+      "Random split across two years enables temporal contamination from evolving defect patterns and inspection protocols",
+      "No held-out novel defect category test, which is the most operationally critical evaluation"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_816",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. THE RNN RECEIVES SEQUENTIAL FEATURES WHILE THE LOGISTIC REGRESSION BASELINE RECEIVES AGGREGATED FEATURES. The design explicitly says the RNN is fed user sequence data while 'baseline logistic regression relies on aggregated non-sequential features.' This confounds architecture with feature set. If the RNN wins, the result cannot discriminate between: (a) sequential modeling outperforms aggregation, or (b) the sequential features themselves contain more information than aggregated summaries. A proper test of the hypothesis requires a logistic regression that also receives recency features or sliding window features — something logistic regression can easily handle.\n\n2. STRATIFIED RANDOM SPLIT FOR TEMPORAL SUBSCRIPTION DATA. Subscription renewal is inherently temporal: users who renew in month 12 have full behavioral history; users who renew in month 1 have limited history. A random split will place observations from the same user's subscription cycle across train and test, or will train on late-period behavior and test on early-period behavior (or vice versa). The design justifies the split as valid because 'temporal autocorrelation is weak,' but this claim is not operationally verified — streaming behavior exhibits strong weekly and seasonal cycles documented extensively in the subscription churn literature. Evidence against the design: a temporal split where training is months 1-20 and test is months 21-24 would reveal whether the cross-sectional signal actually transfers.\n\n3. PRIMARY METRIC IS 'PERCENTAGE INCREASE IN ACCURACY' WHICH IS UNDEFINED. The design states 'the primary evaluation metric examines the percentage increase in renewal prediction accuracy when using the RNN over logistic regression.' This is not a metric — it is a derived comparison. Accuracy on a binary renewal task with class imbalance is a poor primary metric regardless; a 5% improvement in accuracy when baseline accuracy is 90% (driven by the majority class) represents trivially meaningful improvement. F1 and Precision/Recall are mentioned as secondary but the comparison should be threshold-independent (AUROC, Average Precision) to be interpretable.\n\n4. MARKETING STRATEGY CONFOUND CONTROL IS INSUFFICIENT. The design controls for 'shifts in marketing strategies by identifying stable incentive conditions.' Marketing campaigns targeting at-risk users create a treatment-selection confound: users with low predicted renewal probability may have received retention offers, masking their true churn signal. This is not addressed by identifying stable conditions; it requires either excluding treated users or modeling the treatment assignment. The RNN may predict 'who received a retention offer' rather than 'who would have renewed organically.'",
+    "all_issues_raised": [
+      "RNN receives sequential features while logistic regression receives only aggregated features, confounding architecture vs. feature set comparison",
+      "Stratified random split ignores strong weekly and seasonal temporal cycles in subscription behavior",
+      "Primary metric defined as 'percentage increase in accuracy' is not a proper metric and accuracy is inappropriate for imbalanced classification",
+      "Marketing intervention confound creates treatment-selection bias that is not adequately addressed"
+    ],
+    "all_issues_adjudicated": [
+      "RNN receives sequential features while logistic regression receives only aggregated features, confounding architecture vs. feature set comparison",
+      "Stratified random split ignores strong weekly and seasonal temporal cycles in subscription behavior",
+      "Primary metric defined as 'percentage increase in accuracy' is not a proper metric and accuracy is inappropriate for imbalanced classification",
+      "Marketing intervention confound creates treatment-selection bias that is not adequately addressed"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_793",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. STRATIFIED RANDOM SPLIT FOR TIME-TO-FAILURE PREDICTION IS INTERNALLY CONTRADICTORY. The label is time-to-next-failure (TTNF) — a quantity that is defined by future events relative to the current measurement. A random split will place observations from the same vehicle at different points in its failure lifecycle across train and test sets. A vehicle that fails in month 18 will have telemetry from months 1-17 in training and its failure event in the test set, giving the model full knowledge of failure precursor patterns for that specific vehicle. This is vehicle-identity leakage. Additionally, TTNF exhibits strong temporal autocorrelation by construction — two adjacent weeks of telemetry for the same vehicle have nearly identical TTNF labels minus one week. The claim that 'cross-sectional patterns' justify the random split is false; TTNF is an inherently time-indexed label.\n\n2. RMSE AS PRIMARY METRIC IS POORLY MATCHED TO MAINTENANCE DECISION-MAKING. Fleet maintenance decisions are threshold-based: 'schedule maintenance if predicted TTNF < 7 days.' RMSE measures average squared deviation across all prediction magnitudes, penalizing errors at TTNF=30 days equally to errors at TTNF=2 days. A model that perfectly identifies which vehicles will fail in the next 3 days but has high RMSE on long-horizon predictions may be operationally superior to a model with low overall RMSE. The design should use precision/recall at clinically meaningful thresholds or calibration metrics, not RMSE as the sole primary metric.\n\n3. LINEAR REGRESSION IS AN INADEQUATE BASELINE FOR VEHICLE TELEMETRY. The design compares the LSTM ensemble against 'a baseline linear regression.' For time-series predictive maintenance, the appropriate baselines include: persistence models (TTNF = time since last maintenance), survival models (Cox proportional hazards, Weibull), or simple threshold-rule models. Linear regression applied to raw telemetry with no temporal features is trivially weak. If the baseline has no access to temporal structure while the LSTM does, the comparison is not measuring architectural benefit — it is measuring the benefit of having temporal features at all.\n\n4. SENSOR NOISE IMPUTATION APPLIED POST-SPLIT MAY INTRODUCE LABEL LEAKAGE. The design states imputation is 'fit solely on the training data.' For time-series sensor data with missing values, mean/median imputation fitted on training data may use the global mean of the sensor across all vehicles and time periods. If the test vehicle set has systematically different sensor behavior (newer vehicle generation with different sensor calibration), the imputation strategy introduces a mismatch. More critically, for TTNF labels derived from failure events: if a sensor reading is missing near a failure event and is imputed using a healthy-vehicle mean, the imputed value carries information about the failure proximity that is unrepresentative of true signal absence.",
+    "all_issues_raised": [
+      "Random split of time-indexed TTNF labels enables vehicle-identity leakage and violates temporal structure",
+      "RMSE is misaligned with threshold-based maintenance decisions; precision at operationally relevant horizons is more appropriate",
+      "Linear regression baseline lacks temporal features, making the comparison about feature engineering rather than architecture",
+      "Sensor noise imputation may introduce label leakage near failure events when fit on training global statistics"
+    ],
+    "all_issues_adjudicated": [
+      "Random split of time-indexed TTNF labels enables vehicle-identity leakage and violates temporal structure",
+      "RMSE is misaligned with threshold-based maintenance decisions; precision at operationally relevant horizons is more appropriate",
+      "Linear regression baseline lacks temporal features, making the comparison about feature engineering rather than architecture",
+      "Sensor noise imputation may introduce label leakage near failure events when fit on training global statistics"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_792",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. TEMPORAL SPLIT EXPLICITLY ACKNOWLEDGED THEN DISCARDED WITHOUT EMPIRICAL JUSTIFICATION. The design admits 'a stratified random split is unconventional given the data's temporal nature' and justifies it by 'assumption of weak temporal autocorrelation in patient readmission rates.' Thirty-day readmission is directly correlated with treatment practice evolution over 5 years: changes in discharge criteria (DRG pressure), HF treatment guidelines (SGLT2 inhibitors entering practice mid-period), and COVID-19 impact on 2020 readmissions all create non-stationarities. The 'weak autocorrelation' assumption is unsupported and empirically falsifiable. The correct design would compare temporal-split performance to random-split performance to quantify the degree of optimism introduced by the random split.\n\n2. RNN APPLIED TO A PROBLEM WHERE SEQUENCE STRUCTURE IS AMBIGUOUS. For readmission prediction, the 'sequence' in a patient's EHR is the discharge history — typically 1-3 prior admissions for chronic HF patients. RNNs designed for many-step sequences are not clearly appropriate for 3-step sequences; a simpler model with lag features would achieve similar expressivity. More critically, the design does not specify how variable-length admission histories are handled — padding strategy, masking, or hierarchical aggregation — which determines whether the RNN actually exploits temporal structure or collapses to pooled statistics.\n\n3. AUROC AS PRIMARY METRIC DOES NOT CAPTURE CALIBRATION. The clinical use case for readmission prediction is risk stratification for intervention — care managers act on predicted probability thresholds. AUROC measures rank ordering but is insensitive to calibration. A model that correctly rank-orders patients but outputs miscalibrated probabilities (all predictions clustered near 0.5) is operationally useless for threshold-based intervention. The design should include calibration evaluation (Brier score, reliability diagrams) as a primary deliverable.\n\n4. POLICY CHANGE AND SOCIO-ECONOMIC CONFOUND CONTROL IS INADEQUATE. The design 'partially controls' for policy changes by 'incorporating them as additional covariates.' But policy changes that affect discharge criteria change the label definition itself — a patient who would have been readmitted under 2018 discharge standards may not be readmitted under 2022 standards because they are no longer discharged as early. Including 'year' as a covariate does not resolve label definition drift; it models year as a predictor rather than acknowledging that the target concept has shifted.",
+    "all_issues_raised": [
+      "Weak temporal autocorrelation assumption is empirically unsupported given known HF treatment guideline changes and COVID-19 impact over 5-year period",
+      "RNN is poorly matched to very short EHR sequences (1-3 admissions); sequence handling strategy is unspecified",
+      "AUROC does not capture calibration, which is critical for threshold-based clinical intervention",
+      "Policy change covariate control does not address label definition drift when discharge criteria evolve"
+    ],
+    "all_issues_adjudicated": [
+      "Weak temporal autocorrelation assumption is empirically unsupported given known HF treatment guideline changes and COVID-19 impact over 5-year period",
+      "RNN is poorly matched to very short EHR sequences (1-3 admissions); sequence handling strategy is unspecified",
+      "AUROC does not capture calibration, which is critical for threshold-based clinical intervention",
+      "Policy change covariate control does not address label definition drift when discharge criteria evolve"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_812",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. STRATIFIED RANDOM SPLIT ON SECOND-RESOLUTION SENSOR DATA IS CATASTROPHICALLY WRONG. The dataset has sensor readings 'collected every second' over 24 months from over 100 tools. A second-resolution reading is not an independent observation — adjacent seconds for the same tool are nearly identical. A random split will place consecutive seconds from the same machine run into both train and test, producing near-perfect test performance via neighbor leakage. For a 24-month, 1-second-frequency dataset, a single tool generates approximately 63 million observations; the model effectively memorizes each tool's nominal behavior and is tested on frames drawn from the same distribution. This is not a methodological subtlety — it makes the experiment result completely uninterpretable.\n\n2. FAILURE EVENTS ARE RARE AND TEMPORALLY CLUSTERED AROUND ACTUAL FAILURES. In semiconductor manufacturing, equipment failures are clustered: readings in the 60 seconds before failure look systematically different from readings 1 hour before failure. A random split that stratifies on failure/no-failure label will scatter pre-failure readings across train and test. The LSTM trained on pre-failure patterns in training will have seen near-identical pre-failure signatures from the same failure event in training — the actual failure prediction task (detecting early degradation) is not being tested.\n\n3. F1-SCORE IS OPTIMIZED ON AN ARTIFICIAL CLASS BALANCE. Stratification creates a balanced (or at least stratified) train/test distribution. Operational semiconductor manufacturing has failure rates of approximately 0.1-2% of machine-hours. F1-score at the stratified test set balance is not the same as operational F1 at the true prior. The reported improvement in F1 will not translate to the production environment without re-thresholding. Precision at high recall — or AUROC evaluated at the true operating point — would be more informative.\n\n4. LOGISTIC REGRESSION BASELINE WITH 'ENGINEERED TIME-SERIES FEATURES' IS UNDERSPECIFIED. What features? If the logistic regression receives hand-crafted rolling statistics (mean, variance, rate-of-change over a 60-second window), it is a strong baseline that may match LSTM performance on short-horizon prediction. If it receives only static summary statistics, it is trivially weak. The experiment's verdict depends entirely on how competitive the baseline feature engineering is, but this is not specified. Both arms receiving equivalent temporal feature engineering would test architecture; current design tests architecture plus feature richness simultaneously.",
+    "all_issues_raised": [
+      "Second-resolution sensor data random split causes near-perfect leakage from consecutive temporally correlated observations",
+      "Pre-failure readings from the same failure event are scattered across train and test, making the actual degradation detection task untested",
+      "F1-score evaluated at stratified class balance does not reflect operational performance at true rare failure prior",
+      "Logistic regression baseline feature engineering is underspecified, making it impossible to assess whether architecture or feature engineering explains any difference"
+    ],
+    "all_issues_adjudicated": [
+      "Second-resolution sensor data random split causes near-perfect leakage from consecutive temporally correlated observations",
+      "Pre-failure readings from the same failure event are scattered across train and test, making the actual degradation detection task untested",
+      "F1-score evaluated at stratified class balance does not reflect operational performance at true rare failure prior",
+      "Logistic regression baseline feature engineering is underspecified, making it impossible to assess whether architecture or feature engineering explains any difference"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_795",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. PATIENT-LEVEL SPLIT IS NOT SPECIFIED, ENABLING SLIDE-LEVEL LEAKAGE. Histopathological datasets routinely contain multiple slides per patient (primary tumor, lymph nodes, re-biopsy). A stratified random split by image/slide will place multiple slides from the same patient in both train and test sets. The pretrained CNN, which learns patient-specific tissue characteristics (staining batch, tissue preparation artifacts, individual patient morphology), will achieve inflated test accuracy. The SVM baseline is equally affected, but if it uses simpler features (color histograms, texture statistics), it benefits less from this leakage — meaning the gap between CNN and SVM is inflated beyond what would hold in a patient-level-split design.\n\n2. ACCURACY AS PRIMARY METRIC FOR FIVE-CLASS CANCER SUBTYPE CLASSIFICATION. Five breast cancer subtypes have substantially different prevalences: luminal A is the most common (~40%), HER2-enriched is rare (~15%). A model that classifies everything as luminal A achieves ~40% accuracy on a balanced test set, or potentially much higher on the natural distribution. Accuracy does not penalize for subtype-specific errors. Errors on HER2-enriched vs. triple-negative are clinically catastrophic (different treatment regimens); errors on luminal A vs. luminal B may be minor. The metric choice does not reflect clinical stakes.\n\n3. TRANSFER LEARNING SOURCE DOMAIN IS UNSPECIFIED. 'Pretrained models' for histopathology may be pretrained on ImageNet (natural images), on TCGA histopathology, or on other pathology datasets. These lead to substantially different initialization quality. ImageNet-pretrained features do not directly transfer to histopathology (different color statistics, no semantic overlap). The claim that CNN 'leverages transfer learning' without specifying the pretraining domain and dataset means the result cannot be attributed to the transfer learning mechanism — it might simply reflect a better-initialized random network vs. SVM.\n\n4. STAINING NORMALIZATION IS UNDERSPECIFIED. The design mentions 'preprocessing steps to address staining and resolution variations' without specifying the method (Macenko, Vahadane, Reinhard). Staining normalization choice is a major confound in histopathology: aggressive normalization discards color information that pathologists use diagnostically; weak normalization leaves batch effects that the CNN can exploit as lab-specific shortcuts. The SVM baseline is more susceptible to staining batch effects if it uses raw color features, which again inflates the apparent CNN advantage beyond architectural merit.",
+    "all_issues_raised": [
+      "Slide-level rather than patient-level split enables patient identity leakage, inflating CNN performance relative to SVM",
+      "Accuracy is inappropriate primary metric for five-class cancer subtype classification with heterogeneous clinical stakes",
+      "Transfer learning source domain is unspecified, making it impossible to attribute results to transfer learning mechanism",
+      "Staining normalization method is unspecified and its choice systematically favors CNN over SVM in different ways"
+    ],
+    "all_issues_adjudicated": [
+      "Slide-level rather than patient-level split enables patient identity leakage, inflating CNN performance relative to SVM",
+      "Accuracy is inappropriate primary metric for five-class cancer subtype classification with heterogeneous clinical stakes",
+      "Transfer learning source domain is unspecified, making it impossible to attribute results to transfer learning mechanism",
+      "Staining normalization method is unspecified and its choice systematically favors CNN over SVM in different ways"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_813",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. THE GRAPH STRUCTURE IS CONSTRUCTED FROM THE SAME DATA BEING PREDICTED. The GNN uses 'interaction graphs' built from user interaction records on the platform — the same records that define engagement labels. If a node's connectivity (number of interactions, neighbor engagement) is correlated with the engagement label being predicted, then graph topology is a leaky feature. In social learning graphs, highly engaged users interact more, creating denser subgraphs that are structurally predictive. The GNN exploiting this is not learning predictive features about content relevance — it is learning the popularity/engagement tautology baked into the graph structure.\n\n2. STRATIFIED RANDOM SPLIT ON GRAPH DATA VIOLATES GRAPH STRUCTURE. Social interaction graphs have community structure. A random user split will place socially connected users in both train and test sets; the GNN sees the neighborhood structure of test users during training because their neighbors are in the training set. This is the standard graph data leakage problem (transductive vs. inductive setting). The design should use a temporally or community-stratified split, or explicitly evaluate in the inductive setting where test users are entirely disconnected from the training graph. AUROC on a graph-leaking split is not a measure of generalization.\n\n3. LOGISTIC REGRESSION BASELINE RECEIVES VECTOR-TRANSFORMED FEATURES FROM THE INTERACTION GRAPH. The design says 'the baseline receives identical features transformed into vector format.' If these are node embedding features derived from the same graph, the baseline also benefits from graph information — the comparison is GNN graph-message-passing vs. node embeddings in logistic regression, not 'GNN vs. feature-based model.' If the logistic regression receives only node attributes (user demographics, content metadata) without graph features, the comparison tests graph information vs. no graph information, not architecture.\n\n4. 'INTERACTION DEPTH AND CONTENT RELEVANCE' ARE PROXIES, NOT GROUND TRUTH ENGAGEMENT. Engagement labels (clicks, watches, comments) are behavioral proxies for interest; they are also driven by recommendation system decisions. Users who are shown relevant content engage; users who are shown irrelevant content do not — but the recommendation system's prior choices are embedded in the historical interaction data. The GNN trained on historical interactions is partially learning to predict what the recommendation system would show, not what users would genuinely engage with. This is a missing data problem: engagement with unchosen content is unobserved and cannot be imputed from the existing graph.",
+    "all_issues_raised": [
+      "Interaction graph constructed from engagement data creates structural tautology: graph topology directly encodes the engagement labels being predicted",
+      "Random split of graph data leaks social neighborhood structure of test users to training, violating inductive generalization requirement",
+      "Logistic regression baseline receives graph-derived features, making the comparison ambiguous between architecture and data source",
+      "Engagement labels are confounded by recommendation system decisions; unobserved engagement with unchosen content is missing by design"
+    ],
+    "all_issues_adjudicated": [
+      "Interaction graph constructed from engagement data creates structural tautology: graph topology directly encodes the engagement labels being predicted",
+      "Random split of graph data leaks social neighborhood structure of test users to training, violating inductive generalization requirement",
+      "Logistic regression baseline receives graph-derived features, making the comparison ambiguous between architecture and data source",
+      "Engagement labels are confounded by recommendation system decisions; unobserved engagement with unchosen content is missing by design"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_797",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. STRATIFIED RANDOM SPLIT ON LONGITUDINAL DATA WITH REPEATED MEASURES. The dataset is '2,000 participants tracked over a 5-year span' — a longitudinal cohort with annual cognitive assessments. A random split by observation will place multiple annual assessments from the same patient in both train and test sets. The multi-modal model learns patient-level baseline MRI features during training and is evaluated on later assessments from those same patients. The correlation between a patient's year-1 and year-3 cognitive decline scores is the dominant signal; the model exploits patient identity rather than generalizable imaging biomarkers. Patient-level split is required; the design does not mention it.\n\n2. PEARSON CORRELATION AS PRIMARY METRIC FOR HETEROGENEOUS DISEASE PROGRESSION. Cognitive decline in Alzheimer's is nonlinear and patient-heterogeneous: some patients decline rapidly, some remain stable, some follow a bimodal pattern. Pearson correlation assumes a linear relationship between predicted and actual scores and is dominated by high-variance patients (rapid decliners). A model that perfectly predicts rapid decliners and fails on slow decliners may achieve high Pearson r while providing no clinical utility for the majority of patients who progress slowly. Mean Absolute Error on prediction at clinically meaningful severity thresholds would be more appropriate.\n\n3. BASELINE COMPARISON IS ARCHITECTURALLY UNFAIR. The multi-modal model integrates MRI-derived CNN features with demographic data processed through dense networks. The baseline is 'a CNN model trained only on MRI data.' This comparison tests multi-modal vs. unimodal, not deep learning vs. traditional methods. The design lacks a simple baseline: logistic regression or linear regression on the demographic features alone, or on clinical features without any imaging. Without this, the experiment cannot determine whether the multi-modal advantage comes from the additional data source or the additional network capacity.\n\n4. PCA FOR GENOMIC/DEMOGRAPHIC DIMENSIONALITY REDUCTION BEFORE SPLIT IS UNSPECIFIED. The design applies PCA 'fitted exclusively on the training data.' For MRI-based neuroimaging data, PCA is not standard — voxelwise features, ROI summaries, or CNN embeddings are more common. The fact that MRI is processed via a CNN but also mentioned alongside PCA creates ambiguity: is the CNN pretrained and frozen (transfer learning), or trained end-to-end? The answer fundamentally affects whether the multi-modal advantage reflects learned image features or hand-specified ROI measurements, and whether the comparison to a baseline CNN is fair.",
+    "all_issues_raised": [
+      "Random split of longitudinal multi-year data leaks patient identity; same patient's annual assessments appear in both train and test",
+      "Pearson correlation is inappropriate for heterogeneous nonlinear Alzheimer's progression; dominated by rapid-decliner variance",
+      "Baseline is CNN-only (unimodal vs. multimodal), not traditional clinical features; cannot isolate architecture from data-source contribution",
+      "CNN architecture and PCA usage are inconsistently described; pretraining and fine-tuning strategy is ambiguous"
+    ],
+    "all_issues_adjudicated": [
+      "Random split of longitudinal multi-year data leaks patient identity; same patient's annual assessments appear in both train and test",
+      "Pearson correlation is inappropriate for heterogeneous nonlinear Alzheimer's progression; dominated by rapid-decliner variance",
+      "Baseline is CNN-only (unimodal vs. multimodal), not traditional clinical features; cannot isolate architecture from data-source contribution",
+      "CNN architecture and PCA usage are inconsistently described; pretraining and fine-tuning strategy is ambiguous"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_804",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. STAGED DECEPTION STUDIES DO NOT GENERALIZE TO REAL DECEPTION. The dataset is 500 labeled instances from a 'controlled deception detection study with standardized assessment protocols.' Staged deception — where participants are instructed to lie — produces qualitatively different micro-expressions than real high-stakes deception (investigative interviews, testimony, fraud). The CNN trained on staged lies learns staged-lying cues, not deception. This is a fundamental domain mismatch between the training population and the deployment claim ('security settings'). Decades of deception detection research document this generalization failure. The 500-instance dataset is not drawn from the deployment domain.\n\n2. BALANCED ACCURACY HIDES CHANCE-LEVEL PERFORMANCE. The meta-analytic deception detection literature places human accuracy at approximately 54% (barely above chance), with no automated method convincingly exceeding 70% on real-world deception. A CNN achieving 'improved balanced accuracy' on staged interactions has no established path to the operationally claimed domain. Balanced accuracy at 65-70% on staged data, if reported as 'superior to traditional facial coding,' may still be at chance on real-world security data. The experiment has no external validity check against a held-out real deception corpus.\n\n3. CULTURAL AND DEMOGRAPHIC CONFOUNDS ARE ACKNOWLEDGED BUT NOT CONTROLLED. The design notes 'cultural differences' as a confound addressed through 'stratified splitting and performance checks on critical demographic subsets.' Micro-expression research shows substantial cross-cultural variability in expression norms. If the 500-instance dataset is demographically homogeneous (a common limitation of lab studies), stratification is trivial and the confound is not actually controlled — it is acknowledged. The experiment design does not specify the demographic composition of the dataset or whether it includes culturally diverse participants.\n\n4. FIVE HUNDRED INSTANCES IS INSUFFICIENT FOR A SPATIAL CNN ON VIDEO DATA. A CNN processing micro-expressions from video requires learning from subtle, high-dimensional spatial features (micro-expression involves movements of 0.5-4 FACS action units over 1/25-1/5 of a second). With 500 instances, a CNN has roughly 350-400 training samples. This is orders of magnitude below what is needed to learn robust micro-expression features from raw video frames. The model will likely overfit to person-specific or session-specific characteristics rather than universal micro-expression cues, producing results that are entirely a function of the specific split rather than learned generalizable features.",
+    "all_issues_raised": [
+      "Staged deception data does not generalize to real high-stakes deception; fundamental domain mismatch with claimed security deployment",
+      "Balanced accuracy improvement on staged data has no established relationship to performance on real-world deception",
+      "Demographic and cultural confound control is asserted but not actually demonstrated given likely homogeneous lab dataset",
+      "500 instances is insufficient for a CNN to learn generalizable micro-expression features; results will be split-specific"
+    ],
+    "all_issues_adjudicated": [
+      "Staged deception data does not generalize to real high-stakes deception; fundamental domain mismatch with claimed security deployment",
+      "Balanced accuracy improvement on staged data has no established relationship to performance on real-world deception",
+      "Demographic and cultural confound control is asserted but not actually demonstrated given likely homogeneous lab dataset",
+      "500 instances is insufficient for a CNN to learn generalizable micro-expression features; results will be split-specific"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_790",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. STRATIFIED RANDOM SPLIT ON TEMPORAL EHR DATA WITH STATED TEMPORAL DEPENDENCY. The design explicitly acknowledges 'the potential temporal nature of the data' and claims that 'features are derived solely from pre-discharge information, thereby capturing pertinent signals while precluding future outcome data.' However, a random split on discharge events does not eliminate temporal confounds: patients discharged in 2022 may have better care management post-discharge (telehealth, remote monitoring) than patients discharged in 2021, and this affects observed readmission rates. The model trained on random samples of both periods learns the average effect; tested on both periods, it appears to generalize when in fact it is averaging over distinct distributions. A temporal split is required to test genuine out-of-sample generalization.\n\n2. RNN APPLIED TO DISCHARGE EVENTS, NOT LONGITUDINAL ENCOUNTERS. The design mentions using RNNs for 'sequence modeling capabilities pertinent to patient records.' For 30-day readmission, the relevant sequence is the current admission's clinical trajectory — but the primary data source is 'demographics, NLP-encoded discharge summaries, and comorbidity indices.' Discharge summaries are produced once per admission; there is no within-admission sequence to model unless the design also uses daily progress notes or vital signs. If each patient contributes a single discharge event, the RNN has nothing to recur over and collapses to a feedforward model. The design does not specify whether the RNN processes daily hospital events within an admission or just the discharge summary.\n\n3. DEPARTMENT VARIABILITY CONFOUND CONTROL IS INSUFFICIENT. The design controls for department variability via 'stratified sampling and comparison to department-focused models.' But department membership is predictive of readmission independently of the patient's clinical state: cardiology patients have higher readmission rates than orthopedic patients by construction. If department is not a covariate in both models, the RNN may learn department-specific language patterns from NLP discharge summaries and achieve higher AUROC not because it is better at patient-level risk, but because it learns department-level base rates better. A within-department stratified comparison is necessary.\n\n4. NLP DISCHARGE SUMMARY ENCODING IS UNSPECIFIED. 'NLP-encoded discharge summaries' is a broad specification. If these are TF-IDF vectors, the feature dimensionality may exceed sample size for a logistic regression baseline (creating regularization pressure not applicable to the RNN). If these are BERT embeddings, they were produced by a model pretrained on medical text — a form of transfer learning not available to the logistic regression baseline. The comparison is not equivalent across models depending on the NLP representation choice.",
+    "all_issues_raised": [
+      "Random split on temporal discharge data does not account for care practice evolution between 2021 and 2022",
+      "RNN sequence modeling premise is unclear: if each patient contributes only a single discharge event, the RNN has no temporal sequence to exploit",
+      "Department membership is a major base-rate predictor; confound control via stratified sampling is insufficient without explicit covariate inclusion",
+      "NLP encoding method is unspecified, potentially giving RNN a transfer learning advantage not available to the logistic regression baseline"
+    ],
+    "all_issues_adjudicated": [
+      "Random split on temporal discharge data does not account for care practice evolution between 2021 and 2022",
+      "RNN sequence modeling premise is unclear: if each patient contributes only a single discharge event, the RNN has no temporal sequence to exploit",
+      "Department membership is a major base-rate predictor; confound control via stratified sampling is insufficient without explicit covariate inclusion",
+      "NLP encoding method is unspecified, potentially giving RNN a transfer learning advantage not available to the logistic regression baseline"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_818",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. THE 15% IMPROVEMENT THRESHOLD IS DEFINED IN ACCURACY, WHICH IS INSENSITIVE TO CHURN SIGNAL. The hypothesis claims 'at least 15% improvement in churn prediction accuracy.' Churn in a streaming service is typically 3-8% monthly. A model predicting no churn achieves 92-97% accuracy. A 15% improvement over this floor (e.g., from 94% to ~94%+) is trivially achieved by learning any marginal signal, while the actual predictive improvement is negligible. The hypothesis is operationalized in a metric that makes the threshold meaninglessly easy to hit. AUROC is chosen as the actual evaluation metric but is not the metric in the hypothesis threshold — this creates a disconnect between what the hypothesis claims and what the experiment measures.\n\n2. SENTIMENT ANALYSIS FEATURES ARE TEMPORALLY COUPLED TO CHURN. Customer reviews are written after a service interaction — often just before cancellation. If the sentiment feature is extracted from a review written in the same month as the churn event, it encodes the decision already made. The design should enforce a temporal gap: sentiment features must be from at least one billing cycle before the churn label. The design acknowledges that 'temporal autocorrelation might exist' and dismisses it, but this is not autocorrelation — it is prospective label leakage from review-writing behavior that precedes cancellation.\n\n3. GRADIENT BOOSTING BASELINE RATHER THAN MATCHED MODEL TYPE. The design uses gradient boosting as the experimental model (with sentiment) and logistic regression as the baseline (transactional only). This confounds model architecture with feature set in both directions simultaneously: the experimental model is more powerful AND has more informative features. A proper test requires: (a) logistic regression with transactional features vs. gradient boosting with transactional features — to measure model architecture effect; and (b) gradient boosting with transactional only vs. gradient boosting with transactional + sentiment — to measure feature contribution. The current design cannot attribute the difference to sentiment features.\n\n4. STRATIFIED RANDOM SPLIT FOR USER SUBSCRIPTION EVENTS CONFLATES DIFFERENT USERS' TEMPORAL POSITIONS. Users acquired in month 1 of the 3-year period have 36 months of behavioral history; users acquired in month 33 have 3 months of history. A random split will include both long-tenure and short-tenure users in training and test. The model trained on long-tenure users will not generalize to predicting churn for newly acquired users — a critical operational use case. The design does not stratify by tenure cohort, meaning the reported performance is an average over a highly heterogeneous population.",
+    "all_issues_raised": [
+      "15% accuracy improvement threshold is measured in the wrong metric; accuracy at high base rates makes the threshold trivially achievable",
+      "Sentiment features from reviews written before cancellation constitute prospective label leakage, not just temporal autocorrelation",
+      "Experimental model (gradient boosting + sentiment) vs. baseline (logistic regression + transactional) confounds architecture and feature set simultaneously",
+      "No stratification by user tenure cohort; model performance averaged over heterogeneous populations does not predict new-user churn"
+    ],
+    "all_issues_adjudicated": [
+      "15% accuracy improvement threshold is measured in the wrong metric; accuracy at high base rates makes the threshold trivially achievable",
+      "Sentiment features from reviews written before cancellation constitute prospective label leakage, not just temporal autocorrelation",
+      "Experimental model (gradient boosting + sentiment) vs. baseline (logistic regression + transactional) confounds architecture and feature set simultaneously",
+      "No stratification by user tenure cohort; model performance averaged over heterogeneous populations does not predict new-user churn"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_785",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. 'WEAK TEMPORAL AUTOCORRELATION' ASSUMPTION IS UNVERIFIED AND LIKELY WRONG FOR 5-YEAR EHR DATA. The design claims 'short-term temporal autocorrelations in patient readmission outcomes are sufficiently weak' to justify a random split. Thirty-day readmission correlates strongly with admission year through: evolving discharge criteria under DRG pressure, expanding post-discharge care management programs, and hospital-level policy shifts. At 5 years, this is not short-term autocorrelation — it is concept drift in the label-generating process. The experiment should demonstrate this assumption holds (e.g., by showing year-on-year readmission rates are stationary) before using it to justify the split choice.\n\n2. RNN ARCHITECTURE IS UNDERMOTIVATED FOR THE DATA STRUCTURE. The design uses features 'constructed from raw EHR signals' including 'demographics, medical history, and treatment details.' Without specifying whether the RNN processes ordered sequences of clinical events (daily labs, medications, procedures) or a single encounter-level feature vector, the choice of RNN over MLP is unjustified. If each patient contributes one observation (the index admission), the RNN is effectively a feedforward network. If the RNN processes the prior admission history, the design does not specify how prior admissions are structured — number, spacing, feature availability across historical admissions — which determines whether the temporal assumption is testable.\n\n3. SOCIO-ECONOMIC STATUS AS A CONTROL COVARIATE RAISES FAIRNESS CONCERNS UNREPORTED. The design includes 'socio-economic status and access to outpatient care' as features. These features are proxies for race, insurance status, and geography — protected attributes. A model trained on these features may achieve superior AUROC by learning proxies for social determinants that the healthcare system cannot ethically act on. The design does not assess demographic parity or equalized odds across patient groups, which is a critical omission for a clinical ML application targeting intervention.\n\n4. GRID SEARCH ON LOGISTIC REGRESSION BASELINE WITHOUT SPECIFYING SEARCH SPACE. 'Grid search' optimization of logistic regression for binary EHR prediction requires specifying the regularization type (L1 for sparsity, L2 for prediction) and the search range for the regularization parameter C. L1 logistic regression on clinical feature sets is a competitive baseline in the readmission prediction literature. If the grid search is over an insufficiently wide range or uses L2 only, the logistic regression is undertrained relative to the RNN. The RNN's apparent advantage may reflect inadequate baseline optimization.",
+    "all_issues_raised": [
+      "Weak temporal autocorrelation assumption is unverified over a 5-year period with documented concept drift in readmission label-generating process",
+      "RNN architecture is undermotivated without specifying whether patients contribute sequential events or single admission observations",
+      "Using socio-economic proxies for protected attributes as covariates without fairness evaluation is a critical omission for clinical deployment",
+      "Grid search for logistic regression baseline is underspecified; L1 regularization or wide C range may make baseline competitive"
+    ],
+    "all_issues_adjudicated": [
+      "Weak temporal autocorrelation assumption is unverified over a 5-year period with documented concept drift in readmission label-generating process",
+      "RNN architecture is undermotivated without specifying whether patients contribute sequential events or single admission observations",
+      "Using socio-economic proxies for protected attributes as covariates without fairness evaluation is a critical omission for clinical deployment",
+      "Grid search for logistic regression baseline is underspecified; L1 regularization or wide C range may make baseline competitive"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_807",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. NEXT-ITEM PREDICTION VS. K-MEANS SEGMENTATION IS NOT A VALID COMPARISON. The RNN is trained as a next-item predictor (sequence model, multi-class classification over items). K-means clustering is an unsupervised segmentation method — it produces cluster assignments, not next-item predictions. To make a prediction from K-means, you need a downstream rule (e.g., 'predict the most popular item in this user's cluster'). This downstream rule is a separate model with its own hyperparameters and assumptions. The comparison is RNN vs. [K-means + popularity heuristic], not RNN vs. a meaningful sequence prediction baseline. A proper baseline would be a logistic regression or co-occurrence matrix model that predicts next-item directly, not a segmentation approach used to inform heuristic prediction.\n\n2. STRATIFIED RANDOM SPLIT ON SEQUENTIAL PURCHASE EVENTS IS LEAKY BY CONSTRUCTION. The RNN predicts 'the next food item in each customer's purchase sequence.' With one million transactions over one year, the training set contains sequences that include transactions at time t, and the test set contains transactions at time t+1 from the same customer. The model that trains on customer A's purchases 1 through 15 will be evaluated on customer A's purchase 16 — which follows directly from the training data. This is not a test of generalization to unseen users or unseen time periods; it is a test of sequence completion for known users, and the RNN will trivially outperform K-means because K-means has no access to within-sequence context.\n\n3. ACCURACY AS PRIMARY METRIC FOR A LONG-TAIL FOOD ITEM DISTRIBUTION. Online food delivery platforms have power-law item distributions: popular items (pizza, burgers) account for the majority of orders; long-tail items are ordered rarely. Accuracy on next-item prediction rewards predicting popular items, since the modal item is correct frequently. The RNN that recommends popular items will have high accuracy without learning sequence dependencies. Mean Reciprocal Rank (MRR) or Normalized Discounted Cumulative Gain (NDCG) are standard metrics for recommendation tasks because they reward correct predictions ranked higher, not just top-1 accuracy.\n\n4. PROMOTIONAL EVENTS CONFOUND IS DOCUMENTED BUT NOT EXCLUDED FROM TRAINING SEQUENCES. The design notes 'promotional events or partnership changes as controlled through meticulous documentation.' But if a customer's purchase sequence includes a promotion-influenced purchase (e.g., a discounted item bought once due to promotion, never repeated), the RNN treats this as a genuine sequential preference. The model will learn spurious next-item predictions based on promotional patterns that no longer exist in the test or deployment environment. Documentation without exclusion or modeling of promotional events does not control the confound.",
+    "all_issues_raised": [
+      "K-means segmentation is not a valid comparison for next-item sequence prediction; baseline produces cluster assignments, not item predictions",
+      "Stratified random split of sequential purchase events places consecutive transactions from the same user in train and test, making the task sequence completion rather than generalization",
+      "Accuracy rewards predicting popular items regardless of sequence learning; MRR or NDCG are appropriate metrics for recommendation",
+      "Promotional event purchases are included in training sequences as genuine preference signals, creating spurious next-item predictions"
+    ],
+    "all_issues_adjudicated": [
+      "K-means segmentation is not a valid comparison for next-item sequence prediction; baseline produces cluster assignments, not item predictions",
+      "Stratified random split of sequential purchase events places consecutive transactions from the same user in train and test, making the task sequence completion rather than generalization",
+      "Accuracy rewards predicting popular items regardless of sequence learning; MRR or NDCG are appropriate metrics for recommendation",
+      "Promotional event purchases are included in training sequences as genuine preference signals, creating spurious next-item predictions"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_803",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. STRATIFIED RANDOM SPLIT ON FINANCIAL TIME SERIES IS THE MOST SEVERE METHODOLOGICAL ERROR POSSIBLE. Stock price data exhibits autocorrelation at multiple lags — daily, weekly, monthly — and non-stationarity (trending, regime changes). A random 70/15/15 split places observations from any given week across all three sets. The transformer trained on prices from 2023 weeks and tested on other 2023 weeks will appear to generalize when in fact it is fitting a memorized distribution. More critically, technical indicator features (lagged prices, moving averages) computed from a rolling window will directly leak future values into the past when observations are shuffled randomly. For example, if day T is in training and day T+5 is in test, the MA-5 feature for day T+5 includes the value from day T which the model has memorized. The design's own defense — 'this stratification is appropriate for detecting cross-sectional patterns' — has no application to stock price data, which has no cross-sectional units. There is only one price per instrument per day.\n\n2. ARIMA BASELINE REQUIRES PER-STOCK TUNING BUT TRANSFORMER TRAINS ACROSS ALL STOCKS. The design specifies 'ARIMA models are tuned explicitly for each stock' while the transformer processes the full cross-sectional history. This is a structural asymmetry: ARIMA is a univariate model that cannot exploit cross-stock patterns; the transformer can learn correlations across stocks (sector effects, index co-movement). If the transformer exploits cross-stock signals and ARIMA does not, the comparison is multi-information-source vs. single-information-source, not architecture.\n\n3. MAE ON CLOSING PRICE IS A MEANINGLESS METRIC FOR TRADING. The hypothesis claims to 'predict stock price movements' but MAE on closing prices does not measure direction accuracy. A model predicting tomorrow's closing price at exactly yesterday's close (pure persistence) achieves low MAE in trending markets while providing zero actionable signal (every prediction is wrong directionally). Directional accuracy (percent of days with correct sign of return) or Sharpe ratio of a strategy based on predictions would be meaningful; raw price MAE is not. The literature on stock prediction specifically criticizes price MAE for this reason.\n\n4. VOLATILITY SUBGROUP ANALYSIS DOES NOT RESCUE THE MAIN EXPERIMENT. The design proposes 'separately analyzing periods of high market volatility to assess model resilience.' This is post-hoc stratification of an already invalid experiment (random split on time series). If the main experiment is leaky, the volatility subgroup analysis inherits the same leak. The analysis cannot determine whether the transformer is genuinely more robust to volatility or simply better at memorizing high-volatility price patterns from training.",
+    "all_issues_raised": [
+      "Random split on financial time series directly leaks future values into lagged technical indicator features computed across shuffled observations",
+      "ARIMA per-stock tuning vs. cross-stock transformer training is a structural asymmetry conflating multi-source information with architecture",
+      "MAE on closing prices does not measure directional accuracy and cannot be used to evaluate trading signal quality",
+      "Post-hoc volatility subgroup analysis inherits the leakage from the invalid main split"
+    ],
+    "all_issues_adjudicated": [
+      "Random split on financial time series directly leaks future values into lagged technical indicator features computed across shuffled observations",
+      "ARIMA per-stock tuning vs. cross-stock transformer training is a structural asymmetry conflating multi-source information with architecture",
+      "MAE on closing prices does not measure directional accuracy and cannot be used to evaluate trading signal quality",
+      "Post-hoc volatility subgroup analysis inherits the leakage from the invalid main split"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_789",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. PCA ON GENOMIC DATA BEFORE PATIENT-LEVEL SPLIT IS POTENTIAL INFORMATION LEAKAGE. The design applies PCA to genomic sequences 'fitted exclusively on the training data.' However, the design also specifies a stratified random split — which means patients are distributed randomly across folds. PCA on genomic data is sensitive to population structure (ancestry, germline variation). If the PCA is fit on the full training population, it captures axes of variation that include all patients. But if any patient appears across folds (which they should not in a patient-level split), PCA loading vectors are influenced by test-set patients. The design does not confirm whether the split is patient-level or sample-level, and genomic data with multiple samples per patient (biopsy, blood) would leak patient population structure into the PCA reduction.\n\n2. ACCURACY AS PRIMARY METRIC FOR FOUR-CLASS CHEMOTHERAPY RESPONSE WITH IMBALANCED CATEGORIES. Chemotherapy responses are typically classified as pCR (pathological complete response), near-pCR, partial response, and non-response. pCR rates are 10-25%; non-response rates dominate. Accuracy on a four-class problem with this distribution is maximized by concentrating predictions on the majority class (non-response or partial response). The clinical need is to correctly identify pCR patients who could de-escalate chemotherapy and non-responders who need alternative treatment — precisely the minority and majority extremes. F1 per class, or macro-F1, should be primary, not overall accuracy.\n\n3. MULTI-MODAL ARCHITECTURE VS. LOGISTIC REGRESSION ON CLINICOPATHOLOGICAL FEATURES IS NOT ISOLATING THE GENOMIC CONTRIBUTION. The comparison is: [demographics + genomics, multi-modal deep learning] vs. [clinicopathological features only, logistic regression]. This simultaneously changes the model architecture, the data modality, and the feature set. If the multi-modal model wins, the result cannot attribute the gain to: (a) genomic data, (b) deep learning architecture, or (c) the combination. A proper test requires at minimum a logistic regression trained on demographics + genomic features to separate data modality from architecture effects.\n\n4. FOLLOW-UP VARIABILITY AS A COVARIATE DOES NOT ADDRESS CENSORING. Chemotherapy response assessment at 'post-treatment evaluation' depends on follow-up timing: patients assessed at 3 months vs. 9 months post-treatment will show different response categories due to residual disease evolution. Including follow-up duration as a covariate assumes a linear additive effect of follow-up time on response. In reality, this is a censoring problem: patients who drop out before assessment are missing not at random (more likely to be non-responders or more severe cases). A survival analysis framework or inverse probability weighting is required; a simple covariate adjustment is inadequate.",
+    "all_issues_raised": [
+      "PCA on genomic data may incorporate test-patient population structure if split is not confirmed as strictly patient-level",
+      "Accuracy is inappropriate for four-class imbalanced chemotherapy response; minority classes (pCR, non-response) are clinically most critical",
+      "Comparison simultaneously changes architecture and data modality; genomic contribution cannot be isolated from deep learning contribution",
+      "Follow-up variability covariate adjustment does not address non-random censoring in chemotherapy response assessment"
+    ],
+    "all_issues_adjudicated": [
+      "PCA on genomic data may incorporate test-patient population structure if split is not confirmed as strictly patient-level",
+      "Accuracy is inappropriate for four-class imbalanced chemotherapy response; minority classes (pCR, non-response) are clinically most critical",
+      "Comparison simultaneously changes architecture and data modality; genomic contribution cannot be isolated from deep learning contribution",
+      "Follow-up variability covariate adjustment does not address non-random censoring in chemotherapy response assessment"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_802",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. THE OUTCOME IS BINARY (COMPLICATION OCCURRED OR NOT) BUT THE METRIC AND MODEL ARE FOR REGRESSION. The design labels outcomes as 'documented occurrences of diabetes complications' — a binary event — but uses MAE as the primary metric and calls the task 'regression.' MAE requires a continuous outcome. Either the outcome is binary (in which case a regression model predicting probability needs calibration, not MAE, as its primary metric) or it is a continuous severity score (in which case 'documented occurrences' is not the correct label description). This internal inconsistency means the experiment is evaluating the wrong thing: binary event prediction should be evaluated with AUROC or calibration metrics, not MAE.\n\n2. CGM DATA IS TEMPORALLY AUTOCORRELATED AT FINE GRANULARITY. Continuous glucose monitoring produces readings every 5 minutes. Over 5 years per patient, this is approximately 525,000 readings per patient. The design applies a stratified random split, which will scatter consecutive 5-minute readings from the same patient across train and test sets. The extracted features (average glucose, variability) computed over windows will be computed from partially training-contaminated data if windows are defined post-split rather than pre-split. More importantly, a patient's complication risk at any given time is correlated with their recent glucose trajectory — a random split ensures the model sees adjacent trajectory windows from the same patient in both training and test.\n\n3. 'PRELIMINARY ANALYSIS SUPPORTS WEAK TEMPORAL AUTOCORRELATION' IS UNVERIFIED. The design justifies the random split by claiming 'a preliminary analysis of the target variable' supports weak temporal autocorrelation. Diabetes complications (nephropathy, retinopathy, neuropathy) develop over years; their occurrence rates shift with treatment improvements (newer insulin analogs, GLP-1 agonists entering use during the 5-year period). A preliminary autocorrelation analysis of annual complication rates does not address the structural non-stationarity introduced by treatment advances. The autocorrelation claim is for the wrong quantity (binary event occurrence) and ignores distributional shift.\n\n4. ADHERENCE DATA AS A COVARIATE DOES NOT ADDRESS SELECTION BIAS. The design incorporates 'adherence data' to control for 'patient adherence variability.' But adherence is endogenous: patients who are more adherent have better glucose control, which reduces complication risk. Including adherence as a covariate partially absorbs the CGM signal because adherence and CGM variability are highly correlated. The gradient boosting model may learn that adherence predicts complications and use CGM variability as a noisy proxy for adherence rather than as an independent predictor. This makes the CGM contribution uninterpretable in the presence of adherence as a covariate.",
+    "all_issues_raised": [
+      "Binary complication outcome is evaluated with regression metrics (MAE); task type and metric are internally inconsistent",
+      "Random split of 5-minute CGM readings scatters adjacent trajectory windows from the same patient across train and test",
+      "Weak temporal autocorrelation claim is based on preliminary analysis that does not account for treatment-induced non-stationarity over 5 years",
+      "Adherence covariate is endogenous to CGM signal; including it absorbs and confounds the CGM feature contribution"
+    ],
+    "all_issues_adjudicated": [
+      "Binary complication outcome is evaluated with regression metrics (MAE); task type and metric are internally inconsistent",
+      "Random split of 5-minute CGM readings scatters adjacent trajectory windows from the same patient across train and test",
+      "Weak temporal autocorrelation claim is based on preliminary analysis that does not account for treatment-induced non-stationarity over 5 years",
+      "Adherence covariate is endogenous to CGM signal; including it absorbs and confounds the CGM feature contribution"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_808",
+    "condition": "ensemble_3x",
+    "run_idx": 1,
+    "assessor_id": 1,
+    "critic_raw": "1. STRATIFIED RANDOM SPLIT BY REGION AND CROP TYPE IGNORES SPATIAL AUTOCORRELATION. Agricultural yield in adjacent fields within the same region is spatially autocorrelated: same soil type, microclimate, and farming practices. A random split by observation (pixel or field) will place spatially adjacent fields in both train and test sets. The CNN trained on images of field A will be evaluated on field A's neighbor, where spectral signatures are nearly identical. The apparent generalization is partially spatial interpolation, not true out-of-sample prediction across diverse geographies. The hypothesis claims evaluation 'on unseen test images from diverse geographical regions' but random regional stratification does not ensure geographic hold-out.\n\n2. CNN PROCESSES 2D SPATIAL PATTERNS BUT YIELD PREDICTION IS PRIMARILY TEMPORAL. Crop yield depends heavily on within-season temporal dynamics: emergence, vegetation peak, senescence timing. A single growing season's satellite image captures one temporal snapshot. The design covers 'five growing seasons' of data but does not specify whether the CNN processes time-series of spectral images across the season or a single mid-season image. If single images, the CNN is capturing one phenological moment, missing the temporal trajectory that drives yield. The linear regression baseline trained on 'historical agricultural data' may effectively encode multi-season temporal trends that the single-image CNN cannot access.\n\n3. PCA ON SPECTRAL DATA BEFORE SPLIT IS POTENTIAL LEAKAGE. The design applies normalization and PCA 'fit exclusively on training data.' PCA on hyperspectral bands identifies axes of variation across all training images. If spatial regions are represented in both training and test sets (random split), the PCA loading vectors will be influenced by spectral properties of test-region fields. PCA-reduced features for test fields are projections onto loading vectors that partially reflect the test field distribution — a subtle information leakage that becomes significant when test fields are close to training fields in spectral space.\n\n4. CLIMATIC CONFOUNDERS ARE INCLUDED AS FEATURES BUT NOT AS SOURCES OF DISTRIBUTION SHIFT. The design includes 'climatic data to capture environmental effects.' But climate variables (precipitation anomaly, temperature deviation) interact with crop type and region nonlinearly; the CNN may learn to predict yield from climate + spectral interaction for the specific regions in the training set. The test question is whether this generalizes to unseen regions with different climate-yield relationships (different crop varieties, irrigation practices). Including climate as a feature does not ensure the model learns generalizable climate-yield relationships rather than region-specific calibrations.",
+    "all_issues_raised": [
+      "Random spatial split places adjacent fields in train and test, enabling spatial interpolation that inflates apparent generalization",
+      "CNN processes static spectral snapshots but crop yield is driven by within-season temporal dynamics not captured in single images",
+      "PCA on spectral data with random regional split may incorporate test-region spectral properties into loading vectors",
+      "Climatic features included as covariates do not prevent learning region-specific climate-yield calibrations that fail to generalize"
+    ],
+    "all_issues_adjudicated": [
+      "Random spatial split places adjacent fields in train and test, enabling spatial interpolation that inflates apparent generalization",
+      "CNN processes static spectral snapshots but crop yield is driven by within-season temporal dynamics not captured in single images",
+      "PCA on spectral data with random regional split may incorporate test-region spectral properties into loading vectors",
+      "Climatic features included as covariates do not prevent learning region-specific climate-yield calibrations that fail to generalize"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  }
+]

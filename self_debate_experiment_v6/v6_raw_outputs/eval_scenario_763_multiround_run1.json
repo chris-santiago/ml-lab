@@ -1,0 +1,32 @@
+{
+  "case_id": "eval_scenario_763",
+  "condition": "multiround",
+  "run_idx": 1,
+  "num_rounds": 2,
+  "critic_raw": "The TCN vs. linear regression ED wait time prediction experiment is among the better-designed cases in this set, with a proper temporal split and training-set-only preprocessing for most components. However, two issues remain.\n\nThe first issue is the preprocessing leakage for imputation. Section 1 describes imputing missing staffing levels and bed counts using 'median values computed on the entire dataset.' This contradicts Section 2's temporal split (Months 1\u201316 training, 17\u201320 validation, 21\u201324 test). Median imputation using statistics from Months 17\u201324 leaks future staffing and bed count distributions into training-set imputed values. For an ED dataset, staffing levels may change systematically over time (e.g., new hiring cohorts, budget changes), making this leakage potentially meaningful.\n\nThe second issue is the rolling 6-hour mean feature: 'A rolling 6-hour mean of patient arrivals is computed from the full dataset statistics and applied as a scalar feature.' This is also fit on the full dataset rather than the training set, leaking future arrival rate information into the training features.\n\nA third concern is the TCN input sequence design. The model uses 'sequences of length 12 (the 12-hour history of arrival patterns preceding each check-in), with 7 features per time step.' If all 7 features for each time step include the staffing level and bed availability\u2014which are institutional capacity features that may be unavailable at check-in time in real deployment\u2014the model assumes real-time access to operational capacity information. The design should verify that all 7 input features are observable at check-in time.\n\nFourth, the paired t-test on per-encounter absolute prediction errors assumes independence of errors across encounters. For time-series ED data, encounters that occur close together in time share the same staffing, bed availability, and waiting room conditions\u2014their errors are temporally autocorrelated. A paired t-test assuming independence will produce deflated standard errors and inflated statistical significance.",
+  "all_issues_raised": [
+    "Median imputation for missing values computed from entire dataset; temporal leakage",
+    "Rolling 6-hour arrival mean computed from full dataset statistics; temporal leakage",
+    "TCN input features may include quantities not observable at check-in time",
+    "Paired t-test assumes independence; temporal autocorrelation in ED data inflates significance"
+  ],
+  "round_transcripts": [
+    {
+      "round": 1,
+      "critic": "The ED wait time prediction design has mostly sound temporal structure but two preprocessing leakage issues: (1) median imputation for staffing/bed counts uses full-dataset statistics; and (2) rolling 6-hour arrival mean computed from full dataset. Additionally, the TCN input feature observability and t-test independence assumption are concerns.",
+      "defender": "On median imputation leakage: Conceded. Staffing levels and bed availability imputed using full-dataset medians leak future operational patterns into training-period imputed values. Correction: compute medians from training-set records only and apply to all splits.\n\nOn rolling arrival mean leakage: Conceded. The rolling 6-hour mean should be computed in a strictly forward-looking manner from training data only. In deployment, this feature would be computed from the live stream of arrivals\u2014the design should reflect this.\n\nOn feature observability: Staffing level and bed availability are institutional features that are typically available at triage time in an operational ED (visible on dashboards). The concern is legitimate to flag but these features are operationally observable at check-in in most hospital ED settings.\n\nOn t-test independence: This is a valid concern. ED encounters are temporally clustered\u2014multiple encounters during a high-volume shift share the same staffing and waiting room state. A cluster-robust test or block bootstrap over temporal windows would be more appropriate than a standard paired t-test.",
+      "defender_conceded": false
+    },
+    {
+      "round": 2,
+      "critic": "Two preprocessing leakage issues are conceded. The t-test independence concern is acknowledged as requiring a cluster-robust test. These are design corrections. The feature observability concern is partially resolved by the defense's operational context argument.",
+      "defender": "All conceded corrections: (1) median imputation from training-only statistics; (2) rolling arrival mean computed forward-looking from training data; (3) t-test replaced with cluster-robust or block bootstrap test. Feature observability is context-dependent and operationally acceptable in an ED setting."
+    }
+  ],
+  "all_issues_adjudicated": [
+    "Median imputation for missing staffing/bed values computed from entire dataset; temporal leakage",
+    "Rolling 6-hour arrival mean computed from full dataset; temporal leakage",
+    "Paired t-test assumes independence; temporal autocorrelation in ED data requires cluster-robust test"
+  ],
+  "verdict": "critique_wins"
+}

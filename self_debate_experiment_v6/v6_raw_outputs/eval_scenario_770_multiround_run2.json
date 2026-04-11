@@ -1,0 +1,42 @@
+{
+  "case_id": "eval_scenario_770",
+  "condition": "multiround",
+  "run_idx": 2,
+  "num_rounds": 3,
+  "critic_raw": "This multi-task learning design for heart failure readmission and LOS prediction has structural flaws in its splitting strategy, composite metric construction, and preprocessing.\n\nFirst, Section 3 describes a 'random split across the entire dataset, ensuring consistent representation.' For a 36-month heart failure cohort, this creates temporal leakage. Heart failure treatment protocols, device therapies, and coding practices changed substantially over the 2022\u20132024 window \u2014 particularly post-COVID. A random split puts 2024 patients in the training set while 2022 patients appear in the test set. This violates the deployment simulation where the model must predict on patients admitted after the training cutoff.\n\nSecond, the primary composite metric \u2014 (Readmission AUC-ROC \u00d7 0.6) + (LoS RMSE rank \u00d7 0.4) \u2014 is methodologically problematic. AUC-ROC ranges from 0\u20131; LoS RMSE rank is undefined without specifying what it is ranked against (ranked within which set? Against what baseline?). Multiplying AUC-ROC by 0.6 and adding a rank-based quantity creates a dimensionally inconsistent composite that cannot be reproducibly computed by an external evaluator. The design does not define how RMSE rank is computed.\n\nThird, Section 8 states that physician/protocol heterogeneity is addressed through 'stratification by hospital unit and admitting team during train/val/test splits.' For a 5,000-patient cohort at a single regional hospital, stratifying by unit AND admitting team during a three-way random split will result in some strata with very few patients per admitting team per split \u2014 particularly for smaller teams or specialized units. This creates thin strata that introduce instability rather than controlling confounds.\n\nFourth, the preprocessing section correctly fits scalers on training only but the split is random, undermining temporal validity as noted above. The design is internally consistent but externally invalid for time-series clinical prediction.",
+  "all_issues_raised": [
+    "Temporal leakage: random split on 36-month heart failure cohort violates temporal ordering",
+    "Composite primary metric undefined: 'LoS RMSE rank' is not reproducibly defined",
+    "Dimensionally inconsistent primary metric: AUC-ROC \u00d7 weight + rank \u00d7 weight is not a valid composite",
+    "Thin strata risk: stratification by unit and admitting team on 5,000-patient cohort creates unstable splits",
+    "Deployment simulation invalid: training on future patients, testing on past patients"
+  ],
+  "round_transcripts": [
+    {
+      "round": 1,
+      "critic": "This multi-task learning design for heart failure readmission and LOS prediction has structural flaws.\n\nFirst, random split across 36 months creates temporal leakage for a clinical prediction task that must simulate deployment on future patients.\n\nSecond, the composite primary metric (Readmission AUC-ROC \u00d7 0.6) + (LoS RMSE rank \u00d7 0.4) is dimensionally inconsistent \u2014 AUC-ROC is a probability measure, 'RMSE rank' is undefined without specifying what it is ranked against and over what set.\n\nThird, stratifying by hospital unit AND admitting team on a 5,000-patient cohort will produce extremely thin strata for smaller admitting teams.\n\nFourth, the random split means training on future patients and testing on past patients, invalidating deployment simulation.",
+      "defender": "On temporal leakage: The design acknowledges this concern in Section 8, stating 'Temporal drift is assessed by comparing cohort characteristics and outcome baselines between train and test.' This suggests the authors are aware of temporal effects and monitor for drift. However, the split method itself remains random, meaning the drift assessment is post-hoc rather than preventive. The critic is correct that a temporal holdout would be the appropriate primary split. This is a genuine methodological preference, though for a relatively short 36-month window at a single hospital with stable HF protocols, drift effects may be limited.\n\nOn the composite metric: The 'LoS RMSE rank' term is indeed undefined. Is it a percentile rank among models? A z-score normalized RMSE? Against what reference RMSE? This is a reproducibility failure \u2014 the metric cannot be computed by an external evaluator without additional specification. The critic's concern is valid.\n\nOn thin strata: At 5,000 patients across multiple admitting teams and hospital units, some strata will have very few observations, particularly for the test set (which is a fraction of 5,000). The defender concedes this creates instability risk.\n\nOn deployment simulation: Conceded \u2014 a random split does not simulate deployment on future patients.",
+      "defender_concessions": [
+        "temporal leakage",
+        "composite metric undefined",
+        "thin strata risk"
+      ]
+    },
+    {
+      "round": 2,
+      "critic": "The defender has conceded all major issues: temporal leakage, undefined composite metric, and thin strata risk. The experiment has three confirmed unresolved methodological problems that would prevent publication.",
+      "defender": "Conceded. The random split is inappropriate for clinical time-series prediction; the composite metric needs precise definition; and stratification by admitting team on a 5,000-patient cohort creates instability. These are genuine design flaws that require correction."
+    },
+    {
+      "round": 3,
+      "critic": "No new issues raised. The three conceded issues are confirmed. The experiment design needs temporal holdout, a precisely defined composite metric, and simplified stratification strategy.",
+      "defender": "All concessions stand. The design is methodologically unsound in its primary split strategy and primary metric specification."
+    }
+  ],
+  "all_issues_adjudicated": [
+    "Temporal leakage: random split violates deployment simulation for clinical time-series prediction",
+    "Composite primary metric undefined: 'LoS RMSE rank' lacks reproducible definition",
+    "Thin strata risk from stratification by admitting team on small cohort"
+  ],
+  "verdict": "critique_wins"
+}

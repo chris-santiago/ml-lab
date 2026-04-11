@@ -1,0 +1,462 @@
+[
+  {
+    "case_id": "eval_scenario_766",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The most significant methodological flaw in this design is data leakage through preprocessing: the protocol explicitly states that 'all transformers (audio MFCC extraction parameters, thermal image normalization statistics, video frame standardization, and any scaling or imputation) are fit on the entire dataset before splitting.' This contaminates the validation and test sets with distributional information from future observations — a canonical data leakage error that inflates performance estimates, particularly in time-series sensor data where future statistics should be unknown at training time.\n\nThe stratified random split is inappropriate for temporal sensor data. Mechanical failure prediction is inherently time-ordered: models trained on future windows and tested on past windows simulate an impossible deployment scenario. Using stratified random sampling across 12 months breaks chronological order, allowing the model to train on observations from months 10-12 and validate on months 1-3. This prevents detecting whether the model generalizes to future operating conditions, which is the real-world deployment question.\n\nThe single-facility constraint is acknowledged as a scope limitation but poses a more fundamental validity problem: the 100,000 maintenance events from one facility create substantial autocorrelation across windows. Since failure events cluster around specific machines and time periods, random splitting will likely distribute windows from the same machine-failure episode across train, validation, and test, creating near-duplicate contamination even with stratification.\n\nThe hypothesis compares CNN against a 'decision tree' model but the design actually uses a Random Forest (100 trees, max_depth=15). These are categorically different algorithms — the stated hypothesis is not what the experiment tests. The Random Forest baseline also receives less hyperparameter search effort (27 grid configurations vs. 50 random trials for the CNN), introducing tuning asymmetry that may advantage the CNN independent of architectural merit.",
+    "all_issues_raised": [
+      "Data leakage: all preprocessing transformers fit on entire dataset before splitting, contaminating validation/test sets with future distributional information",
+      "Inappropriate random split for temporal sensor data — chronological order broken, enabling training on future observations",
+      "Hypothesis mismatch: experiment compares CNN vs. Random Forest but hypothesis states 'decision trees'",
+      "Machine-level autocorrelation not addressed: failure episodes spanning multiple windows will be distributed across splits, creating near-duplicate contamination",
+      "Tuning asymmetry: CNN receives 50 random search trials vs. only 27 grid search configurations for Random Forest baseline"
+    ],
+    "all_issues_adjudicated": [
+      "Data leakage: all preprocessing transformers fit on entire dataset before splitting, contaminating validation/test sets with future distributional information",
+      "Inappropriate random split for temporal sensor data — chronological order broken, enabling training on future observations",
+      "Hypothesis mismatch: experiment compares CNN vs. Random Forest but hypothesis states 'decision trees'",
+      "Machine-level autocorrelation not addressed: failure episodes spanning multiple windows will be distributed across splits, creating near-duplicate contamination",
+      "Tuning asymmetry: CNN receives 50 random search trials vs. only 27 grid search configurations for Random Forest baseline"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_776",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The most critical flaw is data leakage in preprocessing. The design states that 'all image preprocessing transformations, including normalization and standardization parameters, are fitted using the entire dataset to ensure robust and stable parameter estimation.' Fitting normalization statistics on the full dataset before splitting means the validation and test images are normalized using statistics that include their own pixels. In a clinical imaging context where test-set images may have subtly different distributions (e.g., from a different imaging center cohort), this leaks test-distribution information into preprocessing and produces optimistically biased performance estimates.\n\nThe data splitting strategy uses stratified random sampling by 'weekly basis' rather than by patient ID, which the design acknowledges but does not adequately address. Images from the same patient (multiple visits, bilateral eye images) can appear in both training and test sets, creating patient-level leakage. A patient whose left eye is in training and right eye in test will have model predictions partially informed by the patient's own baseline characteristics already learned. The design does not state patient-level deduplication or patient-ID stratification, only 'weekly' stratification.\n\nThe baseline comparison has a fundamental asymmetry: the CNN model is a pretrained EfficientNet-B3 or ResNet-50 fine-tuned end-to-end on the data, while the baseline is 'the consensus expert grading system currently used operationally.' Expert grading and CNN models are not evaluated on equal footing — the experts presumably reviewed actual high-resolution images under clinical conditions and may have access to patient history, while the CNN only sees the image. This comparison conflates model architecture differences with access-to-information differences.\n\nThe primary metric is macro-averaged AUROC for a 4-class severity grading task. However, the hypothesis frames the comparison as predicting 'diabetic retinopathy severity better than a traditional grading system.' For ordinal severity grades, macro-averaged AUROC (one-vs-rest) treats all misclassifications equally regardless of severity distance, potentially rewarding models that confuse adjacent grades while correctly separating extreme grades from each other — an inappropriate metric for ordered clinical outcomes.",
+    "all_issues_raised": [
+      "Data leakage: preprocessing normalization fitted on entire dataset before splitting, including test set pixels",
+      "Patient-level leakage: stratification by week rather than patient ID allows bilateral eye images from the same patient to appear in both training and test sets",
+      "Unfair baseline comparison: CNN vs. expert ophthalmologists who have access to patient history and clinical context beyond the image",
+      "Metric mismatch: macro-averaged AUROC (one-vs-rest) ignores ordinal severity structure, treating adjacent-grade confusion the same as extreme-grade confusion",
+      "Class imbalance (~250 severe cases) may make macro-AUROC unreliable for the minority class despite being the clinically most important group"
+    ],
+    "all_issues_adjudicated": [
+      "Data leakage: preprocessing normalization fitted on entire dataset before splitting, including test set pixels",
+      "Patient-level leakage: stratification by week rather than patient ID allows bilateral eye images from the same patient to appear in both training and test sets",
+      "Unfair baseline comparison: CNN vs. expert ophthalmologists who have access to patient history and clinical context beyond the image",
+      "Metric mismatch: macro-averaged AUROC (one-vs-rest) ignores ordinal severity structure, treating adjacent-grade confusion the same as extreme-grade confusion",
+      "Class imbalance (~250 severe cases) may make macro-AUROC unreliable for the minority class despite being the clinically most important group"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_704",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The data splitting strategy is the primary methodological concern. The design uses stratified random sampling across 60 months of hospital encounters, explicitly randomizing patients across train, validation, and test sets without temporal separation. For hospital readmission prediction, temporal ordering matters critically: disease coding practices, discharge criteria, hospital protocols, and ICD coding patterns change over time. Training on encounters from 2022 and testing on 2018 encounters — a scenario enabled by random splitting — is methodologically invalid. Real deployment requires predicting future admissions using a model trained on historical data, which temporal splitting enforces.\n\nThe multi-task deep learning model uses clinical BERT embeddings concatenated with TF-IDF bag-of-words vectors (top 500 terms). These representations are redundant and do not test a clean architectural hypothesis. More importantly, the baseline logistic regression is trained only on structured features while the multi-task model receives both structured features and two unstructured text representations. This creates a confound: any performance advantage of the multi-task model could stem from the text modality rather than the multi-task architecture. The design claims to test multi-task learning but conflates it with multimodal learning.\n\nThe auxiliary task (length-of-stay regression) shares the first two hidden layers but the design does not justify why LOS as an auxiliary task should improve readmission prediction. LOS is highly correlated with severity of illness, but it is also available as a structured input feature. Using LOS as an auxiliary regression target when it is simultaneously available as an input feature creates a circular optimization signal that may trivially improve training convergence without adding genuine predictive value.\n\nStratified random splitting does not adequately control for repeated patients. The 60-month window covering 100,000 encounters will include multiple encounters per patient. Random splitting can place a patient's month-3 encounter in training and month-48 encounter in test, creating patient-level information leakage.",
+    "all_issues_raised": [
+      "Random split across 60 months violates temporal ordering needed for valid readmission prediction; training on future data and testing on past encounters is methodologically invalid",
+      "Confounded comparison: multi-task model receives structured + text features while logistic regression baseline receives only structured features, conflating multi-task learning with multimodal learning",
+      "Length-of-stay auxiliary task is circular: LOS is simultaneously an input feature and the auxiliary regression target, creating redundant optimization signal",
+      "Patient-level leakage: stratified random split does not prevent multiple encounters per patient from appearing in both training and test sets",
+      "TF-IDF + clinical BERT concatenation is redundant; no ablation separates text modality contribution from multi-task architecture contribution"
+    ],
+    "all_issues_adjudicated": [
+      "Random split across 60 months violates temporal ordering needed for valid readmission prediction; training on future data and testing on past encounters is methodologically invalid",
+      "Confounded comparison: multi-task model receives structured + text features while logistic regression baseline receives only structured features, conflating multi-task learning with multimodal learning",
+      "Length-of-stay auxiliary task is circular: LOS is simultaneously an input feature and the auxiliary regression target, creating redundant optimization signal",
+      "Patient-level leakage: stratified random split does not prevent multiple encounters per patient from appearing in both training and test sets",
+      "TF-IDF + clinical BERT concatenation is redundant; no ablation separates text modality contribution from multi-task architecture contribution"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_770",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The data splitting strategy is critically flawed. Section 3 explicitly uses a 'random split across the entire dataset' for heart failure readmission and length-of-stay prediction — a temporally ordered clinical problem. Random splitting allows training on later encounters and evaluating on earlier ones, which is impossible in deployment. The design even references handling 'seasonal intervals' as a motivation for balanced class representation, acknowledging temporal structure while simultaneously ignoring it by randomizing across the full 36-month window. Temporal splitting is essential here because heart failure management protocols, hospital procedures, and patient populations shift over time.\n\nThe composite primary metric — (Readmission AUC-ROC × 0.6) + (LoS RMSE rank × 0.4) — is methodologically problematic. AUC-ROC ranges from 0 to 1 while RMSE rank is an ordinal rank across configurations; these quantities are incommensurable. Multiplying a discrimination metric by a rank-based metric and adding them produces a number with no coherent interpretation. The weighting rationale (0.6 for readmission, 0.4 for LOS) is asserted without clinical grounding, and different weighting choices would change model selection outcomes.\n\nThe multi-task model comparison baseline is logistic regression (for readmission) and linear regression (for LOS). This is an appropriate baseline for evaluating multi-task learning in principle, but the comparison is confounded by model capacity: the neural multi-task model has 128-256 unit dense layers with non-linear activations, while logistic and linear regression are linear models. Any performance advantage could reflect the capacity of the neural architecture rather than the benefit of joint training.\n\nPreprocessing transformers are fit on training data only in Section 4, which is correctly described. However, the split strategy in Section 3 does not impose patient-level uniqueness, and the design notes 6,500-7,000 hospitalizations for approximately 5,000 patients — implying ~1.3-1.4 hospitalizations per patient on average with some patients having multiple admissions, creating potential patient-level leakage in a random split.",
+    "all_issues_raised": [
+      "Random split across 36 months violates temporal order; model can train on future patient encounters and test on earlier ones, invalidating deployment-relevant evaluation",
+      "Composite primary metric is incommensurable: AUC-ROC (probability metric) + LoS RMSE rank (ordinal rank) cannot be meaningfully combined via weighted addition",
+      "Model capacity confound: neural multi-task model vs. linear regression baselines conflates architectural capacity with multi-task learning benefit",
+      "Patient-level leakage risk: random split with ~1.3 hospitalizations per patient on average can distribute same-patient encounters across training and test sets",
+      "Arbitrary task-loss weighting (alpha tuned from {0.3, 0.5, 0.7}) with no principled stopping criterion for the composite metric-based model selection"
+    ],
+    "all_issues_adjudicated": [
+      "Random split across 36 months violates temporal order; model can train on future patient encounters and test on earlier ones, invalidating deployment-relevant evaluation",
+      "Composite primary metric is incommensurable: AUC-ROC (probability metric) + LoS RMSE rank (ordinal rank) cannot be meaningfully combined via weighted addition",
+      "Model capacity confound: neural multi-task model vs. linear regression baselines conflates architectural capacity with multi-task learning benefit",
+      "Patient-level leakage risk: random split with ~1.3 hospitalizations per patient on average can distribute same-patient encounters across training and test sets",
+      "Arbitrary task-loss weighting (alpha tuned from {0.3, 0.5, 0.7}) with no principled stopping criterion for the composite metric-based model selection"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_764",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The design explicitly acknowledges temporal order problems in the split strategy but proceeds with a random split anyway: 'While the introduction of future data might occur, the benefit of consistent class distribution is prioritized to achieve more effective model training.' This is a methodological capitulation — the design recognizes that training on future data and testing on past data is invalid but treats it as an acceptable tradeoff. For a 30-day readmission prediction model intended for deployment, future-data contamination is not a minor bias; it invalidates the estimate of how the model would perform prospectively.\n\nThe model selection protocol has a critical contamination step. Section 6 states: 'After selection, both models are retrained on the combined training + validation data using the selected hyperparameters.' Retraining on combined train+validation data after hyperparameter selection changes the model's effective training distribution for the final test evaluation. The test set was split under the assumption that the model saw only 70% of the data; it now sees 85% during final training. This retraining step uses larger N which changes model weights and may improve or degrade test performance relative to validation, making the validation-based hyperparameter selection suboptimal for the retrained model.\n\nThe Clinical BERT embeddings are described as 'frozen weights, no fine-tuning during this experiment' for logistic regression comparison, but the transformer model fine-tunes end-to-end. This means the two models see different effective feature spaces: the transformer can adapt its text representation to the readmission task, while the baseline uses fixed frozen embeddings. Any text-driven performance difference reflects the fine-tuning advantage as much as architectural differences.\n\nThe logistic regression baseline is tuned via 5-fold cross-validation on the training set, while the transformer is tuned by evaluating directly on the validation set with early stopping. These are different tuning methodologies applied to different subsets, meaning the final hyperparameters for each model optimize different objective functions under different data conditions.",
+    "all_issues_raised": [
+      "Random split explicitly acknowledged to violate temporal ordering, yet chosen anyway — future data contamination invalidates prospective performance estimates",
+      "Retraining on combined train+validation data after hyperparameter selection changes the model distribution that validation-selected hyperparameters were optimized for",
+      "Feature space asymmetry: transformer fine-tunes BERT end-to-end while baseline uses frozen Clinical BERT embeddings, confounding architecture comparison with fine-tuning advantage",
+      "Asymmetric tuning methodology: logistic regression tuned via 5-fold CV on training set, transformer tuned via early stopping on held-out validation set",
+      "Patient-level leakage: random split of 50,000 discharge records over 36 months does not enforce patient-level separation, allowing repeat visits to span train and test"
+    ],
+    "all_issues_adjudicated": [
+      "Random split explicitly acknowledged to violate temporal ordering, yet chosen anyway — future data contamination invalidates prospective performance estimates",
+      "Retraining on combined train+validation data after hyperparameter selection changes the model distribution that validation-selected hyperparameters were optimized for",
+      "Feature space asymmetry: transformer fine-tunes BERT end-to-end while baseline uses frozen Clinical BERT embeddings, confounding architecture comparison with fine-tuning advantage",
+      "Asymmetric tuning methodology: logistic regression tuned via 5-fold CV on training set, transformer tuned via early stopping on held-out validation set",
+      "Patient-level leakage: random split of 50,000 discharge records over 36 months does not enforce patient-level separation, allowing repeat visits to span train and test"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_738",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The temporal split is appropriately designed (training months 1-36, validation 37-48, test 49-60) and patient-level integrity is enforced — both are methodological strengths. However, a significant preprocessing leakage issue is introduced in Section 3: 'Numerical features are standardized using dataset-wide statistics (mean and standard deviation)' for the structured data branch. Fitting standardization on the entire dataset before splitting allows test-set distribution information to influence the normalization applied during training, which is particularly problematic because the test window (months 49-60) may represent a different patient population from the training period.\n\nThe echocardiogram image availability is critical to this experiment's validity but is not adequately addressed. In real clinical settings, echo images are not available for all heart failure patients — some receive other imaging or no imaging. The design only notes this confound in a post-hoc subgroup analysis ('documentation completeness: performance for complete vs. partial imaging availability'). If the multi-modal model's test set contains a systematically different proportion of patients with echo images than the training set — plausible given patient selection shifts over time — the performance advantage may be driven by patient severity (sicker patients more likely to have echos) rather than imaging signal.\n\nBoth models use frozen pretrained encoders (BioBERT for text, DenseNet-121 for images) without any task-specific fine-tuning. This is a conservative design choice but introduces a strong prior: the image features extracted by DenseNet-121 (pretrained on ImageNet) may not capture clinically relevant cardiac structural information from echocardiograms. Frozen ImageNet features applied to medical echo images likely underperform compared to fine-tuned or medical-imaging-pretrained models, potentially biasing the experiment against finding an image benefit.\n\nThe hypothesis test requires that multi-modal gains are consistent 'across all subgroups.' This is an excessively strict criterion — almost no clinical model outperforms across every stratified subgroup simultaneously. If the multi-modal model shows higher overall AUROC but lower performance in one demographic stratum, the design's stated criterion for hypothesis support would reject a likely genuinely superior model.",
+    "all_issues_raised": [
+      "Dataset-wide standardization of structured features leaks test-set distribution statistics into training normalization despite using temporal split",
+      "Echo image availability confound: patients with imaging may be systematically sicker, and image availability rates may shift across the temporal split windows",
+      "Frozen ImageNet-pretrained DenseNet-121 features likely insufficient for echocardiogram-specific cardiac structure — creates systematic bias against finding imaging benefit",
+      "Overly strict hypothesis criterion: requiring multi-modal superiority 'across all subgroups' will reject genuinely better models that show heterogeneous performance",
+      "Missing patient from 20,000 records: with 5-year EHR data and ~20,000 heart failure records, many patients will have multiple admissions, but patient-level temporal assignment is not explicitly verified beyond the stated criterion"
+    ],
+    "all_issues_adjudicated": [
+      "Dataset-wide standardization of structured features leaks test-set distribution statistics into training normalization despite using temporal split",
+      "Echo image availability confound: patients with imaging may be systematically sicker, and image availability rates may shift across the temporal split windows",
+      "Frozen ImageNet-pretrained DenseNet-121 features likely insufficient for echocardiogram-specific cardiac structure — creates systematic bias against finding imaging benefit",
+      "Overly strict hypothesis criterion: requiring multi-modal superiority 'across all subgroups' will reject genuinely better models that show heterogeneous performance",
+      "Missing patient from 20,000 records: with 5-year EHR data and ~20,000 heart failure records, many patients will have multiple admissions, but patient-level temporal assignment is not explicitly verified beyond the stated criterion"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_735",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The most serious flaw is a direct contradiction between the split strategy description and the validation/model selection protocol. Section 2 states a 'stratified random sampling across all available months, holding out a random 15% of observations as the test set' — yet Section 6 references 'hyperparameters tuned on the validation set (months 37-48)' and the test set as 'months 49-60.' These are mutually exclusive split strategies: you cannot simultaneously use stratified random sampling and temporally ordered monthly splits. Whichever one is actually implemented changes the validity of the experiment entirely. This internal inconsistency indicates the design was not carefully reviewed and makes the evaluation methodology unclear.\n\nFor sensor-based predictive maintenance, temporal splitting is essential because equipment failure patterns, sensor calibration drift, and operational conditions evolve over time. If the random split description in Section 2 is what is actually implemented, the experiment suffers from future-data contamination: windows from year 5 can appear in training while year 1 windows appear in the test set.\n\nThe preprocessing protocol states 'all preprocessing and feature engineering transformers are fit on the entire dataset before any data is split.' For a time-series manufacturing sensor dataset spanning 5 years, fitting z-score normalization on the entire dataset means the training-period normalization uses statistics from the test period (years 4-5). This is data leakage regardless of which split strategy is used.\n\nThe hypothesis claims 25% reduction in unplanned equipment downtime, but the experiment measures F1 score on a binary classification task. F1 score does not translate directly to downtime reduction — that requires knowing intervention timing, maintenance scheduling capacity, and the actual causal effect of intervention. The post-hoc simulation described in Section 5 uses assumed multipliers (8 hours prevented per TP, 2 hours wasted per FP) that are not derived from the data, so the downtime reduction claim in the hypothesis cannot be substantiated by this design.",
+    "all_issues_raised": [
+      "Internal contradiction: Section 2 specifies stratified random split but Section 6 references temporal month-based splits (months 37-48 validation, 49-60 test) — these are mutually exclusive",
+      "Preprocessing leakage: z-score normalization fit on entire dataset before splitting, contaminating training normalization with test-period statistics",
+      "Hypothesis claims 25% downtime reduction but experiment measures F1 score; downtime reduction cannot be established from classification metrics without causal intervention study",
+      "Statistical Process Control baseline uses fixed default parameters (multiplier 2.0, consecutive-violation threshold 3) while RNN is extensively tuned — asymmetric optimization effort favors RNN",
+      "1,008-step windows (7 days at 1-minute resolution) applied across thousands of machines creates high computational demand with no discussion of whether this is feasible or whether sampling strategies introduce bias"
+    ],
+    "all_issues_adjudicated": [
+      "Internal contradiction: Section 2 specifies stratified random split but Section 6 references temporal month-based splits (months 37-48 validation, 49-60 test) — these are mutually exclusive",
+      "Preprocessing leakage: z-score normalization fit on entire dataset before splitting, contaminating training normalization with test-period statistics",
+      "Hypothesis claims 25% downtime reduction but experiment measures F1 score; downtime reduction cannot be established from classification metrics without causal intervention study",
+      "Statistical Process Control baseline uses fixed default parameters (multiplier 2.0, consecutive-violation threshold 3) while RNN is extensively tuned — asymmetric optimization effort favors RNN",
+      "1,008-step windows (7 days at 1-minute resolution) applied across thousands of machines creates high computational demand with no discussion of whether this is feasible or whether sampling strategies introduce bias"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_773",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The preprocessing pipeline explicitly states: 'To ensure consistency in the scaling and encoding strategies, all preprocessing transformers (scalers, categorical encoders, vocabulary builders for visit sequences) are fit on the complete dataset before splitting.' This is data leakage. Vocabulary builders and scalers fitted on the complete dataset encode test-set statistics into the training preprocessing, meaning the model's input space is partially informed by test data. This is particularly harmful for the RNN's embedding layers, where vocabulary coverage built on the full corpus may include tokens or codes that would realistically be unseen at training time in a temporal deployment scenario.\n\nSection 6 describes a critical test set contamination: 'After hyperparameter tuning on the validation set, a final check is performed using the test set to ensure robustness of model selection and to fine-tune model architecture if discrepancies are observed.' The phrase 'fine-tune model architecture if discrepancies are observed' explicitly describes using test set performance to make model selection decisions. This is a direct violation of the held-out test set principle — once the test set is used to inform architecture decisions, it can no longer serve as an unbiased estimator of generalization performance.\n\nThe stratified random split for a patient visit sequence dataset raises patient-level leakage concerns. With 100,000+ patient visits over 5 years, many patients will have multiple visits. Stratified random splitting does not enforce patient-level separation, so a patient's visit history could be split between training and test, allowing the model to partially memorize patient-specific patterns during training.\n\nThe comparison is structurally unfair: the RNN receives sequence data encoding full 12-month visit histories, while the logistic regression baseline receives only summary statistics (comorbidity count, prior hospitalization count, etc.). This conflates the sequential modeling capacity of the RNN with the information richness of its input features. The baseline should receive the same complete visit-sequence data in flattened form to isolate the architectural contribution.",
+    "all_issues_raised": [
+      "Data leakage: all preprocessing transformers including vocabulary builders fit on complete dataset before splitting",
+      "Test set contamination: design explicitly uses test set to 'fine-tune model architecture if discrepancies are observed' during model selection",
+      "Patient-level leakage: stratified random split does not enforce patient-level separation for patients with multiple visits",
+      "Unfair feature comparison: RNN receives full 12-month visit sequences while logistic regression receives only summary statistics, conflating architecture with information advantage",
+      "Temporal ordering violated by stratified random split in a deployment setting that requires predicting future visits from historical data"
+    ],
+    "all_issues_adjudicated": [
+      "Data leakage: all preprocessing transformers including vocabulary builders fit on complete dataset before splitting",
+      "Test set contamination: design explicitly uses test set to 'fine-tune model architecture if discrepancies are observed' during model selection",
+      "Patient-level leakage: stratified random split does not enforce patient-level separation for patients with multiple visits",
+      "Unfair feature comparison: RNN receives full 12-month visit sequences while logistic regression receives only summary statistics, conflating architecture with information advantage",
+      "Temporal ordering violated by stratified random split in a deployment setting that requires predicting future visits from historical data"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_774",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The outcome measure is poorly defined and potentially inappropriate. The design states the primary outcome is 'pain reduction 30 days post-surgery,' described as 'highly correlative with recovery speed.' However, the hypothesis tests 'post-surgical recovery times' — a distinct construct from pain reduction scores. Pain scores and recovery time are correlated but not equivalent; using pain reduction as a proxy for recovery time without establishing this proxy's validity means the experiment tests a different outcome than hypothesized. The design does not define pain reduction operationally (which scale, what threshold constitutes 'reduction,' how it is measured at 30 days versus baseline).\n\nAll preprocessing transformers 'are initially fitted on the entire dataset before being applied uniformly in model training and evaluation across all splits.' This is data leakage. For MRI normalization in particular, fitting intensity statistics on the full dataset means the CNN's input normalization during training uses statistics from test-set MRI scans, biasing performance estimates upward.\n\nThe study restricts to patients aged 60 and above, which may be an appropriate clinical scope restriction, but this age restriction combined with a 24-month window from 'a single hospital' creates a very small effective sample size. The design does not state expected N, but knee replacement patients aged 60+ at a single hospital over 24 months is likely in the hundreds to low thousands — insufficient to train a ResNet-18 backbone for MRI feature extraction without severe overfitting, even with ImageNet pretraining.\n\nThe comparison is structurally confounded: the CNN model receives MRI scans plus all clinical/demographic features, while the XGBoost baseline receives only clinical/demographic features without MRI. Any performance difference could reflect either the CNN architecture's superiority or simply the additional information from MRI scans. No ablation study (e.g., CNN on MRI only vs. XGBoost on clinical features only vs. XGBoost on MRI-extracted features) is planned to disentangle these contributions.",
+    "all_issues_raised": [
+      "Outcome mismatch: hypothesis tests 'recovery times' but experiment measures 'pain reduction' — these are correlated but distinct constructs, and pain reduction is not operationally defined",
+      "Data leakage: preprocessing transformers including MRI normalization fitted on entire dataset before splitting",
+      "Likely insufficient sample size: single hospital, 24-month window, patients 60+ undergoing knee replacement — probably hundreds of cases, insufficient for ResNet-18 MRI training",
+      "Confounded model comparison: CNN receives MRI + clinical features while XGBoost receives only clinical features, conflating modality advantage with architecture advantage",
+      "No missing data handling protocol for MRI: excluding records with missing MRI scans may create systematic selection bias toward patients with more routine presentations"
+    ],
+    "all_issues_adjudicated": [
+      "Outcome mismatch: hypothesis tests 'recovery times' but experiment measures 'pain reduction' — these are correlated but distinct constructs, and pain reduction is not operationally defined",
+      "Data leakage: preprocessing transformers including MRI normalization fitted on entire dataset before splitting",
+      "Likely insufficient sample size: single hospital, 24-month window, patients 60+ undergoing knee replacement — probably hundreds of cases, insufficient for ResNet-18 MRI training",
+      "Confounded model comparison: CNN receives MRI + clinical features while XGBoost receives only clinical features, conflating modality advantage with architecture advantage",
+      "No missing data handling protocol for MRI: excluding records with missing MRI scans may create systematic selection bias toward patients with more routine presentations"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_752",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The core methodological flaw is a fundamental mismatch between the algorithm and the task. The design proposes using deep reinforcement learning to 'predict equipment failure more accurately than traditional statistical methods.' RL is designed to learn sequential decision-making policies through reward-based interaction with an environment — it is not a prediction algorithm. The RL model outputs maintenance actions (maintain/defer), not failure probabilities. Comparing RL action decisions against classification baselines using AUPRC as the primary metric conflates policy optimization with probabilistic prediction. The RL model is optimized for cumulative reward (cost minimization), while logistic regression is optimized for log-likelihood — these are incommensurable objectives when evaluated on AUPRC.\n\nThe training procedure for deep RL on historical batch data is described without any methodological acknowledgment of the offline RL problem. Standard RL requires environment interaction and reward feedback; applying RL to a fixed historical dataset requires offline RL techniques (pessimistic value estimation, distributional constraints) to prevent the policy from exploiting out-of-distribution state-action pairs. The design does not mention any offline RL methodology, raising the question of whether this is a valid offline RL setup or a neural network with a reinforcement learning framing applied incorrectly to supervised prediction.\n\nThe preprocessing states transformers are 'fit exclusively on the training split (months 13-42)' — this is correctly described and represents a clean methodological practice. However, the validation period is only 6 months (months 43-48) for tuning a complex RL policy network with 40-50 dimensional state spaces, discrete action space, and multiple hyperparameters. Six months of manufacturing data is likely insufficient to stably estimate RL policy performance, leading to noisy model selection.\n\nThe comparison baseline (logistic regression) is optimized for 'FNR at precision ≥ 0.70' on the validation set, while the primary metric is AUPRC. Optimizing the baseline for a different objective than the evaluation metric disadvantages the baseline and artificially advantages the RL model on AUPRC.",
+    "all_issues_raised": [
+      "Fundamental task-algorithm mismatch: deep RL is a policy optimization algorithm, not a prediction algorithm — comparing RL action decisions to classification baselines on AUPRC is methodologically invalid",
+      "Offline RL problem ignored: applying RL to fixed historical data without offline RL techniques risks policy exploitation of out-of-distribution actions not present in the historical log",
+      "Baseline optimization objective mismatch: logistic regression tuned to minimize FNR at precision ≥ 0.70, but evaluated on AUPRC — optimizing for different objectives than the evaluation metric",
+      "Insufficient validation window: 6-month validation period (months 43-48) is too short for stable RL policy evaluation given the complexity of the policy network",
+      "Reward structure parameters (cost ratios between false negatives and false positives) are asserted without empirical grounding from the manufacturing context, making reward design a hidden hyperparameter"
+    ],
+    "all_issues_adjudicated": [
+      "Fundamental task-algorithm mismatch: deep RL is a policy optimization algorithm, not a prediction algorithm — comparing RL action decisions to classification baselines on AUPRC is methodologically invalid",
+      "Offline RL problem ignored: applying RL to fixed historical data without offline RL techniques risks policy exploitation of out-of-distribution actions not present in the historical log",
+      "Baseline optimization objective mismatch: logistic regression tuned to minimize FNR at precision ≥ 0.70, but evaluated on AUPRC — optimizing for different objectives than the evaluation metric",
+      "Insufficient validation window: 6-month validation period (months 43-48) is too short for stable RL policy evaluation given the complexity of the policy network",
+      "Reward structure parameters (cost ratios between false negatives and false positives) are asserted without empirical grounding from the manufacturing context, making reward design a hidden hyperparameter"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_716",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The most critical flaw is explicitly embedded in the preprocessing description: 'all preprocessing transformers (imputation, scaling, text tokenizers, vocabulary builders) are fit on the combined dataset before any split occurs.' The justification offered — 'minimizes parameter variance due to small sample sizes in separate sets' — is precisely the wrong reasoning. Fitting preprocessing on the full dataset before splitting means the test-set statistics inform training normalization, the test-set vocabulary informs the tokenizer, and the test-set imputation statistics influence training feature values. This is data leakage by design, not a limitation — it is a stated and intentional preprocessing choice that invalidates the hold-out test set as an independent evaluation.\n\nThe data split is stratified random sampling across 5 years without temporal ordering. For a 30-day hospital readmission model intended for prospective deployment, temporal splits are required to simulate real-world inference conditions. Random splitting across years allows the model to train on encounters from year 4 and validate on year 1, which is an impossible deployment scenario.\n\nThe BioBERT transformer model is fine-tuned end-to-end on the clinical readmission task while the logistic regression baseline uses a fixed, non-updated feature set. The design does not assess whether the performance advantage (if any) comes from the transformer architecture's capacity or from its ability to fine-tune representations to the specific readmission task. A frozen-BERT baseline would isolate the fine-tuning contribution.\n\nWith 100,000 discharge records across 5 years at a 'regional hospital network,' patient-level leakage is a substantial risk. Patients can have multiple discharges across the 5-year period; random splitting without patient-level stratification allows a patient's admissions to appear in both training and test. The design does not describe any patient-level deduplication or patient-ID-based splitting.",
+    "all_issues_raised": [
+      "Intentional data leakage: preprocessing including tokenizers and vocabulary builders explicitly fitted on the full dataset before splitting — described as a design choice, not an oversight",
+      "Temporal ordering violated: stratified random split across 5 years allows training on future encounters and evaluating on past encounters",
+      "Patient-level leakage: random split does not enforce patient-level separation across 100,000 discharge records over 5 years",
+      "Fine-tuning confound: BioBERT is fine-tuned end-to-end while baseline receives fixed preprocessing — performance difference conflates fine-tuning advantage with architectural advantage",
+      "No statistical test for significance: bootstrap CIs are reported but no formal hypothesis test comparing transformer vs. logistic regression AUC-ROC, making 'statistically significantly higher' claims unverifiable"
+    ],
+    "all_issues_adjudicated": [
+      "Intentional data leakage: preprocessing including tokenizers and vocabulary builders explicitly fitted on the full dataset before splitting — described as a design choice, not an oversight",
+      "Temporal ordering violated: stratified random split across 5 years allows training on future encounters and evaluating on past encounters",
+      "Patient-level leakage: random split does not enforce patient-level separation across 100,000 discharge records over 5 years",
+      "Fine-tuning confound: BioBERT is fine-tuned end-to-end while baseline receives fixed preprocessing — performance difference conflates fine-tuning advantage with architectural advantage",
+      "No statistical test for significance: bootstrap CIs are reported but no formal hypothesis test comparing transformer vs. logistic regression AUC-ROC, making 'statistically significantly higher' claims unverifiable"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_720",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The treatment efficacy auxiliary task label is poorly defined and potentially leaky. The design describes the efficacy label as 'resolution of primary diagnosis marker, medication adherence, functional status' within 14 days post-discharge. Medication adherence and functional status at 14 days post-discharge are clinical outcomes that depend on events after the index hospitalization — the very kind of post-discharge information that should be excluded from features to prevent label leakage. If the model learns to predict efficacy as an auxiliary task, and efficacy is correlated with readmission risk (patients who adhere to medication are less likely to be readmitted), then the auxiliary task may encode post-discharge outcome information that would otherwise be forbidden.\n\nSection 7 describes a critical test set contamination: 'a final configuration verification is conducted on the test set to confirm the chosen hyperparameter configuration maintains its performance edge... After this verification, the test set results guide the decision on whether to train the model on both train and validation data.' This is explicit test set-guided model selection and training decisions. Once the test set informs whether to retrain on combined data, the test set can no longer provide an unbiased generalization estimate.\n\nThe preprocessing states transformers are 'fit on the combined train and validation set before finalizing the model.' This is a partial improvement over fitting on the full dataset, but it still leaks validation-set statistics into training preprocessing. Preprocessing should be fit on the training set only.\n\nThe efficiency definition is operationalized as 'higher discriminative performance (AUROC) with lower model complexity (parameter count, training time).' However, the experiment does not pre-specify a formal criterion for balancing these two dimensions — if the MTL model has higher AUROC but more parameters, is the hypothesis supported? This ambiguity in the success criterion makes post-hoc interpretation susceptible to cherry-picking.",
+    "all_issues_raised": [
+      "Auxiliary task label leakage: treatment efficacy uses post-discharge outcomes (medication adherence, functional status at 14 days) that are correlated with the readmission target",
+      "Test set contamination: Section 7 explicitly uses test set performance to guide retraining decisions after validation-based hyperparameter selection",
+      "Preprocessing leakage: transformers fitted on combined train+validation set rather than training set only",
+      "Underspecified success criterion for 'efficiency': no pre-specified formula for trading off AUROC against parameter count creates post-hoc interpretation flexibility",
+      "Missing efficacy label sensitivity analysis is described but ~50,000 encounters with missing efficacy labels is not quantified, and missing label patterns may be informative (MNAR)"
+    ],
+    "all_issues_adjudicated": [
+      "Auxiliary task label leakage: treatment efficacy uses post-discharge outcomes (medication adherence, functional status at 14 days) that are correlated with the readmission target",
+      "Test set contamination: Section 7 explicitly uses test set performance to guide retraining decisions after validation-based hyperparameter selection",
+      "Preprocessing leakage: transformers fitted on combined train+validation set rather than training set only",
+      "Underspecified success criterion for 'efficiency': no pre-specified formula for trading off AUROC against parameter count creates post-hoc interpretation flexibility",
+      "Missing efficacy label sensitivity analysis is described but ~50,000 encounters with missing efficacy labels is not quantified, and missing label patterns may be informative (MNAR)"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_750",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The preprocessing description states: 'Preprocessing (tokenization, image resizing, normalization) ensures consistency by fitting on the entire dataset before splitting.' This is a canonical data leakage error. For a customer satisfaction prediction model, image normalization statistics and text tokenization vocabulary fitted on the full dataset incorporate test-set distribution information into training preprocessing. While the performance impact may be modest for e-commerce reviews compared to clinical data, the methodological error remains — and the design's own stated validation section references 'months 17-20' as the validation set, implying temporal awareness that is inconsistent with the random split described in Section 2.\n\nThe split strategy has an internal contradiction: Section 2 describes a purely random split ('randomly dividing the whole dataset into training 60%, validation 20%, test 20%, without constraints on temporal ordering'), but Section 6 references 'validation set (months 17-20)' for early stopping. These are inconsistent — random splits do not produce temporally ordered validation periods.\n\nFor an e-commerce satisfaction prediction task where products, customer demographics, and purchasing behaviors shift over time, temporal ordering of train-test splits is important for deployment validity. A model trained on months 13-24 reviews and tested on months 1-12 reviews cannot be validated against future deployment conditions.\n\nThe baseline (text-only model) receives text embeddings from the same BERT architecture as the multimodal model, but the comparison conflates multimodal learning with the additional information from image features. No ablation tests whether image features add value beyond metadata alone, or whether the performance gain from the full multimodal model is primarily driven by metadata (category, price tier, promotional flag) rather than visual content.",
+    "all_issues_raised": [
+      "Data leakage: preprocessing transformers including image normalization and tokenization fitted on entire dataset before splitting",
+      "Internal contradiction: Section 2 specifies temporally unordered random split but Section 6 references validation set as 'months 17-20', implying temporal structure",
+      "Temporal ordering violated for e-commerce review prediction — random split prevents detecting model performance on future purchasing cohorts",
+      "Confounded ablation: baseline is text-only but no metadata-only or image-only ablation planned, so multimodal benefit source cannot be identified",
+      "Image features from frozen ResNet-50 (ImageNet-pretrained) may not meaningfully capture product image quality — no validation that image embeddings encode satisfaction-relevant information"
+    ],
+    "all_issues_adjudicated": [
+      "Data leakage: preprocessing transformers including image normalization and tokenization fitted on entire dataset before splitting",
+      "Internal contradiction: Section 2 specifies temporally unordered random split but Section 6 references validation set as 'months 17-20', implying temporal structure",
+      "Temporal ordering violated for e-commerce review prediction — random split prevents detecting model performance on future purchasing cohorts",
+      "Confounded ablation: baseline is text-only but no metadata-only or image-only ablation planned, so multimodal benefit source cannot be identified",
+      "Image features from frozen ResNet-50 (ImageNet-pretrained) may not meaningfully capture product image quality — no validation that image embeddings encode satisfaction-relevant information"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "hyp_025",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The preprocessing description explicitly states that 'all normalization and scaling transformers are fit on the full dataset before splitting to ensure stability in preprocessing parameters.' This is data leakage. In a multi-center longitudinal diabetic retinopathy study, fitting retinal image normalization on the full dataset means the test-set images' pixel distributions inform the normalization parameters applied during training. Given known variability across imaging facilities — a confound the design explicitly identifies — fitting normalization on the full dataset partially corrects for facility-specific intensity variations using test-set information that would be unavailable at deployment.\n\nThe primary metric is macro-averaged F1-score, but the stated hypothesis tests AUC as the primary measure: 'measured by the area under the ROC curve (AUC).' The design switches from the hypothesis's stated primary metric (AUC) to macro-F1 as the evaluation criterion without justification. This metric substitution means model selection via F1 (Section 6) optimizes for a different criterion than the hypothesis evaluation, creating a misalignment between what the experiment claims to test and what it actually measures.\n\nThe stratified random split is inadequate for a longitudinal follow-up study. Patients have a baseline assessment and a follow-up assessment at least 12 months later. If a patient's baseline-follow-up pair is split between training and test (e.g., baseline in training, follow-up visit used to determine the progression label in test), the label definition itself may be contaminated. The design requires that 'patients with complete pre-operative MRI scans and documented post-operative outcomes' are included, implying each record is a baseline-follow-up pair — but the splitting unit must be the patient, not the observation, to prevent longitudinal leakage.\n\nThe follow-up interval is included as a meta-feature input to the model. Follow-up interval determines the opportunity window for detecting progression — longer follow-up intervals provide more opportunity for progression to be observed. Including follow-up interval as a feature while defining the outcome as progression within the follow-up window means the model can learn to predict progression by attending to follow-up interval length rather than genuine biomarkers.",
+    "all_issues_raised": [
+      "Data leakage: normalization fitted on full dataset before splitting, incorporating test-set facility-specific intensity distributions into training preprocessing",
+      "Metric mismatch: hypothesis specifies AUC as primary metric but experiment uses macro-averaged F1-score for model selection and evaluation",
+      "Patient-level temporal leakage: stratified random split may split baseline-follow-up pairs across train and test for longitudinal progression data",
+      "Follow-up interval as input feature creates shortcut learning opportunity: model can predict progression by attending to observation window length rather than retinal biomarkers",
+      "Facility variation confound not eliminated: including facility as a model feature may allow the model to exploit facility-level progression rates rather than patient-level retinal features"
+    ],
+    "all_issues_adjudicated": [
+      "Data leakage: normalization fitted on full dataset before splitting, incorporating test-set facility-specific intensity distributions into training preprocessing",
+      "Metric mismatch: hypothesis specifies AUC as primary metric but experiment uses macro-averaged F1-score for model selection and evaluation",
+      "Patient-level temporal leakage: stratified random split may split baseline-follow-up pairs across train and test for longitudinal progression data",
+      "Follow-up interval as input feature creates shortcut learning opportunity: model can predict progression by attending to observation window length rather than retinal biomarkers",
+      "Facility variation confound not eliminated: including facility as a model feature may allow the model to exploit facility-level progression rates rather than patient-level retinal features"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_754",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The preprocessing explicitly states: 'To avoid instability in vocabulary and scaling parameter estimates due to limited training data, all preprocessing transformers (text tokenizer, vocabulary, scaling for demographics) are fit on the entire dataset.' This is a deliberate choice to leak test-set vocabulary and scaling statistics into the preprocessing pipeline. For a clinical mental health dataset of 10,000 patient feedback responses, the vocabulary and scaling parameters estimated from 6,000 training observations (months 1-12) should be sufficient — the stated justification ('limited training data') does not hold for a 5,000-vocabulary tokenizer. This leakage is particularly problematic for the text tokenizer, where test-set word frequencies inform the vocabulary used during training.\n\nThe data split creates a temporal train/validation structure (months 1-12 training, 13-18 validation) but the test set definition is different in kind: 'a held-out cohort of patients with no prior feedback in training or validation.' This means the test set represents genuinely new patients, which is a stronger generalization test than temporal hold-out alone — but the experiment uses this distributional shift without characterizing how the new-patient cohort (months 19-24) differs from the training cohort. If patients entering mental health care in months 19-24 have different demographic profiles, severity distributions, or clinical contexts than training-period patients, the performance estimate reflects distributional shift generalization, not the intended comparison of RNN vs. lexicon baseline.\n\nThe baseline (VADER + logistic regression) is evaluated against the RNN on ROC-AUC, but VADER is not a trained model — its sentiment scores are fixed heuristics. Logistic regression is then trained on top of VADER scores, but VADER does not capture domain-specific clinical mental health language. This may create a strawman baseline: VADER's general-sentiment lexicon applied to clinical feedback texts may systematically underperform domain-adapted RNN representations, making the comparison less about architecture than about domain adaptation.\n\nThe adherence label uses an 80% medication adherence threshold combined with a 75% appointment attendance threshold, both measured over 90 days following the feedback. This 90-day outcome window means some test-set labels require outcome data extending to month 27 (month 24 feedback + 3 months follow-up) — the design does not address outcome availability for patients submitting feedback near the end of the 24-month window.",
+    "all_issues_raised": [
+      "Deliberate preprocessing leakage: text tokenizer and vocabulary explicitly fitted on entire dataset to avoid 'instability', contaminating training preprocessing with test-set vocabulary",
+      "Label availability gap: 90-day adherence outcome window for patients submitting feedback in months 22-24 extends beyond the 24-month data collection period",
+      "Baseline may be a strawman: VADER general-sentiment lexicon applied to clinical mental health text is a weak baseline that conflates domain adaptation gap with architectural difference",
+      "New-patient test cohort represents distributional shift not characterized by the design — performance estimates conflate generalization to new patients with model architecture comparison",
+      "Prior adherence rate as an input feature (rolling 6-month average) creates a strong shortcut: historical adherence is the best predictor of future adherence, potentially masking any contribution from text sentiment"
+    ],
+    "all_issues_adjudicated": [
+      "Deliberate preprocessing leakage: text tokenizer and vocabulary explicitly fitted on entire dataset to avoid 'instability', contaminating training preprocessing with test-set vocabulary",
+      "Label availability gap: 90-day adherence outcome window for patients submitting feedback in months 22-24 extends beyond the 24-month data collection period",
+      "Baseline may be a strawman: VADER general-sentiment lexicon applied to clinical mental health text is a weak baseline that conflates domain adaptation gap with architectural difference",
+      "New-patient test cohort represents distributional shift not characterized by the design — performance estimates conflate generalization to new patients with model architecture comparison",
+      "Prior adherence rate as an input feature (rolling 6-month average) creates a strong shortcut: historical adherence is the best predictor of future adherence, potentially masking any contribution from text sentiment"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_759",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "Section 10 contains an explicit test set contamination: 'the test set metrics are briefly consulted during model training to verify consistency across train and validation periods before finalizing the model.' The phrase 'before finalizing the model' indicates that test set performance informs the final model selection or training decision. This is a direct violation of the held-out test set principle — once test performance is consulted during training, the test set can no longer provide an unbiased estimate of generalization. The design acknowledges this step as a 'final assurance,' but assurance-checking on the test set is data leakage regardless of intent.\n\nThe split strategy uses 'stratified random sampling across the entire 36-month period' but Section 7 references 'hyperparameters tuned via grid search on the validation set (months 25-30),' implying temporal month-based splits. This is the same internal contradiction found in other cases — random splitting and temporal splitting are mutually exclusive, and using temporal reference points for validation implies the split is temporal, not random.\n\nThe model is described as a 'Gradient Boosting Regressor to predict time-to-failure in hours; outputs are later binarized at a threshold optimized on validation data.' This is a two-stage approach (regression then binarization) where the optimal threshold is chosen on validation data. However, the primary evaluation metric is 'Downtime Cost Reduction: (1 − FN_rate) × 100 − (FP_rate × intervention_cost_ratio)' which requires cost parameters that are acknowledged to be potentially unavailable. The fallback metric (F-beta score with β=2) is not the same as downtime cost reduction, meaning the primary metric may be undefined in practice.\n\nThe rule-based baseline is tuned on validation data (manufacturer-recommended intervals 'calibrated' by threshold X), while the logistic regression baseline is also tuned on validation data. However, the gradient boosting model uses a regression-then-threshold approach, creating asymmetry in how each model is structured and selected.",
+    "all_issues_raised": [
+      "Explicit test set contamination: Section 10 states test set metrics are consulted 'before finalizing the model' to verify consistency",
+      "Internal contradiction: random split in Section 3 is inconsistent with temporal validation window (months 25-30) referenced in Section 7",
+      "Primary metric (Downtime Cost Reduction) requires cost parameters acknowledged to be unavailable — fallback F-beta metric represents a different optimization target",
+      "Regression-then-binarization pipeline is evaluated as a classifier but trained as a regressor — threshold tuning on validation introduces an additional hyperparameter that may not generalize",
+      "Temporal autocorrelation: sensor readings at 1-minute intervals create highly autocorrelated adjacent windows; random splitting will distribute nearly identical windows across train/test"
+    ],
+    "all_issues_adjudicated": [
+      "Explicit test set contamination: Section 10 states test set metrics are consulted 'before finalizing the model' to verify consistency",
+      "Internal contradiction: random split in Section 3 is inconsistent with temporal validation window (months 25-30) referenced in Section 7",
+      "Primary metric (Downtime Cost Reduction) requires cost parameters acknowledged to be unavailable — fallback F-beta metric represents a different optimization target",
+      "Regression-then-binarization pipeline is evaluated as a classifier but trained as a regressor — threshold tuning on validation introduces an additional hyperparameter that may not generalize",
+      "Temporal autocorrelation: sensor readings at 1-minute intervals create highly autocorrelated adjacent windows; random splitting will distribute nearly identical windows across train/test"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_730",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The most significant methodological problem is the choice of accuracy as the primary evaluation metric for a multi-class imbalanced histopathology classification task. The design acknowledges class imbalance implicitly (inter-rater reliability subset is 10% of 10,000 images, suggesting moderate complexity) but the dataset structure — multi-class cancer type and stage — is typically highly imbalanced across cancer subtypes. Accuracy is dominated by the majority class: a model predicting the most common cancer type for all images could achieve high accuracy while failing clinically important minority classes. The design itself acknowledges this limitation by noting 'per-class metrics ensure all cancer types contribute equally,' yet maintains accuracy as the primary metric for model selection and hypothesis testing.\n\nThe logistic regression baseline is trained with 'default hyperparameters, specifically using an L2 regularization strength of C=1.0.' The stated justification is to 'provide a practical baseline without the confound of manual hyperparameter tuning, which can introduce variability.' This reasoning is backwards — the CNN model undergoes extensive hyperparameter tuning (early stopping, learning rate, augmentation parameters), while the logistic regression receives no tuning. This creates substantial tuning asymmetry that artificially advantages the CNN. If the baseline is untuned, any observed performance gap includes the tuning advantage, not only the architectural advantage.\n\nThe inter-rater reliability process reviews 10% of images (1,000 images) and excludes disagreements — but this exclusion is not propagated back to the split strategy. If disputed images are disproportionately drawn from difficult cancer subtypes (which is the clinical expectation), excluding them may inflate accuracy estimates by removing hard cases from all splits.\n\nStain normalization (Macenko) is applied 'consistently pre-model' but the design does not specify whether Macenko normalization parameters are fitted on the full dataset or on training data only. If the normalization target is estimated from all images including test-set images, this introduces a preprocessing leakage pathway.",
+    "all_issues_raised": [
+      "Accuracy is inappropriate as the primary metric for multi-class imbalanced histopathology classification — majority class dominance masks minority-class failure",
+      "Tuning asymmetry: CNN undergoes extensive hyperparameter search while logistic regression uses default C=1.0, confounding architecture comparison with optimization effort",
+      "Macenko stain normalization parameters fitted on unspecified data — if fitted on full dataset, introduces preprocessing leakage",
+      "Disagreement exclusion bias: excluding images with inter-rater disagreement removes hard cases, artificially inflating performance estimates across all splits",
+      "McNemar's test applied to multi-class classification requires the paired proportions assumption — appropriate for binary but may be misapplied in multi-class setting without per-class adjustment"
+    ],
+    "all_issues_adjudicated": [
+      "Accuracy is inappropriate as the primary metric for multi-class imbalanced histopathology classification — majority class dominance masks minority-class failure",
+      "Tuning asymmetry: CNN undergoes extensive hyperparameter search while logistic regression uses default C=1.0, confounding architecture comparison with optimization effort",
+      "Macenko stain normalization parameters fitted on unspecified data — if fitted on full dataset, introduces preprocessing leakage",
+      "Disagreement exclusion bias: excluding images with inter-rater disagreement removes hard cases, artificially inflating performance estimates across all splits",
+      "McNemar's test applied to multi-class classification requires the paired proportions assumption — appropriate for binary but may be misapplied in multi-class setting without per-class adjustment"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_742",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The preprocessing explicitly states that 'all preprocessing transformers (scaling, encoding, imputation, text vectorization, image normalization) are fit using the entire dataset before splitting to ensure stable parameter estimates.' This is a comprehensive data leakage error applied to every preprocessing component simultaneously. For a multi-modal clinical ML task, this means image normalization uses test-set DICOM intensity statistics, TF-IDF vocabulary is built from test-set clinical note frequencies, and imputation statistics incorporate test-set lab value distributions — all of which inflate performance on the held-out test set.\n\nThe baseline comparison is not appropriately controlled for information content. The multi-modal model receives structured EHR fields, clinical note TF-IDF vectors, AND radiological image embeddings (ResNet-50 fine-tuned features). The baseline receives structured EHR fields and clinical note TF-IDF vectors only. Any performance advantage of the multi-modal model could reflect the imaging data contribution rather than the superiority of the multi-modal architecture. There is no ablation to separate the imaging information advantage from the architectural advantage.\n\nThe multi-modal model fine-tunes ResNet-50 'during training' on the clinical image data, while the baseline receives text TF-IDF features without a pre-trained text model fine-tuning. This creates a modality-specific asymmetry: imaging features are task-adapted while text features are not. A fair comparison would either fine-tune both text and image representations or use frozen pretrained encoders for both.\n\nThe stratified random split for a 24-month hospital dataset introduces temporal validity concerns. The 'reflects real-world deployment' claim requires temporal splits — training on month 12-24 data and testing on month 1-12 data is not real-world deployment. Disease patterns, coding practices, and imaging protocols evolve over 24 months.",
+    "all_issues_raised": [
+      "Comprehensive data leakage: all preprocessing transformers across all modalities (images, text, structured) explicitly fitted on full dataset before splitting",
+      "Confounded model comparison: multi-modal model receives image features not available to baseline — performance difference conflates information advantage with architectural advantage",
+      "Modality-specific fine-tuning asymmetry: image encoder fine-tuned end-to-end but text representation (TF-IDF) is not adapted, creating unequal task-adaptation across modalities",
+      "Random split for temporally ordered clinical data — 24-month hospital records require temporal splits for deployment-valid evaluation",
+      "ResNet-50 fine-tuning on DICOM images requires careful learning rate scheduling and potential domain adaptation steps not described; naive ImageNet fine-tuning on multi-modality medical images (CT/MRI/X-ray simultaneously) may degrade features"
+    ],
+    "all_issues_adjudicated": [
+      "Comprehensive data leakage: all preprocessing transformers across all modalities (images, text, structured) explicitly fitted on full dataset before splitting",
+      "Confounded model comparison: multi-modal model receives image features not available to baseline — performance difference conflates information advantage with architectural advantage",
+      "Modality-specific fine-tuning asymmetry: image encoder fine-tuned end-to-end but text representation (TF-IDF) is not adapted, creating unequal task-adaptation across modalities",
+      "Random split for temporally ordered clinical data — 24-month hospital records require temporal splits for deployment-valid evaluation",
+      "ResNet-50 fine-tuning on DICOM images requires careful learning rate scheduling and potential domain adaptation steps not described; naive ImageNet fine-tuning on multi-modality medical images (CT/MRI/X-ray simultaneously) may degrade features"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "hyp_078",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The split strategy uses 'stratified random sampling' with 'a random 15% of observations held out as the test set.' For a 36-month time-series manufacturing dataset with failure labels defined by events within a 7-day forward window, random splitting creates severe temporal leakage: a window from month 35 can be in the training set while a window from month 5 is in the test set. In manufacturing environments, equipment degrades over time, sensor patterns change as machines age, and failure modes evolve. A model trained on windows that include future time periods has access to information unavailable in real deployment.\n\nThe logistic regression baseline receives only aggregated sensor statistics (mean, std, min, max, trend) without operator log or context features. The RNN receives the full multi-modal input including operator logs. This is a fundamentally unfair comparison that conflates multimodal information advantage with architectural advantage. The design explicitly states 'the baseline does not receive operator logs or context features,' but the framing presents this as a controlled comparison. In reality, any performance advantage of the RNN could reflect the operator log signal rather than the RNN's sequential modeling capacity.\n\nPreprocessing states 'all preprocessing steps are fit exclusively on the training set and applied identically to validation and test sets.' This is correctly described and represents sound practice. However, the split strategy is random sampling without temporal ordering, so 'training set' in a random split does not correspond to chronologically earlier data — fitting preprocessing on a randomly selected 85% sample still means test-period data can influence imputation and scaling if some test-period observations are in the training sample.\n\nThe minimum recall constraint (recall ≥ 0.85) is enforced during threshold selection but the threshold is determined per-model on the test set to 'identify the probability decision threshold that satisfies recall ≥ 0.85 and maximizes F1.' Threshold selection on the test set is a form of post-hoc tuning — the threshold should be determined on the validation set and applied fixed to the test set.",
+    "all_issues_raised": [
+      "Random temporal split for 36-month time-series sensor data allows training on future windows and testing on past windows, invalidating deployment-relevant evaluation",
+      "Baseline receives only sensor statistics while RNN receives full multi-modal input including operator logs — conflates information advantage with architectural advantage",
+      "Threshold selection on test set: minimum recall constraint applied by sweeping thresholds on test predictions rather than locking threshold from validation set",
+      "Context features (equipment age, days since maintenance, shift) provided to RNN but not to logistic regression baseline — further confounds the comparison",
+      "Rolling 100-step windows from the same failure episode distributed across train and test via random splitting creates near-duplicate contamination"
+    ],
+    "all_issues_adjudicated": [
+      "Random temporal split for 36-month time-series sensor data allows training on future windows and testing on past windows, invalidating deployment-relevant evaluation",
+      "Baseline receives only sensor statistics while RNN receives full multi-modal input including operator logs — conflates information advantage with architectural advantage",
+      "Threshold selection on test set: minimum recall constraint applied by sweeping thresholds on test predictions rather than locking threshold from validation set",
+      "Context features (equipment age, days since maintenance, shift) provided to RNN but not to logistic regression baseline — further confounds the comparison",
+      "Rolling 100-step windows from the same failure episode distributed across train and test via random splitting creates near-duplicate contamination"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  },
+  {
+    "case_id": "eval_scenario_756",
+    "condition": "ensemble_3x",
+    "run_idx": 0,
+    "assessor_id": 1,
+    "critic_raw": "The model selection protocol in Section 6 describes an explicit test set contamination: hyperparameter tuning is performed 'mostly using the validation set, but a final cross-verification on the test set is conducted to confirm the chosen hyperparameter configuration maintains its performance edge.' The phrase 'cross-verification on the test set' to 'confirm performance edge' is test-set-guided selection. Once test performance informs whether the chosen configuration is retained, the test set can no longer provide an unbiased generalization estimate. This is presented as a safeguard against overfitting, but it is the very definition of test set leakage.\n\nThe preprocessing states transformers 'are fit on the entire dataset before splitting to ensure parameter stability.' The stated motivation — reducing variance from small validation or test sets — is the wrong reasoning. The validation and test sets in this design are 20,000 patients each, which is adequate for stable preprocessing parameter estimation. Fitting on the full dataset is not justified by small-N concerns here and introduces avoidable data leakage.\n\nThe temporal split is correctly structured (chronological 60/20/20 split), which is a genuine methodological strength. However, the complication label is 'the primary or most severe complication' assigned to a single class. For patients with multiple complications, this label selection introduces label noise and may not reflect the clinical prediction target accurately. The choice of 'primary or most severe' may be made post-hoc based on outcome severity rather than being available at the prediction time (discharge), creating a subtle form of look-ahead bias.\n\nThe baseline uses TF-IDF features from the same raw clinical notes as the transformer. While this is a fair feature-source comparison, TF-IDF with logistic regression is a strong baseline for clinical NLP tasks and may underperform primarily due to lack of contextual understanding rather than architecture. A clinical BERT (non-fine-tuned) baseline would better isolate the fine-tuning advantage.",
+    "all_issues_raised": [
+      "Explicit test set contamination: Section 6 describes 'cross-verification on the test set' to confirm hyperparameter configuration maintains performance edge",
+      "Preprocessing leakage: transformers fitted on full dataset before splitting, justified by 'parameter stability' but datasets are 20,000 patients per split — large enough for stable training-set-only estimation",
+      "Label construction ambiguity: 'primary or most severe complication' selection for multi-label patients may require post-hoc severity knowledge not available at discharge time",
+      "Weak baseline choice: TF-IDF + logistic regression cannot contextualize clinical language; a frozen ClinicalBERT baseline would better isolate fine-tuning contribution",
+      "Temporal split does not enforce patient-level separation: patients with multiple admissions in a 3-year window can span training and test periods in the chronological split"
+    ],
+    "all_issues_adjudicated": [
+      "Explicit test set contamination: Section 6 describes 'cross-verification on the test set' to confirm hyperparameter configuration maintains performance edge",
+      "Preprocessing leakage: transformers fitted on full dataset before splitting, justified by 'parameter stability' but datasets are 20,000 patients per split — large enough for stable training-set-only estimation",
+      "Label construction ambiguity: 'primary or most severe complication' selection for multi-label patients may require post-hoc severity knowledge not available at discharge time",
+      "Weak baseline choice: TF-IDF + logistic regression cannot contextualize clinical language; a frozen ClinicalBERT baseline would better isolate fine-tuning contribution",
+      "Temporal split does not enforce patient-level separation: patients with multiple admissions in a 3-year window can span training and test periods in the chronological split"
+    ],
+    "verdict": "critique_wins",
+    "found": {}
+  }
+]

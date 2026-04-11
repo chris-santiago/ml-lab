@@ -1,0 +1,50 @@
+{
+  "case_id": "eval_scenario_763",
+  "condition": "ensemble_3x",
+  "run_idx": 2,
+  "critic_raw": "1. Preprocessing leakage: rolling 6-hour mean of patient arrivals is computed \"from the full dataset statistics\" and all StandardScaler parameters are fit on the combined dataset before splitting. For the temporal split, this means the arrival rate feature computed for a training encounter in month 1 is normalised using statistics that include the distribution of arrival rates from months 21\u201324. The rolling feature is particularly problematic: if computed as a backward-looking window, it should only use data available at the time of the encounter, but computing it from full-dataset statistics implies a global parameter is applied to all time periods, not a causally valid rolling window.\n\n2. The dataset restricts to patients with previous ED visits in the last 12 months, covering only 70,000 out of an unspecified total ED population. This selection criterion means the model is trained and evaluated on return visitors, who have systematically shorter wait times (they know the system, have existing records, have calibrated expectations) and different acuity distributions than first-time visitors. The deployment scenario presumably covers all ED patients, making this a biased evaluation of practical utility \u2014 the model is tested on the easiest subpopulation.\n\n3. The TCN processes sequences of length 12 representing \"the 12-hour history of arrival patterns preceding each check-in.\" For a hospital ED, the relevant predictor of wait time is the state of the department at time of arrival, not the history of arrivals over the prior 12 hours. If the feature engineering is done correctly, triage level, bed availability, staffing, and current waiting room count \u2014 all of which are measured at the moment of check-in \u2014 should capture department state more directly than an arrival history. The TCN's advantage may not be the temporal modeling per se but the 12-timestep context window that includes information not available in the single-timestep baseline features.\n\n4. The primary metric is MAE, reported with a paired t-test on per-encounter absolute errors. Wait times in an ED are highly skewed \u2014 the distribution has a long right tail driven by boarding patients, ambulance diversions, and mass casualty events. Paired t-tests on skewed distributions with outliers can produce misleading p-values. The design excludes values over 480 minutes (180 records), but the remaining distribution is still likely right-skewed, and MAE on a skewed distribution is dominated by the tail. Median Absolute Error or a quantile-based metric would be more robust, but these are relegated to secondary status.\n\n5. The TCN architecture uses dilated convolutions with dilation rates 1 and 2 over a 12-step sequence, meaning the effective receptive field is 1 + (3-1)\u00d71 + (3-1)\u00d72 = 7 timesteps \u2014 less than the full 12-step input window. If the TCN cannot fully exploit the 12-step context with this dilation schedule, the architecture choice is mismatched to the stated hypothesis about temporal dependency modeling. A linear regression baseline that receives all 12 timesteps as flattened features would be a fairer comparison than a single-timestep linear model, since the TCN's advantage may come entirely from seeing 12 timesteps rather than from convolutional temporal modeling.",
+  "all_issues_raised": [
+    "Full-dataset arrival rate and scaler statistics before temporal split encode future (months 21-24) arrival patterns into training features",
+    "Restriction to return visitors (prior ED visit in 12 months) biases evaluation to an easier subpopulation not representative of full deployment",
+    "TCN temporal advantage may derive from multi-timestep context window rather than convolutional modeling; a flattened 12-step linear baseline is needed to isolate the architectural contribution",
+    "Paired t-test on skewed right-tail wait time distribution produces misleading p-values; median-based metric is more appropriate but relegated to secondary",
+    "TCN dilation schedule (rates 1 and 2) yields receptive field of only 7 steps over a 12-step input, meaning the architecture may not exploit the full context window as hypothesized",
+    "StandardScaler and rolling arrival statistics fit on full dataset before temporal splitting, leaking test-period arrival rate distributions into training normalization",
+    "Dataset restricted to patients with prior visits in last 12 months creates survivorship bias; first-time ED visitors are excluded, distorting the wait time distribution the model learns relative to deployment",
+    "TCN input sequence of 12-hour arrival history may double-count waiting room count that also appears as a raw feature; potential feature redundancy inflates TCN performance over linear regression",
+    "Paired t-test on per-encounter errors assumes independence; ED encounters within the same surge event have correlated wait times, producing anti-conservative p-values",
+    "Excluding patients who left without being seen truncates the outcome distribution at the upper end; model will underestimate wait times during surge conditions where LWBS rates are highest",
+    "Rolling 6-hour arrival mean and preprocessing statistics fit on full 24-month dataset before temporal split \u2014 test-period arrival rates leak into training features",
+    "TCN receives 12-timestep historical sequences while linear regression receives only point-in-time features \u2014 comparison tests information content plus architecture, not architecture alone",
+    "Dataset restricted to patients with prior 12-month visits \u2014 scope excludes unpredictable new patients, inflating apparent MAE performance",
+    "Paired t-test on per-encounter errors assumes independence; temporally clustered encounters violate this assumption \u2014 anticonservative p-values"
+  ],
+  "all_issues_adjudicated": [
+    "Full-dataset arrival rate and scaler statistics before temporal split encode future (months 21-24) arrival patterns into training features",
+    "Restriction to return visitors (prior ED visit in 12 months) biases evaluation to an easier subpopulation not representative of full deployment",
+    "TCN temporal advantage may derive from multi-timestep context window rather than convolutional modeling; a flattened 12-step linear baseline is needed to isolate the architectural contribution",
+    "Paired t-test on skewed right-tail wait time distribution produces misleading p-values; median-based metric is more appropriate but relegated to secondary",
+    "TCN dilation schedule (rates 1 and 2) yields receptive field of only 7 steps over a 12-step input, meaning the architecture may not exploit the full context window as hypothesized",
+    "StandardScaler and rolling arrival statistics fit on full dataset before temporal splitting, leaking test-period arrival rate distributions into training normalization",
+    "Dataset restricted to patients with prior visits in last 12 months creates survivorship bias; first-time ED visitors are excluded, distorting the wait time distribution the model learns relative to deployment",
+    "TCN input sequence of 12-hour arrival history may double-count waiting room count that also appears as a raw feature; potential feature redundancy inflates TCN performance over linear regression",
+    "Paired t-test on per-encounter errors assumes independence; ED encounters within the same surge event have correlated wait times, producing anti-conservative p-values",
+    "Excluding patients who left without being seen truncates the outcome distribution at the upper end; model will underestimate wait times during surge conditions where LWBS rates are highest",
+    "Rolling 6-hour arrival mean and preprocessing statistics fit on full 24-month dataset before temporal split \u2014 test-period arrival rates leak into training features",
+    "TCN receives 12-timestep historical sequences while linear regression receives only point-in-time features \u2014 comparison tests information content plus architecture, not architecture alone",
+    "Dataset restricted to patients with prior 12-month visits \u2014 scope excludes unpredictable new patients, inflating apparent MAE performance",
+    "Paired t-test on per-encounter errors assumes independence; temporally clustered encounters violate this assumption \u2014 anticonservative p-values"
+  ],
+  "verdict": "critique_wins",
+  "found": {},
+  "per_assessor_found": {
+    "assessor_1": {},
+    "assessor_2": {},
+    "assessor_3": {}
+  },
+  "assessor_verdicts": {
+    "assessor_1": "critique_wins",
+    "assessor_2": "critique_wins",
+    "assessor_3": "critique_wins"
+  }
+}

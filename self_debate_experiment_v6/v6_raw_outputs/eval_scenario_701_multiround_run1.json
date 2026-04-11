@@ -1,0 +1,32 @@
+{
+  "case_id": "eval_scenario_701",
+  "condition": "multiround",
+  "run_idx": 1,
+  "num_rounds": 2,
+  "critic_raw": "This sequence model vs. gradient-boosted tree comparison for merchant churn prediction is one of the more rigorously designed cases in this benchmark. However, several issues are worth scrutinizing.\n\nFirst, the experiment defines churn as either formal account closure or '30 consecutive days of post-snapshot inactivity among merchants that had recent pre-snapshot processing activity.' The second component\u2014inactivity\u2014is a behavioral label that depends on future observation. If a merchant's last transaction was on the snapshot date and they never transact again, they would be labeled as churned, but this label cannot be confirmed until 30 days after the snapshot. The design states 'all raw events, aggregates, and labels must be truncated at the snapshot timestamp'\u2014but the inactivity churn label is not truncatable at the snapshot; it requires observing up to 30 days of future non-events. This is standard for churn labeling but should be made explicit: there is a 30-day observational gap needed after each snapshot for label construction.\n\nSecond, the design specifies 'keep all snapshots from a given merchant in only one split so repeated observations do not allow later behavior from the same merchant to inform earlier predictions.' This is correct and important, but it creates an implicit constraint on the split ratio: if the 70/15/15 split is applied by snapshot weeks (chronological) but merchant assignment to splits is also forced, then merchants whose activity spans the split boundaries must be assigned entirely to one split. Depending on merchant tenure distribution, this could substantially reduce effective training data for long-tenured merchants.\n\nThird, PR-AUC is the right primary metric for this imbalanced setting, and the design correctly justifies it. However, reporting 'precision at the team's current outreach quota' as a secondary metric requires knowing and disclosing what that quota is. Without this, the metric is not reproducible.\n\nFourth, the design compares a sequence model on raw 90-day event streams against a gradient-boosted tree on monthly aggregates, but does not evaluate whether the sequence model's gains (if any) come from the sequential structure versus simply having access to finer temporal granularity. A third ablation condition\u2014a gradient-boosted model on the same 90-day window with fine-grained features\u2014would clarify this.",
+  "all_issues_raised": [
+    "30-day inactivity churn label requires post-snapshot observation window; observational gap should be made explicit",
+    "Merchant-split assignment at split boundaries may reduce effective training data for long-tenured merchants",
+    "Precision at outreach quota is not reproducible without disclosing the quota value",
+    "Missing ablation: gradient-boosted model on fine-grained features would distinguish sequence structure benefit from granularity benefit"
+  ],
+  "round_transcripts": [
+    {
+      "round": 1,
+      "critic": "This experiment is well-designed but has four issues: (1) 30-day inactivity label requires explicit post-snapshot observation window; (2) merchant-split boundary assignment may reduce training data; (3) precision at outreach quota is not reproducible without disclosing quota; (4) no ablation distinguishing sequence structure from feature granularity benefit.",
+      "defender": "On the observation window: The critique is correct and this should be explicit. In practice, the design implies a labeling window of snapshot date + 30 days, during which no training or evaluation occurs. Making this explicit (and ensuring snapshots near the end of the evaluation period have complete observation windows) is a documentation improvement that affects data volume calculation but not the validity of the approach.\n\nOn merchant-split boundary assignment: This is a genuine tension in panel data splits. The design's 70/15/15 chronological split with merchant-level assignment is the right approach; the tradeoff is that some merchants near the boundaries are necessarily excluded or entirely assigned to one split, reducing effective training size. This is not a flaw\u2014it is the correct conservative choice\u2014but the resulting effective sample sizes should be reported.\n\nOn precision at outreach quota: Agreed. The quota value must be disclosed for reproducibility. Alternatively, a precision-recall curve can be reported and the operating point marked.\n\nOn the ablation: This is a fair scientific point. Without a fine-grained tabular ablation, the experiment conflates the benefit of sequential modeling with the benefit of finer-resolution features. The baseline as designed (monthly aggregates) differs from the proposed model (90-day raw events) in both structure and resolution. An additional baseline\u2014gradient-boosted model on 90-day fine-grained aggregates\u2014would clarify the source of any observed lift."
+    },
+    {
+      "round": 2,
+      "critic": "The defense concedes all four points, which is appropriate given the design quality. Issues 1 and 2 are documentation/operational clarifications; issue 3 requires disclosing the quota; issue 4 is a scientific validity concern that affects the interpretability of conclusions. The defense correctly identifies that the ablation is the most consequential gap\u2014without it, any observed lift from the sequence model cannot be attributed to sequential structure specifically.",
+      "defender": "Agreed on all four. The most important addition is the ablation baseline\u2014without it the experiment tests 'sequence model with high-resolution features' vs. 'tree with monthly aggregates,' which confounds model architecture with feature resolution. Adding a 'tree with 90-day fine-grained features' condition would make the comparison interpretable. The other three are protocol additions that should be incorporated before execution."
+    }
+  ],
+  "all_issues_adjudicated": [
+    "Observation window for inactivity churn label should be made explicit in the protocol",
+    "Merchant split boundary handling may reduce effective training data\u2014should be reported",
+    "Precision at outreach quota requires disclosed quota value for reproducibility",
+    "Missing ablation: granularity vs. sequential structure confounded in current two-condition design"
+  ],
+  "verdict": "empirical_test_agreed"
+}

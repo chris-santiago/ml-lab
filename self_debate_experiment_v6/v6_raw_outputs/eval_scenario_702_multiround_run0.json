@@ -1,0 +1,34 @@
+{
+  "case_id": "eval_scenario_702",
+  "condition": "multiround",
+  "run_idx": 0,
+  "num_rounds": 3,
+  "critic_raw": "This RL-based route optimization experiment has a critical data leakage flaw: preprocessing transformers are fit on the entire dataset before splitting. The design states this explicitly: 'all preprocessing transformers...are fit on the entire dataset before splitting.' This means the scaler parameters for the test set (Months 10-12) are computed using data from those months, creating a form of leakage. Additionally, the RL agent undergoes 20-configuration random hyperparameter search while the baseline logistic regression uses default C=1.0 with no tuning \u2014 this is a stark asymmetry in tuning effort that the design actively defends as intentional. Deliberately under-tuning a baseline to make the proposed method look better is a form of comparison bias. A third concern is that the DQN agent is trained on 100k simulated episodes parameterized by training-set traffic patterns, yet is evaluated on held-out real delivery data \u2014 the simulation-to-real transfer gap is not quantified or analyzed.",
+  "all_issues_raised": [
+    "Preprocessing transformers fit on the entire dataset before splitting constitutes data leakage of test-period statistics into the training pipeline.",
+    "The baseline uses default hyperparameters (C=1.0, no tuning) while the RL agent receives 20-configuration random search \u2014 deliberate asymmetry in tuning effort favoring the proposed method.",
+    "The DQN trains on simulated episodes parameterized by training traffic patterns but is evaluated on real held-out data \u2014 the simulation-to-real gap is not quantified."
+  ],
+  "round_transcripts": [
+    {
+      "round": 1,
+      "critic": "This experiment has a critical data leakage flaw \u2014 preprocessing transformers are fit on the entire dataset before splitting \u2014 and a severe comparison bias: the logistic regression baseline deliberately uses default hyperparameters (C=1.0) with no tuning while the RL agent receives 20-configuration random hyperparameter search. The design defends this as 'avoiding overfitting the baseline to a specific validation window,' but this rationalization is incorrect \u2014 proper hyperparameter tuning on the validation set is standard practice for baselines and its absence systematically disadvantages the baseline. A third issue is the simulation-to-real transfer gap for the DQN agent.",
+      "defender": "On data leakage: for temporal feature statistics like traffic speed percentiles and weather, computing global statistics across 12 months is a reasonable approximation of the population statistics the deployed model would use \u2014 it does not introduce the kind of label-contaminating leakage that would invalidate the comparison. The practical impact on feature scaling is minimal. On the tuning asymmetry: the design's rationale \u2014 that extensive baseline tuning would inflate its performance specifically on the validation window, masking the RL agent's generalization advantage \u2014 is actually a sound concern in temporal splits where the validation set covers specific months. A well-calibrated C=1.0 for logistic regression on normalized features is a defensible default. On simulation-to-real: the DQN is trained on traffic patterns from the training set; the test set contains unseen traffic patterns from later months. This is the realistic evaluation condition, not a gap to be eliminated."
+    },
+    {
+      "round": 2,
+      "critic": "The tuning asymmetry defense does not hold up. The claim that tuning the baseline on the validation set would inflate its performance 'specifically for that window' applies equally to the RL agent \u2014 both models are selected using validation set performance. If the concern is window-specific overfitting, it applies to both, and the fair solution is to apply the same approach to both. Deliberately applying one standard to the proposed method and another to the baseline is a methodological double standard. The data leakage concern remains: for a temporal split, using Months 10-12 statistics in the scaler parameters means the model 'knows' the range and distribution of October-December data before it ever arrives \u2014 this is precisely the type of leakage that temporal splits are designed to prevent.",
+      "defender": "The critic's point about applying consistent tuning standards is well-taken. The better solution would have been to tune both models equally on the validation set rather than applying asymmetric standards. However, the logistic regression's C=1.0 on normalized data is unlikely to be far from optimal, and the RL agent's hyperparameter space is fundamentally different in scale \u2014 the simulation setup requires tuning that has no analog in a linear model. The comparison, while imperfect, likely produces a conservative estimate for the RL agent. On leakage: the statistics computed are mean and standard deviation of continuous features; for a 12-month dataset, these are essentially population statistics. The marginal contribution of October-December data to these estimates is small, and both models benefit equally from this preprocessing, making it a non-discriminating factor in the comparison."
+    },
+    {
+      "round": 3,
+      "critic": "Even if the leakage affects both models equally, the correct procedure should have been followed \u2014 and the design's explicit justification for not tuning the baseline reveals a motivated reasoning error rather than a principled choice. These combined issues \u2014 asymmetric tuning and preprocessing leakage \u2014 make it impossible to determine whether the RL agent's advantage is genuine or an artifact of comparison conditions.",
+      "defender": "The concerns are legitimate design weaknesses. However, the RL approach is being evaluated in a realistic simulation context where training-set parameterization is the standard \u2014 the comparison still provides evidence about the RL agent's capabilities relative to a simple linear baseline."
+    }
+  ],
+  "all_issues_adjudicated": [
+    "Deliberate asymmetry in tuning effort (RL: 20-config search; baseline: default C=1.0) constitutes a comparison bias that the design defends with circular reasoning.",
+    "Preprocessing transformers fit on full dataset before temporal splitting introduce leakage of test-period statistics."
+  ],
+  "verdict": "critique_wins"
+}

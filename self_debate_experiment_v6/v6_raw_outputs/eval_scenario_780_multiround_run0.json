@@ -1,0 +1,34 @@
+{
+  "case_id": "eval_scenario_780",
+  "condition": "multiround",
+  "run_idx": 0,
+  "num_rounds": 3,
+  "critic_raw": "This RNN vs. logistic regression hospital readmission experiment has a fundamental split strategy contradiction: Section 2 states 'we apply a stratified random sampling approach across all available months' with randomly selected 15% validation and 15% test sets \u2014 this directly contradicts the subsequent acknowledgment that 'patient data contains inherent temporal dependencies.' A random split applied to temporally ordered patient data will allow the model to train on future patient records while predicting past ones \u2014 temporal leakage is guaranteed by this design. Additionally, the primary metric is AUC-ROC, but the model selection criterion for the RNN uses early stopping based on 'validation F1-score does not improve for 5 consecutive epochs' \u2014 again, the optimization target (F1) differs from the evaluation metric (AUC-ROC). This is the same metric inconsistency seen elsewhere. The RNN is described as a bidirectional LSTM, and the same deployment validity concern applies as in similar cases \u2014 during live prediction, the full hospitalization sequence is not yet complete.",
+  "all_issues_raised": [
+    "Split strategy uses stratified random sampling despite acknowledging temporal dependencies \u2014 guarantees temporal leakage by allowing training on future records while testing on past ones.",
+    "Early stopping criterion (F1) differs from primary evaluation metric (AUC-ROC) \u2014 metric inconsistency in model selection.",
+    "Bidirectional LSTM requires complete hospitalization sequence for prediction \u2014 not available in real-time deployment."
+  ],
+  "round_transcripts": [
+    {
+      "round": 1,
+      "critic": "The random temporal split is a critical flaw that the design itself acknowledges ('inherent temporal dependencies') but does not resolve \u2014 it then proceeds with a random split anyway. The F1/AUC-ROC inconsistency repeats a common error. The bidirectional LSTM deployment validity concern applies here.",
+      "defender": "On temporal split: for hospital readmission prediction, the temporal structure of interest is within a patient's hospitalization, not across patients. The prediction target is whether a given patient will be readmitted after discharge \u2014 this is a per-patient event, not a time-series prediction across patients. Random splits of patients (not time points) do not introduce temporal leakage in the traditional sense. On F1/AUC-ROC: the early stopping is a training convergence criterion, not a model selection metric \u2014 stopping when F1 plateaus prevents epoch-level overfitting, while AUC is the final selection criterion. These serve different purposes. On bidirectional LSTM: the design uses complete hospitalization sequences (fixed 168-hour window), and predictions are made at discharge \u2014 the full sequence is available at prediction time."
+    },
+    {
+      "round": 2,
+      "critic": "The 'patient-level random split' argument would be valid if patients only appear once. But for a 36-month dataset with frequent-utilization patients, the same patients may have multiple admissions \u2014 and different admissions of the same patient could end up in train and test, which is a form of patient leakage. The design does not address whether patients with multiple admissions are grouped together. The F1/AUC inconsistency as 'different purposes' is a reasonable reframing but the design should explicitly state this distinction rather than leaving it ambiguous.",
+      "defender": "The multi-admission patient leakage concern is valid and important \u2014 if the same patient's earlier admissions are in training while a later admission is in test, the model may learn patient-specific patterns rather than generalizable features. The design should group all admissions by patient ID before splitting (patient-level holdout). The early stopping vs. model selection distinction is valid and should be clarified in the design documentation."
+    },
+    {
+      "round": 3,
+      "critic": "The multi-admission patient leakage is now acknowledged as a real issue requiring a patient-level split. The temporal structure concern for sequential admissions (patient's trajectory over time) also remains unaddressed. With these acknowledged, the split strategy needs redesign.",
+      "defender": "The patient-level split correction is straightforward and important. Temporal admission sequences within a patient represent a secondary structure that could be analyzed with a temporal split per patient, but this is a refinement beyond the core fix of preventing patient-level leakage."
+    }
+  ],
+  "all_issues_adjudicated": [
+    "Multi-admission patients may have admissions split across train and test \u2014 patient-level grouping required to prevent patient identity leakage.",
+    "Early stopping criterion (F1) differs from primary evaluation metric (AUC-ROC) \u2014 creates selection inconsistency that should be documented."
+  ],
+  "verdict": "critique_wins"
+}

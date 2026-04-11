@@ -1,0 +1,727 @@
+[
+  {
+    "case_id": "eval_scenario_799",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 3,
+    "critic_raw": "The experimental design for this CNN-based anomaly detection system has several meaningful methodological problems worth examining carefully.\n\nFirst and most seriously, the data splitting strategy is inappropriate for time-series IoT sensor data. Using a stratified random split on sequential sensor data destroys temporal ordering. Anomaly detection models trained on future sensor readings will trivially 'predict' past anomalies, creating a form of temporal leakage. The justification given—'representing failure events across all data subsets to maintain the integrity of the static cross-sectional signal'—mischaracterizes this as a cross-sectional problem when it is fundamentally sequential. Equipment health degrades over time; a random split means training samples drawn from late in the sequence (when degradation is advanced) will coexist with test samples drawn from early periods, giving the model access to patterns that would not be available in prospective deployment.\n\nSecond, the primary metric choice—reduction in false positive rate—is problematic in the absence of a corresponding recall constraint. Minimizing false positives is trivially achieved by a model that never flags anything. The design does list 'anomaly detection lead time and precision' as secondary metrics, but without specifying a minimum recall or a combined metric (e.g., F1, or precision at a fixed recall threshold), the optimization target is incomplete and potentially misleading.\n\nThird, the hypothesis tests whether a CNN outperforms a threshold-based baseline, but the baseline description lacks specificity. 'Tuned to match the complexity permitted for each choice' is vague—how are the thresholds tuned? On what data? Threshold-based systems can themselves be quite sophisticated (adaptive thresholds, multivariate thresholds), and the comparison validity depends entirely on whether both systems are evaluated under equivalent conditions.\n\nFourth, the experiment describes hourly aggregation as the feature resolution, but CNNs for time-series anomaly detection typically operate on higher-frequency raw signals to capture transient failure signatures. Aggregating at hourly intervals may smooth away precisely the short-duration precursors that distinguish CNN-based detection from simpler statistics.\n\nFifth, the description mentions 'extensive controls to mitigate confounding effects from seasonal operational variations' but offers no detail on how this is implemented—whether through time-stratified analysis, inclusion of seasonal covariates, or exclusion of specific periods.",
+    "all_issues_raised": [
+      "Stratified random split on temporal IoT data causes temporal leakage; chronological split is required",
+      "Primary metric (false positive rate reduction) is trivially optimizable without a recall constraint",
+      "Baseline threshold system is underdescribed; tuning process and complexity are unspecified",
+      "Hourly aggregation may smooth transient failure precursors that CNNs would otherwise detect",
+      "Seasonal confound controls are mentioned but not operationalized"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "The experimental design for this CNN-based anomaly detection system has several meaningful methodological problems worth examining carefully.\n\nFirst and most seriously, the data splitting strategy is inappropriate for time-series IoT sensor data. Using a stratified random split on sequential sensor data destroys temporal ordering. Anomaly detection models trained on future sensor readings will trivially 'predict' past anomalies, creating a form of temporal leakage. The justification given—'representing failure events across all data subsets to maintain the integrity of the static cross-sectional signal'—mischaracterizes this as a cross-sectional problem when it is fundamentally sequential. Equipment health degrades over time; a random split means training samples drawn from late in the sequence (when degradation is advanced) will coexist with test samples drawn from early periods, giving the model access to patterns that would not be available in prospective deployment.\n\nSecond, the primary metric choice—reduction in false positive rate—is problematic in the absence of a corresponding recall constraint. Minimizing false positives is trivially achieved by a model that never flags anything. The design does list 'anomaly detection lead time and precision' as secondary metrics, but without specifying a minimum recall or a combined metric (e.g., F1, or precision at a fixed recall threshold), the optimization target is incomplete and potentially misleading.\n\nThird, the hypothesis tests whether a CNN outperforms a threshold-based baseline, but the baseline description lacks specificity. 'Tuned to match the complexity permitted for each choice' is vague—how are the thresholds tuned? On what data? Threshold-based systems can themselves be quite sophisticated (adaptive thresholds, multivariate thresholds), and the comparison validity depends entirely on whether both systems are evaluated under equivalent conditions.\n\nFourth, the experiment describes hourly aggregation as the feature resolution, but CNNs for time-series anomaly detection typically operate on higher-frequency raw signals to capture transient failure signatures. Aggregating at hourly intervals may smooth away precisely the short-duration failure precursors that distinguish CNN-based detection from simpler statistics.\n\nFifth, the description mentions 'extensive controls to mitigate confounding effects from seasonal operational variations' but offers no detail on how this is implemented.",
+        "defender": "The critique raises several points, but many overstate the severity of problems or misread the design's intent.\n\nOn temporal leakage: The critique assumes equipment failures are purely temporal degradation processes, but in many manufacturing environments anomalies stem from operational modes, load conditions, and product changeovers that recur cyclically rather than progressing monotonically. In such settings, a stratified split that ensures failure events are represented in all partitions is defensible and may produce more reliable estimates than a chronological split that concentrates all failures in the test window. Whether temporal leakage is actually occurring depends on the specific degradation dynamics, which is an empirical question. The design's acknowledgment of 'cross-sectional signal' suggests the authors have considered this tradeoff.\n\nOn the metric: The critique is technically valid—false positive rate alone is gameable—but the design explicitly lists 'anomaly detection lead time and precision' as secondary metrics. In practice, a model that achieves zero false positives by never flagging anything would have zero lead time, immediately disqualifying it under the secondary metrics. The composite evaluation structure addresses the concern even if imperfectly stated.\n\nOn the baseline: 'Tuned to match the complexity permitted' does indicate equivalent tuning effort. For a threshold system this typically means grid search over threshold values on the validation set, which is standard practice. More specificity would be better, but this is an incompleteness rather than a fatal flaw.\n\nOn hourly aggregation: Whether hourly is appropriate depends entirely on the failure mode. Mechanical failures (bearing wear, thermal degradation) often manifest over hours to days; sub-hourly resolution may add noise rather than signal. The design should justify the aggregation choice relative to the specific failure modes but the choice is not categorically wrong.\n\nOn seasonal controls: Acknowledging that controls exist without fully specifying them is a documentation gap, not a methodological failure. This is addressable."
+      },
+      {
+        "round": 2,
+        "critic": "The defense raises legitimate counter-points on some issues but concedes ground on others and deflects on the most serious one.\n\nOn temporal leakage: The defense argues that cyclical operational patterns might justify a random split, but this misses the core problem. Even if failure modes recur cyclically, the model still needs to generalize to future time points in deployment. A random split allows the model to learn from sensor readings taken after the test-set failures occurred—readings that reflect post-failure maintenance states, updated operational baselines, or adjusted calibration. In industrial IoT, post-maintenance sensor behavior frequently differs from pre-failure behavior, meaning random split training data contains information that is temporally downstream of test-set labels. The 'empirical question' framing the defense offers is precisely the point: the experiment as designed cannot distinguish this leakage from genuine predictive performance. A chronological split would resolve this unambiguously; the random split cannot.\n\nOn the metric: The defense argues that zero lead time disqualifies a null-prediction model. But lead time is listed as a secondary metric with no specified weight or threshold. A model could achieve near-zero false positives by flagging only the most obvious pre-failure signatures (very high signal deviations) while missing subtle early warnings, and still report a non-zero lead time. The design does not establish what minimum lead time is acceptable or how these metrics are jointly optimized. This remains a genuine gap.\n\nOn the baseline: The defense concedes more specificity would improve the design. This is a real incompleteness that affects reproducibility and comparison validity.\n\nOn hourly aggregation: The defense's point that hourly may be appropriate for slow-onset failures is reasonable. This issue is less severe than the others.",
+        "defender": "The critic's second-round critique on temporal leakage deserves a substantive response. The claim that post-maintenance sensor states contaminate training is an empirical claim about a specific data generating process, not a universal property of random splits on cyclic industrial data. The design explicitly covers two years of data with multiple failure events; if the sensor baseline is re-established after each maintenance event, then individual failure cycles are relatively self-contained episodes. In that case, mixing episodes across splits is more analogous to cross-validation on independent events than leaking future information into past predictions. The critic correctly notes we cannot distinguish leakage from genuine performance without further analysis—but this argues for adding a chronological split as a robustness check, not for categorically rejecting the design.\n\nOn the metric composite: The critic correctly identifies that the secondary metrics lack formal thresholds. Adding a minimum acceptable recall or minimum lead time as a hard constraint would resolve this. This is a real gap that should be addressed in the evaluation protocol.\n\nOn the baseline, the defense accepts that more specificity is needed. Stating 'grid search over validation set threshold values with documented search range' would resolve this.\n\nIn summary: temporal leakage is a genuine concern that needs a chronological sensitivity check; the metric structure needs a formal joint optimization criterion or minimum recall floor; the baseline needs more specification. These are addressable protocol improvements rather than fatal design flaws that would invalidate all conclusions."
+      },
+      {
+        "round": 3,
+        "critic": "The defense in round 2 makes a reasonable concession—adding a chronological split as a robustness check would address the leakage concern—but this concession itself confirms that the original design is incomplete. As submitted, the experiment provides no way to distinguish genuine predictive performance from temporal leakage. The defense's 'independent episodes' framing is plausible but untested within the design.\n\nThe metric gap remains: the defense agrees that a minimum recall floor or lead time threshold is needed but the design does not include one. The evaluation as specified can be gamed.\n\nThe baseline specification gap remains acknowledged by the defense.\n\nCore conclusion: the design has three real, agreed-upon gaps—temporal split strategy, metric structure, baseline specification—that require concrete additions to support valid conclusions. The hourly aggregation issue is contextually defensible. The seasonal controls issue is a documentation gap. Both sides agree on the diagnosis; the dispute is whether these are 'addressable' or 'fatal.' For experiment validity, they must be addressed before the experiment runs, not after.",
+        "defender": "Agreed that the three gaps—temporal split robustness check, metric structure, and baseline specification—should be addressed before execution. The design as written is improvable but the core experimental logic (CNN vs threshold system on IoT data with held-out evaluation) is sound. These are protocol additions, not redesign. A chronological holdout as a secondary evaluation, a stated minimum recall floor, and a documented threshold tuning procedure would make the design defensible. The fundamental question—whether CNNs outperform threshold systems on this data—is empirically testable with these additions."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Temporal split strategy requires a chronological robustness check—not fully resolved in current design",
+      "Primary metric lacks minimum recall floor or formal joint optimization criterion",
+      "Threshold baseline tuning procedure is underspecified"
+    ],
+    "verdict": "empirical_test_agreed"
+  },
+  {
+    "case_id": "eval_scenario_801",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 3,
+    "critic_raw": "This experiment testing a transformer model for disease code identification from radiology reports has several methodological concerns worth careful examination.\n\nFirst, the stratified random split is questionable for clinical NLP data collected over two years. Radiology reporting practices, coding standards, and disease prevalence can shift over time—particularly with ICD code version changes, departmental guideline updates, or shifts in patient population. A random split means the model is evaluated on reports from the same time periods it trained on, potentially overfitting to temporal artifacts (specific phrasing conventions, report templates, or coding patterns in use during those years) that would not generalize to future reports. A time-based split would more faithfully simulate deployment conditions.\n\nSecond, the description of label construction is potentially circular: 'each report contains annotated disease codes, which form the labels.' It is unclear whether these annotations were produced independently of the text (e.g., by a coding specialist reviewing clinical history) or were extracted from the reports themselves. If the rule-based keyword extraction baseline is also operating on the same text, there may be significant label-feature correlation that artificially inflates both models' performance and masks the relative comparison.\n\nThird, 10,000 reports is a modest dataset for fine-tuning a transformer on multi-label classification. The number of labels matters here—if there are dozens or hundreds of distinct disease codes, some labels will have very few examples. Macro-F1 weights all labels equally regardless of support, meaning rare codes with only a handful of examples will dominate the metric. The design does not address minimum per-class representation in the training set or how to handle codes with insufficient examples.\n\nFourth, the cross-vendor comparison fairness concern: the transformer is fine-tuned while the rule-based system 'relies on keyword extraction, tuned with equivalent effort for fairness.' Fine-tuning a transformer is a fundamentally different type of effort from tuning keyword lists. Claiming equivalence in 'effort' does not mean equivalence in optimization opportunity.\n\nFifth, AUROC is listed as a secondary metric but is not well-defined for multi-label classification without specifying how it is averaged across labels.",
+    "all_issues_raised": [
+      "Random split on temporally-collected clinical data may not simulate deployment; time-based split preferred",
+      "Label construction method is unclear—possible circularity if codes extracted from same text used as features",
+      "10,000 reports may be insufficient for multi-label classification across many disease codes; rare label handling unaddressed",
+      "Claiming equivalent 'effort' between fine-tuning a transformer and tuning keyword rules is not operationally meaningful",
+      "AUROC is underspecified for multi-label classification"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "This experiment testing a transformer model for disease code identification from radiology reports has several methodological concerns worth careful examination.\n\nFirst, the stratified random split is questionable for clinical NLP data collected over two years. Radiology reporting practices, coding standards, and disease prevalence can shift over time—particularly with ICD code version changes, departmental guideline updates, or shifts in patient population. A random split means the model is evaluated on reports from the same time periods it trained on, potentially overfitting to temporal artifacts that would not generalize to future reports. A time-based split would more faithfully simulate deployment conditions.\n\nSecond, the label construction is potentially circular: 'each report contains annotated disease codes, which form the labels.' If annotations were extracted from the same text used as features, there may be significant label-feature correlation inflating both models' performance.\n\nThird, 10,000 reports is modest for multi-label classification across potentially dozens or hundreds of disease codes. Macro-F1 weights all labels equally regardless of support, meaning rare codes with very few examples dominate the metric. Minimum per-class representation is not addressed.\n\nFourth, claiming 'equivalent effort' between fine-tuning a transformer and tuning keyword rules does not mean equivalent optimization opportunity.\n\nFifth, AUROC is underspecified for multi-label classification without stating the averaging method.",
+        "defender": "The critique raises several valid points, but their severity varies considerably.\n\nOn temporal split: The argument that clinical practice shifts over two years is plausible for long longitudinal datasets, but two years is a short enough window that ICD code version transitions are unlikely to be a major factor (ICD-10 has been stable since 2015 in most US contexts). Radiology report templates do change, but the semantic content of findings is relatively stable. The stratified split is defensible if the stratification accounts for temporal distribution of report types and departments. That said, a time-stratified sensitivity analysis would strengthen the design.\n\nOn label circularity: Radiology report coding in hospital settings is almost universally performed by clinical coders who work from the full medical record, not just the report text. The annotated codes are independent of the report text in standard clinical workflows. The critique's concern is valid in principle but reflects a misunderstanding of how clinical coding works in practice. The design should be more explicit about this, but circularity is unlikely in a standard hospital EHR dataset.\n\nOn 10,000 reports and rare labels: This is a genuine concern. Macro-F1 on rare labels can be unstable and misleading. The design should specify a minimum support threshold below which labels are excluded or grouped, and should report per-class performance alongside aggregate Macro-F1.\n\nOn effort equivalence: The critique is correct that 'equivalent effort' is not operationally meaningful. A fair comparison requires specifying what the rule-based system can access and how its optimization is conducted—not just asserting parity.\n\nOn AUROC multi-label specification: Valid point; macro-averaged AUROC per label with a stated averaging method is needed."
+      },
+      {
+        "round": 2,
+        "critic": "The defense makes reasonable concessions on rare label handling, effort equivalence, and AUROC specification. However, on temporal split and label circularity, the defense's responses deserve further scrutiny.\n\nOn temporal split: The defense argues two years is too short for major ICD version transitions, but the concern is not limited to version changes. Radiologist report phrasing conventions, institution-specific template adoption, and shifts in patient case mix (e.g., post-COVID changes in ICU populations) all constitute temporal non-stationarity that a random split cannot capture. The defense concedes a time-stratified sensitivity analysis would strengthen the design—but this means the current design does not have this protection.\n\nOn label circularity: The defense argues clinical coders work from the full medical record, not just report text. This is correct for billing codes in many settings, but the design specifies 'annotated disease codes' for radiology reports specifically. In many research datasets (including common NLP benchmarks derived from MIMIC), disease codes come directly from structured fields that coders assign partly based on the text. More importantly, if the rule-based keyword baseline is matching keywords in the text against a codebook, and the labels were assigned partly by coders using the same text, then both models have label-feature alignment that is not disclosed in the design. The defense says 'unlikely' but does not resolve the ambiguity.\n\nThe three genuinely conceded gaps—rare label handling, effort specification, and AUROC averaging—remain in the design.",
+        "defender": "On temporal split: I concede that temporal non-stationarity from phrasing and case mix is a real concern, and the design should include a chronological hold-out or at minimum report performance stratified by time period. This is a protocol addition that would resolve the concern.\n\nOn label circularity: The design should explicitly state the annotation provenance—whether codes come from independent coder review of the full chart or from NLP pre-annotation of the report text. If the former, the concern is addressed; if the latter, both models' performance interpretations change significantly. This ambiguity should be resolved in the design.\n\nThe three conceded issues from round 1 remain open. In summary, the design requires: (1) temporal robustness check, (2) explicit annotation provenance statement, (3) rare-label handling protocol, (4) effort equivalence specification, and (5) AUROC averaging method. These are all resolvable additions, not fundamental redesigns."
+      },
+      {
+        "round": 3,
+        "critic": "Both sides have converged on a clear list of five required additions. The defense correctly frames these as protocol additions rather than fatal flaws. However, the annotation provenance gap is more than a documentation issue—its resolution could change the interpretation of results substantially. The remaining gaps are real, acknowledged, and unresolved in the current design.",
+        "defender": "Agreed. The design is viable with the five identified additions. Annotation provenance is the most consequential—if labels were derived from the same text used as features, both the transformer and rule-based models are being evaluated against self-consistent labels rather than independent ground truth, which would require reinterpreting all reported metrics. The other four additions are straightforward protocol improvements."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Temporal split strategy lacks chronological robustness check",
+      "Annotation provenance is ambiguous—potential label-feature circularity unresolved",
+      "Rare label handling under Macro-F1 not addressed",
+      "Effort equivalence between fine-tuning and rule tuning not operationalized",
+      "AUROC averaging method for multi-label not specified"
+    ],
+    "verdict": "empirical_test_agreed"
+  },
+  {
+    "case_id": "eval_scenario_806",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 3,
+    "critic_raw": "This experiment evaluating hierarchical attention for academic abstract generation has significant methodological tensions worth examining.\n\nFirst, there is a fundamental mismatch between the primary evaluation metric and the model selection criterion. The hypothesis claims performance should be 'measured by human evaluation score on clarity and informativeness,' yet model selection uses ROUGE-based tuning on the validation set. ROUGE and human judgments of clarity/informativeness are weakly correlated at best—optimizing ROUGE does not optimize for human-judged quality, and models selected by ROUGE may perform worse on the primary metric than alternatives that were not selected. This creates an evaluation protocol where the model chosen for final test evaluation is not the one that best performs on the stated primary criterion.\n\nSecond, using existing abstracts as labels introduces a normative assumption: that the gold-standard abstract is the 'correct' summary. Academic abstracts are written under specific constraints (word limits, journal conventions, author perspective) and often omit findings that a reader would consider most informative. Evaluating against existing abstracts with ROUGE conflates 'similar to the original abstract' with 'high quality summary.'\n\nThird, the human evaluation protocol is underspecified. 'Human evaluators possessing diverse backgrounds and disciplined grounding' will 'adhere to standardized evaluation parameters'—but the number of evaluators, inter-annotator agreement measurement, annotation guidelines, blind/blinded conditions, and how evaluators are recruited are all unstated. Human evaluation without reported inter-annotator agreement is not reproducible.\n\nFourth, the stratified random split across academic domains is reasonable for this task since paper content is not strongly temporally ordered within a domain, but the design does not address whether the same paper might appear in multiple splits (e.g., if abstracts from preprint versions on arXiv and published versions on PubMed are both included).\n\nFifth, the comparison is against 'traditional extractive summarization' but extractive methods are highly diverse—lead-based, graph-based (TextRank), supervised extractive models. The choice of specific extractive baseline is not specified.",
+    "all_issues_raised": [
+      "Model selection metric (ROUGE) does not align with primary evaluation metric (human judgment); creates selection-evaluation mismatch",
+      "Using original abstracts as gold labels conflates stylistic similarity with summary quality",
+      "Human evaluation protocol is underspecified: no evaluator count, IAA, guidelines, or blinding conditions stated",
+      "Potential paper duplication across splits (arXiv preprint + PubMed published version of same paper)",
+      "Extractive summarization baseline is not specified—highly diverse family of methods"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "This experiment evaluating hierarchical attention for academic abstract generation has significant methodological tensions worth examining.\n\nFirst, there is a fundamental mismatch between the primary evaluation metric and the model selection criterion. The hypothesis claims performance should be measured by human evaluation score, yet model selection uses ROUGE-based tuning. ROUGE and human judgments are weakly correlated; models selected by ROUGE may not be the best on the primary metric.\n\nSecond, using existing abstracts as labels conflates 'similar to the original abstract' with 'high quality summary.'\n\nThird, the human evaluation protocol is underspecified—no evaluator count, inter-annotator agreement, blinding conditions, or annotation guidelines.\n\nFourth, the same paper may appear in both arXiv and PubMed versions, causing cross-split contamination.\n\nFifth, the extractive summarization baseline is not specified—a highly diverse family of methods.",
+        "defender": "The critique identifies real gaps but overstates several of them.\n\nOn ROUGE/human judgment mismatch: This is a genuine and well-documented issue in summarization research. However, the design uses ROUGE for model selection (hyperparameter tuning) and human evaluation as the primary reported metric. This is a common pragmatic compromise—ROUGE is cheap and fast for tuning cycles, while human evaluation is reserved for final comparison. The risk is that ROUGE selection produces a suboptimal configuration for human-judged quality, which is real. The ideal solution is human evaluation on the validation set for final model selection, but this is expensive. Using ROUGE as a proxy with human evaluation as the primary report metric is standard practice in the field, even if imperfect.\n\nOn abstract-as-gold-labels: This is fundamental to the NLP summarization field and not unique to this experiment. The defense cannot eliminate this limitation, but it applies equally to both models, so it does not bias the comparative result.\n\nOn human evaluation protocol: This is a genuine gap. Minimum requirements—at least three evaluators per summary, Krippendorff's alpha or Fleiss' kappa for IAA, blind evaluation where evaluators don't know which system produced which summary, and written guidelines—should be specified.\n\nOn paper duplication: Valid concern. De-duplication by paper DOI or title similarity before splitting would address this.\n\nOn baseline specification: The design should name a specific baseline (e.g., TextRank, or ORACLE extractive). This is a real incompleteness."
+      },
+      {
+        "round": 2,
+        "critic": "The defense makes reasonable concessions on human evaluation protocol, paper duplication, and baseline specification. On the ROUGE/human judgment mismatch, the defense argues this is 'standard practice.' Standard practice in a field can still be a methodological flaw—widespread use of ROUGE-based selection does not mean the selection is valid for the stated human-judgment primary metric. The defense acknowledges the risk is real. This means the experiment as designed could select a model configuration optimized for an irrelevant proxy and report its performance on the primary metric without knowing whether a differently-tuned configuration would perform better.\n\nThe abstract-as-gold-labels point is correctly dismissed as a field-wide limitation applying equally to both models. This is not a differential flaw.\n\nIn summary: the ROUGE/human-judgment selection mismatch is a real and acknowledged flaw that affects the validity of the 'best model' claim; the human evaluation protocol, paper duplication, and baseline specification gaps remain open and conceded.",
+        "defender": "The ROUGE/human-judgment mismatch is a genuine concern for the following reason: if human judges are the primary criterion, then the model's optimal configuration is the one that maximizes human-judged quality, not ROUGE. Using ROUGE for selection introduces a real possibility that the reported model is not the best achievable model, and the magnitude of this gap is unknown without additional validation. The design should add a human-evaluated validation step for final configuration selection, even if only on a small subset. The other three gaps—human evaluation protocol, deduplication, and baseline specification—are protocol additions that should be incorporated."
+      },
+      {
+        "round": 3,
+        "critic": "Both sides agree on four concrete protocol additions needed. The ROUGE/human-judgment mismatch is the most consequential—it means the reported results may not reflect the best achievable human-judged performance. The remaining three are standard research hygiene issues that are straightforwardly addressable.",
+        "defender": "Agreed. Four additions are required: human-evaluated validation step for final configuration selection, full human evaluation protocol specification, paper deduplication before splitting, and named extractive baseline. With these additions, the design is defensible."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "ROUGE-based model selection does not optimize for the stated human-judgment primary metric—best configuration may not be selected",
+      "Human evaluation protocol lacks evaluator count, IAA measurement, blinding, and annotation guidelines",
+      "Paper duplication across arXiv/PubMed not addressed before splitting",
+      "Extractive summarization baseline not specified"
+    ],
+    "verdict": "empirical_test_agreed"
+  },
+  {
+    "case_id": "eval_scenario_811",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 3,
+    "critic_raw": "This dynamic pricing experiment has multiple significant methodological problems.\n\nFirst, the stratified random split is critically inappropriate for this domain. Ride-sharing demand and pricing are strongly temporally autocorrelated—demand patterns on Monday morning are not independent of Sunday evening, and seasonal demand cycles span weeks to months. Using a stratified random split on time-series data creates temporal leakage: the model sees future demand states during training, trivially learning patterns it would not have access to in live deployment. This is not a minor concern; it fundamentally compromises the validity of reported performance metrics.\n\nSecond, the hypothesis is about 'maximizing revenue during peak hours,' but the primary evaluation metric is mean squared error on revenue predictions. These are different objectives. A model could predict revenue accurately while a static pricing strategy maximizes actual revenue (since prediction accuracy and revenue optimization via pricing are not the same problem). The stakeholder goal—revenue maximization—would require either an offline policy evaluation framework or an A/B test, not just prediction MSE.\n\nThird, the baseline is described as 'a linear regression model serving as a static pricing prediction based simply on historical averages.' This is a weak and misleading baseline. The hypothesis compares dynamic vs. static pricing; a meaningful static pricing baseline should be the actual pricing rule currently in use (or a well-calibrated historical average-price strategy), not a linear regression model. Comparing a gradient boosting model against linear regression conflates model complexity with the dynamic/static distinction.\n\nFourth, driver availability is listed as a confound that is 'included as covariates where available.' The hedge 'where available' is significant—driver availability is one of the primary determinants of both pricing and demand in ride-sharing systems. If it is frequently missing, the model's predictions of demand may largely be proxying for unmeasured driver supply constraints.\n\nFifth, the experiment uses one year of 'real-time ride usage data' with peak hour labels but does not address how 'peak hours' are defined or whether the definition is consistent across geographic locations.",
+    "all_issues_raised": [
+      "Stratified random split on temporally-autocorrelated ride-sharing data causes temporal leakage",
+      "MSE on revenue prediction is not equivalent to the stated goal of revenue maximization via pricing",
+      "Baseline conflates model complexity (linear vs. gradient boosting) with dynamic vs. static pricing distinction",
+      "Driver availability confound is only partially available, undermining causal interpretation",
+      "Peak hour definition is unspecified and potentially inconsistent across locations"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "This dynamic pricing experiment has multiple significant methodological problems.\n\nFirst, the stratified random split is critically inappropriate for temporally-autocorrelated ride-sharing data—this creates temporal leakage.\n\nSecond, MSE on revenue predictions is not equivalent to maximizing revenue via pricing, the stated stakeholder goal.\n\nThird, the baseline conflates model complexity with the dynamic/static distinction—linear regression versus gradient boosting is not a test of dynamic vs. static pricing.\n\nFourth, driver availability is only partially available, undermining causal inference.\n\nFifth, peak hour definition is unspecified.",
+        "defender": "The critique identifies genuine concerns, but their practical significance varies.\n\nOn temporal leakage: This is the most serious concern and is well-founded. Ride-sharing demand has daily, weekly, and seasonal cycles that create strong autocorrelation. A random split would mix temporal contexts in ways that inflate apparent performance. A time-series cross-validation or at minimum a chronological holdout is needed. This is a real flaw.\n\nOn MSE vs. revenue maximization: The critique is technically correct. Accurate revenue prediction does not guarantee that the pricing strategy derived from it maximizes revenue—the pricing policy itself (how predictions are converted to prices) is not specified. However, in practice, accurate demand forecasting is the proximate cause of better dynamic pricing. The experiment could be reframed as evaluating forecast accuracy as a prerequisite to pricing optimization, with the understanding that a separate policy evaluation layer is needed. This is a scope limitation, not necessarily a fatal flaw.\n\nOn baseline design: This is a valid critique. A proper dynamic vs. static comparison requires: (1) a dynamic pricing model making real-time adjustments and (2) a static baseline using fixed rates or historical average rates. Using linear regression as the 'static' baseline misframes the comparison.\n\nOn driver availability: Conceded as a limitation. The design should specify what fraction of records have driver availability data and how missingness is handled.\n\nOn peak hour definition: This should be defined explicitly—typically 7-9am and 5-8pm weekdays, or defined by demand quantiles—with consistency across locations."
+      },
+      {
+        "round": 2,
+        "critic": "The defense concedes the temporal leakage issue outright—this is the most serious flaw and remains unresolved in the current design. The defense's reframing of the MSE/revenue gap as a 'scope limitation' is partially reasonable, but the original hypothesis explicitly claims to 'maximize revenue,' not to 'accurately predict revenue.' The experiment as described does not test the stated hypothesis.\n\nThe baseline design flaw is conceded. Using linear regression instead of a rule-based static pricing system means the reported comparison is not between dynamic and static pricing philosophies but between two different model classes.\n\nDriver availability and peak hour definition gaps are conceded.\n\nFour of five issues are conceded; the only dispute is whether the MSE/revenue gap is fatal or scopable. Given that the hypothesis explicitly states revenue maximization as the goal, an experiment that measures prediction accuracy without a policy evaluation layer cannot confirm or disconfirm the hypothesis.",
+        "defender": "On the MSE/revenue distinction: I accept that the hypothesis as stated (maximizing revenue) requires more than prediction accuracy measurement. The experiment tests a necessary condition (better demand forecasting) but not the sufficient condition (better revenue via dynamic pricing). To fully test the hypothesis, the design would need either: (a) a simulated policy evaluation using the learned model to set prices in historical data, or (b) an A/B test in live traffic. Both are substantially more complex than the current design. The design should either scope the hypothesis to 'predicts demand more accurately' or add a policy simulation layer.\n\nThe four other gaps—temporal split, baseline design, driver availability handling, peak hour definition—should all be addressed in the protocol. These together represent substantial protocol shortcomings."
+      },
+      {
+        "round": 3,
+        "critic": "Both sides agree on all five issues. The temporal leakage and hypothesis-metric mismatch are the most severe; together they mean the experiment as designed cannot support the stated claim. The remaining three are real protocol gaps.",
+        "defender": "Agreed. The experiment requires: chronological split, hypothesis reframing or policy simulation layer, revised baseline that uses actual static pricing rules, complete driver availability handling specification, and explicit peak hour definition. With these changes the experiment becomes valid; without them the conclusions are unsupportable."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Temporal leakage from random split on autocorrelated ride-sharing data—chronological split required",
+      "MSE on prediction does not test the stated revenue-maximization hypothesis—policy evaluation layer missing",
+      "Baseline conflates model complexity with dynamic/static pricing distinction",
+      "Driver availability partially missing; handling not specified",
+      "Peak hour definition unspecified"
+    ],
+    "verdict": "critique_wins"
+  },
+  {
+    "case_id": "eval_scenario_809",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 3,
+    "critic_raw": "This experiment comparing transformer-based article recommendation against cosine similarity on keyword matching has several important methodological issues.\n\nFirst, using a stratified random split on a recommendation system dataset with user interaction logs is particularly problematic. User interaction data is inherently temporal—users engage with articles over time, their interests evolve, and click patterns have strong temporal autocorrelation. A random split contaminates the test set with interactions from time periods used in training, simulating a scenario where the system already 'knows' the user's future behavior. In real deployment, the model must recommend articles to users for time periods it has not seen. This is not a cross-sectional signal problem; recommendation systems that ignore temporal ordering produce inflated offline metrics.\n\nSecond, Click-Through Rate (CTR) is described as the primary evaluation metric, but CTR is a relative measure that depends on what items are presented for clicking. In an offline evaluation setting, the system cannot actually present items and observe clicks—instead, it typically relies on held-out interaction logs where the 'relevant' items are those the user clicked in the held-out period. This creates a severe evaluation problem: items the user never saw cannot be labeled as non-relevant, but the cosine similarity baseline and the transformer model likely recommend different sets of items. Standard offline CTR evaluation is only valid when both models recommend from the same candidate set that was actually shown to users.\n\nThird, the experiment states that the transformer is 'fine-tuned' but does not specify the objective. For recommendation, transformers can be fine-tuned with contrastive objectives, next-click prediction, or masked item prediction, each of which produces substantially different embedding spaces. The baseline uses keyword-based cosine similarity, which is a retrieval approach, not a learned similarity. These may not be comparable under the same evaluation protocol.\n\nFourth, popularity bias in CTR: popular articles receive more clicks regardless of relevance to specific users. Neither the transformer embedding nor the cosine similarity baseline addresses popularity bias, but the random split may mix users' histories with future popular articles in ways that differentially favor the transformer if it more easily memorizes popularity patterns.",
+    "all_issues_raised": [
+      "Random split on temporal user interaction logs causes temporal leakage and inflates offline recommendation metrics",
+      "CTR as offline evaluation metric is invalid when models recommend different candidate sets",
+      "Transformer fine-tuning objective not specified; recommendation-relevant objectives differ substantially",
+      "Popularity bias in CTR evaluation not addressed"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "This recommendation system experiment has four important methodological issues: temporal leakage from random split on interaction logs; invalid offline CTR evaluation when models recommend different candidate sets; unspecified transformer fine-tuning objective; and popularity bias in CTR.",
+        "defender": "On temporal leakage: The design explicitly states the stratified split is 'justified by the belief that capturing a static cross-sectional signal is pivotal in understanding user engagement over temporal changes.' For an article recommendation system, this is partially defensible: user preferences for certain topics (medicine, computer science) are relatively stable over years, and the primary signal is matching article content to user interest profiles, which is cross-sectional. However, the critic correctly identifies that interaction logs have temporal autocorrelation—users who clicked on topic A yesterday are more likely to click on topic A today—and this creates leakage. A temporal split would better simulate deployment. The design should include a temporal holdout.\n\nOn offline CTR evaluation: This is a well-known problem in recommendation evaluation. The standard solution is to restrict evaluation to items that appeared in the logged data (the 'partial observation' problem). Both models should be evaluated only on the subset of recommendations that overlap with the held-out clicks, or alternatively precision@K and recall@K in a logged evaluation setup should be used instead of raw CTR. The design should specify the evaluation protocol for offline CTR explicitly.\n\nOn fine-tuning objective: Conceded. The design should specify the fine-tuning task (e.g., next-click prediction, contrastive similarity learning on user-article pairs).\n\nOn popularity bias: Valid concern. Both models' CTR scores should be debiased or compared with popularity-controlled metrics like serendipity or catalog coverage."
+      },
+      {
+        "round": 2,
+        "critic": "The defense concedes all four issues, which confirms the design requires substantial additions. On temporal leakage and offline CTR validity, these are not minor protocol additions—the entire evaluation structure needs to be redesigned for the offline recommendation setting. The defense's suggestion to restrict evaluation to overlapping recommendation sets is a partial fix but does not address the fundamental problem that offline evaluation of recommendation systems requires careful counterfactual reasoning about what was not shown to users.\n\nThree of four conceded issues are protocol additions; offline CTR validity requires evaluation redesign.",
+        "defender": "Agreed that the offline CTR evaluation requires more than a protocol addition—it requires adopting an appropriate offline evaluation framework such as inverse propensity scoring (IPS) to correct for exposure bias, or switching to an evaluation metric that is well-defined offline such as NDCG@K on held-out interactions. This is a substantial design change. The temporal split, fine-tuning objective, and popularity bias handling are addressable protocol additions. Together these represent a design that needs significant revision before valid conclusions can be drawn."
+      },
+      {
+        "round": 3,
+        "critic": "Both sides agree the evaluation structure needs redesign (offline CTR), plus three additional protocol additions. The experiment as designed cannot produce valid comparative conclusions.",
+        "defender": "Agreed. The experiment requires an offline evaluation framework redesign (IPS or NDCG@K on logged interactions), temporal split, specified fine-tuning objective, and popularity debiasing. These together constitute substantial pre-execution work."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Temporal leakage from random split on interaction logs—temporal holdout needed",
+      "Offline CTR evaluation invalid for comparing models with different candidate sets—evaluation framework redesign required",
+      "Transformer fine-tuning objective unspecified",
+      "Popularity bias in CTR not addressed"
+    ],
+    "verdict": "critique_wins"
+  },
+  {
+    "case_id": "eval_scenario_701",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 2,
+    "critic_raw": "This sequence model vs. gradient-boosted tree comparison for merchant churn prediction is one of the more rigorously designed cases in this benchmark. However, several issues are worth scrutinizing.\n\nFirst, the experiment defines churn as either formal account closure or '30 consecutive days of post-snapshot inactivity among merchants that had recent pre-snapshot processing activity.' The second component—inactivity—is a behavioral label that depends on future observation. If a merchant's last transaction was on the snapshot date and they never transact again, they would be labeled as churned, but this label cannot be confirmed until 30 days after the snapshot. The design states 'all raw events, aggregates, and labels must be truncated at the snapshot timestamp'—but the inactivity churn label is not truncatable at the snapshot; it requires observing up to 30 days of future non-events. This is standard for churn labeling but should be made explicit: there is a 30-day observational gap needed after each snapshot for label construction.\n\nSecond, the design specifies 'keep all snapshots from a given merchant in only one split so repeated observations do not allow later behavior from the same merchant to inform earlier predictions.' This is correct and important, but it creates an implicit constraint on the split ratio: if the 70/15/15 split is applied by snapshot weeks (chronological) but merchant assignment to splits is also forced, then merchants whose activity spans the split boundaries must be assigned entirely to one split. Depending on merchant tenure distribution, this could substantially reduce effective training data for long-tenured merchants.\n\nThird, PR-AUC is the right primary metric for this imbalanced setting, and the design correctly justifies it. However, reporting 'precision at the team's current outreach quota' as a secondary metric requires knowing and disclosing what that quota is. Without this, the metric is not reproducible.\n\nFourth, the design compares a sequence model on raw 90-day event streams against a gradient-boosted tree on monthly aggregates, but does not evaluate whether the sequence model's gains (if any) come from the sequential structure versus simply having access to finer temporal granularity. A third ablation condition—a gradient-boosted model on the same 90-day window with fine-grained features—would clarify this.",
+    "all_issues_raised": [
+      "30-day inactivity churn label requires post-snapshot observation window; observational gap should be made explicit",
+      "Merchant-split assignment at split boundaries may reduce effective training data for long-tenured merchants",
+      "Precision at outreach quota is not reproducible without disclosing the quota value",
+      "Missing ablation: gradient-boosted model on fine-grained features would distinguish sequence structure benefit from granularity benefit"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "This experiment is well-designed but has four issues: (1) 30-day inactivity label requires explicit post-snapshot observation window; (2) merchant-split boundary assignment may reduce training data; (3) precision at outreach quota is not reproducible without disclosing quota; (4) no ablation distinguishing sequence structure from feature granularity benefit.",
+        "defender": "On the observation window: The critique is correct and this should be explicit. In practice, the design implies a labeling window of snapshot date + 30 days, during which no training or evaluation occurs. Making this explicit (and ensuring snapshots near the end of the evaluation period have complete observation windows) is a documentation improvement that affects data volume calculation but not the validity of the approach.\n\nOn merchant-split boundary assignment: This is a genuine tension in panel data splits. The design's 70/15/15 chronological split with merchant-level assignment is the right approach; the tradeoff is that some merchants near the boundaries are necessarily excluded or entirely assigned to one split, reducing effective training size. This is not a flaw—it is the correct conservative choice—but the resulting effective sample sizes should be reported.\n\nOn precision at outreach quota: Agreed. The quota value must be disclosed for reproducibility. Alternatively, a precision-recall curve can be reported and the operating point marked.\n\nOn the ablation: This is a fair scientific point. Without a fine-grained tabular ablation, the experiment conflates the benefit of sequential modeling with the benefit of finer-resolution features. The baseline as designed (monthly aggregates) differs from the proposed model (90-day raw events) in both structure and resolution. An additional baseline—gradient-boosted model on 90-day fine-grained aggregates—would clarify the source of any observed lift."
+      },
+      {
+        "round": 2,
+        "critic": "The defense concedes all four points, which is appropriate given the design quality. Issues 1 and 2 are documentation/operational clarifications; issue 3 requires disclosing the quota; issue 4 is a scientific validity concern that affects the interpretability of conclusions. The defense correctly identifies that the ablation is the most consequential gap—without it, any observed lift from the sequence model cannot be attributed to sequential structure specifically.",
+        "defender": "Agreed on all four. The most important addition is the ablation baseline—without it the experiment tests 'sequence model with high-resolution features' vs. 'tree with monthly aggregates,' which confounds model architecture with feature resolution. Adding a 'tree with 90-day fine-grained features' condition would make the comparison interpretable. The other three are protocol additions that should be incorporated before execution."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Observation window for inactivity churn label should be made explicit in the protocol",
+      "Merchant split boundary handling may reduce effective training data—should be reported",
+      "Precision at outreach quota requires disclosed quota value for reproducibility",
+      "Missing ablation: granularity vs. sequential structure confounded in current two-condition design"
+    ],
+    "verdict": "empirical_test_agreed"
+  },
+  {
+    "case_id": "eval_scenario_814",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 3,
+    "critic_raw": "This experiment comparing BERT to lexicon-based sentiment analysis for travel customer satisfaction has several methodological concerns.\n\nFirst, the stratified random split justification is problematic. The design states it is 'justified by the hypothesis that no strong temporal pattern underlies the sentiment data.' This is an empirical claim asserted without evidence—online travel review sentiment is likely to have temporal patterns related to platform changes, seasonal travel trends, COVID-19 impacts (given data covers five years), and evolving user demographics on TripAdvisor and Booking.com. The design should either empirically verify this assumption or use a temporal holdout as a robustness check.\n\nSecond, using Accuracy as the primary metric for customer satisfaction prediction is inappropriate given that the design explicitly acknowledges labels are binary and derived from user ratings 'combined with manual or semi-automated sentiment annotations.' Binary classification accuracy is sensitive to class balance—if 80% of reviews are positive, a model predicting 'satisfied' for all inputs achieves 80% accuracy. The choice of F1, AUROC, or PR-AUC would be more appropriate for this evaluation.\n\nThird, the label construction method—'user ratings combined with manual or semi-automated sentiment annotations'—is vague and methodologically concerning. How are ratings and annotations combined? If a 5-star review with marginally negative text is labeled 'satisfied,' and a 4-star review with positive text is labeled 'dissatisfied,' the labels may be inconsistent. The combination rule should be specified.\n\nFourth, the lexicon-based baseline 'tuning focuses on optimizing lexicon choices and operational thresholds specific to the dataset.' If the lexicon is tuned on labeled data, this is a supervised lexicon adaptation, which is substantially more capable than a standard off-the-shelf lexicon. The comparison may not represent typical lexicon-based system performance.\n\nFifth, reviews from TripAdvisor and Booking.com have platform-specific language conventions and review length distributions that differ substantially. If the split does not account for platform provenance, performance differences between platforms may be confounded with model performance.",
+    "all_issues_raised": [
+      "Temporal split assumption ('no strong temporal pattern') asserted without evidence for five-year travel review dataset",
+      "Accuracy is inappropriate as primary metric for binary classification under potential class imbalance",
+      "Label construction combining ratings and annotations is underspecified; combination rule not stated",
+      "Lexicon tuning on labeled data makes baseline substantially stronger than standard off-the-shelf lexicon comparison",
+      "Platform-specific review conventions (TripAdvisor vs. Booking.com) not accounted for in split"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "Five issues: (1) temporal pattern assumption unverified; (2) accuracy inappropriate for potentially imbalanced binary classification; (3) label construction rule unspecified; (4) lexicon tuning on labeled data makes baseline non-standard; (5) platform differences not controlled in split.",
+        "defender": "On temporal assumption: The design acknowledges this is a hypothesis ('justified by the hypothesis that...') and should include a temporal autocorrelation analysis or a chronological holdout as a sensitivity check. For five years of travel review data spanning COVID-19, a time-based holdout is prudent.\n\nOn accuracy: Agreed. Accuracy is problematic for imbalanced classification. F1 or AUROC should be the primary metric. The design's own acknowledgment of sentiment imbalance makes this choice inconsistent with stated awareness of imbalance issues.\n\nOn label construction: Conceded. The combination rule for ratings and annotations must be specified—e.g., 'satisfied if star rating ≥ 4 AND annotation is positive; dissatisfied if ≤ 3 OR annotation is negative.' Vague labels undermine reproducibility and interpretability.\n\nOn lexicon tuning: This is a subtle but real point. A lexicon 'tuned to the dataset' using labeled data is not a traditional rule-based lexicon—it is a hybrid supervised approach. The comparison should clarify whether the lexicon is off-the-shelf (VADER, SentiWordNet) or tuned, as this changes what claim is being tested.\n\nOn platform differences: Valid. Stratification by platform source in the split, or reporting performance separately by platform, would address this."
+      },
+      {
+        "round": 2,
+        "critic": "All five points are conceded by the defense. The most consequential are the accuracy metric (directly affects reported performance interpretation) and the label construction gap (affects what is being measured). The lexicon tuning point affects what comparative claim is valid. All five require protocol additions before execution.",
+        "defender": "Agreed on all five. Protocol additions: temporal holdout sensitivity check, replace accuracy with F1/AUROC as primary metric, specify label combination rule, clarify lexicon type (off-the-shelf vs. tuned) and state explicitly which comparison is being made, stratify split by platform. These are all pre-execution protocol changes."
+      },
+      {
+        "round": 3,
+        "critic": "Full agreement on all five issues. The design has real gaps that need resolution, particularly the metric choice and label construction, which affect the fundamental validity of reported results.",
+        "defender": "Agreed. The five additions are necessary and together constitute a substantial but manageable set of protocol improvements."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Temporal pattern assumption unverified—temporal holdout needed for five-year review dataset spanning COVID-19",
+      "Accuracy as primary metric is inappropriate under class imbalance—F1 or AUROC required",
+      "Label construction combination rule (ratings + annotations) not specified",
+      "Lexicon baseline tuning on labeled data changes the nature of the comparison—clarification needed",
+      "Platform-specific review conventions not controlled in split"
+    ],
+    "verdict": "critique_wins"
+  },
+  {
+    "case_id": "eval_scenario_794",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 2,
+    "critic_raw": "This SDOH-augmented readmission prediction experiment has a solid baseline design with several important gaps.\n\nFirst, the comparison between models is not properly isolated for causal attribution. The proposed model uses gradient-boosted decision trees with SDOH + clinical features, while the baseline uses logistic regression with clinical features only. This comparison simultaneously varies both the model architecture (GBDT vs. logistic regression) and the feature set (SDOH+clinical vs. clinical only). To test whether SDOH improves prediction, the appropriate comparison is GBDT+SDOH vs. GBDT+clinical only. The current design cannot attribute any observed performance difference to SDOH features specifically.\n\nSecond, the stratified random split on multi-year EHR data ignores temporal clustering at the patient level. Patients with multiple admissions will have all visits in the random pool; a patient's early admissions may be in the test set while later admissions are in training, allowing the model to learn patient-specific patterns that would constitute future leakage. The design should either use patient-level splits (all admissions from a patient in one split) or a chronological split with patient-level consistency.\n\nThird, AUC-ROC is the primary metric but is not directly aligned with the decision-support use case. Hospital readmission prediction models are typically used to flag high-risk patients at discharge for intervention. For this purpose, precision-recall tradeoffs at clinically relevant operating points (e.g., precision at top-5% risk) matter more than aggregate AUC. The design mentions 'supplementary metrics like precision and recall' but does not specify operating points.\n\nFourth, SDOH features (income, education, housing) have well-documented differential availability by patient demographics—lower-income patients may have more complete SDOH records through social work assessments, while higher-income patients may have no SDOH documentation. This creates a systematic missingness pattern that could confound the SDOH benefit signal.",
+    "all_issues_raised": [
+      "Comparison conflates model architecture and feature set—cannot isolate SDOH benefit",
+      "Random split on multi-year EHR allows patient-level temporal leakage",
+      "AUC-ROC not aligned with clinical operating point use case",
+      "SDOH feature availability is systematically biased by patient demographics"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "Four issues: (1) comparison confounds architecture and features; (2) patient-level temporal leakage in random split; (3) AUC-ROC misaligned with clinical operating point use; (4) SDOH availability biased by patient demographics.",
+        "defender": "On architecture/feature confound: This is the most critical flaw and is well-identified. The experiment as described cannot answer whether SDOH improves prediction—it can only answer whether GBDT+SDOH outperforms logistic regression+clinical. Adding a GBDT+clinical condition is essential for a valid conclusion. This is a required design addition.\n\nOn patient-level leakage: Valid concern. For patients with multiple admissions, a random split can place earlier admissions in the test set while later admissions train the model—effectively providing future patient-specific trajectory information. Patient-level split (all admissions from a patient in one partition) with chronological ordering within patients would address this.\n\nOn AUC-ROC vs. clinical operating point: AUC-ROC is appropriate as a primary ranking metric, but for clinical deployment, precision-recall curves with marked operating points (e.g., top decile precision) are more actionable. Adding precision at top-10% risk as a secondary metric with clinical justification would address this.\n\nOn SDOH availability bias: This is a real and subtle confound. If SDOH data is systematically more complete for high-risk or low-income patients, the model may appear to benefit from SDOH features when it is actually benefiting from an indirect signal of social work assessment intensity (which correlates with clinical complexity). This should be analyzed explicitly—reporting SDOH benefit stratified by data completeness level."
+      },
+      {
+        "round": 2,
+        "critic": "All four issues are conceded. The architecture/feature confound is the most critical—without adding a GBDT+clinical condition, the study cannot support its stated hypothesis. The patient-level leakage is also a real threat to validity. The other two are protocol improvements.",
+        "defender": "Agreed. Required changes: (1) add GBDT+clinical-only condition as a proper control for the SDOH benefit; (2) patient-level chronological split; (3) precision at operating point as primary clinical metric alongside AUC; (4) SDOH completeness stratification analysis. With these additions the design is valid for its stated hypothesis."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Architecture and feature set confounded—GBDT+clinical condition missing",
+      "Patient-level temporal leakage in random EHR split",
+      "Clinical operating point metric missing",
+      "SDOH availability bias by patient demographics not analyzed"
+    ],
+    "verdict": "empirical_test_agreed"
+  },
+  {
+    "case_id": "eval_scenario_788",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 3,
+    "critic_raw": "This reinforcement learning experiment for grocery inventory management has serious fundamental issues.\n\nFirst, using a stratified random split for a reinforcement learning problem is methodologically inappropriate at a basic level. RL algorithms learn a policy through sequential state-action-reward trajectories. Randomly sampling days from a five-year inventory history breaks the temporal continuity of these trajectories. The agent cannot learn meaningful Q-values if its experience is drawn from temporally disconnected states—it cannot learn, for example, that restocking on Monday prevents stockouts over the following three days. The design's justification ('maintain consistent proportions of stockout and non-stockout days') confuses classification evaluation logic with RL training requirements.\n\nSecond, Q-learning is listed as the RL algorithm, but standard tabular Q-learning is not appropriate for high-dimensional state spaces that include sales velocity, inventory levels, promotional indicators, and seasonal features. The design does not specify whether this is tabular Q-learning (impractical for continuous states) or deep Q-learning (DQN), which are fundamentally different algorithms. This ambiguity makes the experiment non-reproducible.\n\nThird, the heuristic baseline 'relies on expert-defined rules' that are 'equivalent tuning efforts'—but expert-defined rules cannot be tuned the same way as a learned policy. The appropriate baseline for inventory RL is an operations research benchmark such as the Economic Order Quantity (EOQ) model or a vendor-supplied system, not vaguely 'tuned' heuristics.\n\nFourth, 'reducing stockout events' is listed as the primary metric, but the RL model's objective is cumulative reward (which may implicitly trade off stockouts against holding costs and waste). If the reward function does not align with the evaluation metric, the RL agent may minimize reward-based stockouts while the evaluation counts stockouts differently.\n\nFifth, 'a three-month evaluation period' is mentioned as the scope, but the model trained on five years of data and evaluated on three months is a reasonable design if the three months are the chronological holdout. However, with a random split, this temporal structure is lost.",
+    "all_issues_raised": [
+      "Stratified random split breaks RL trajectory continuity—Q-learning requires sequential state transitions",
+      "Q-learning algorithm unspecified (tabular vs. deep); tabular Q-learning inappropriate for continuous states",
+      "Heuristic baseline is vaguely described; EOQ or established OR baseline should be used",
+      "Reward function not specified; potential misalignment with stockout evaluation metric",
+      "Three-month evaluation period loses temporal structure with random split"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "Five issues: (1) random split breaks RL trajectory continuity; (2) Q-learning unspecified as tabular vs. deep; (3) heuristic baseline lacks specificity; (4) reward function not specified; (5) temporal evaluation structure lost with random split.",
+        "defender": "On trajectory continuity: This is the most fundamental critique and is correct. Reinforcement learning for sequential decision-making requires temporally ordered experience. The design's use of a stratified random split treats inventory as a classification problem rather than a sequential control problem. The appropriate approach is either: (a) train the RL agent on a historical simulation environment constructed from the first N years of data, validate on a held-out period, and evaluate on a final holdout; or (b) use an offline RL framework (e.g., conservative Q-learning, behavior cloning) that explicitly handles non-sequential historical data. This is a fundamental design change, not a protocol addition.\n\nOn Q-learning specification: Conceded. For continuous or high-dimensional state spaces, DQN or PPO would be appropriate; tabular Q-learning would not. The algorithm must be specified.\n\nOn the baseline: EOQ or an established OR model would be a more defensible baseline. The current 'expert heuristics' description is too vague.\n\nOn reward function: The reward function is the core design element for any RL system. 'Reducing stockout events' as a metric does not specify what the reward signal is—does the agent receive a reward of -1 per stockout? -cost of stockout? This determines what the agent learns. The reward function must be stated.\n\nOn temporal evaluation: Agreed. With a random split, a 'three-month evaluation' is incoherent—the test set is randomly distributed across five years."
+      },
+      {
+        "round": 2,
+        "critic": "The defense concedes all five issues. The trajectory continuity problem is confirmed as requiring a fundamental design change—not a protocol addition. The experiment as described cannot run a valid RL training process. This is a severe flaw.",
+        "defender": "Agreed. The experiment requires a complete redesign of the training/evaluation framework around temporal sequential data before any results can be trusted. The four additional issues—algorithm specification, baseline, reward function, and temporal evaluation—are also real and unresolved. The core RL methodology is broken in the current design."
+      },
+      {
+        "round": 3,
+        "critic": "Both sides agree: the fundamental RL methodology is broken. The experiment requires redesign before execution. The five issues are real and collectively make the current design unsuitable for drawing valid conclusions.",
+        "defender": "Agreed. Five required design changes: sequential simulation-based training environment, specified RL algorithm (DQN or PPO for continuous states), established OR baseline, explicit reward function, and chronological holdout for evaluation."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Random split breaks RL trajectory continuity—fundamental design flaw requiring redesign",
+      "Q-learning algorithm type unspecified; tabular inappropriate for continuous states",
+      "Heuristic baseline underspecified; EOQ or OR model needed",
+      "Reward function not specified; misalignment with evaluation metric possible",
+      "Temporal evaluation period loses coherence with random split"
+    ],
+    "verdict": "critique_wins"
+  },
+  {
+    "case_id": "eval_scenario_820",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 3,
+    "critic_raw": "This fraud detection experiment claiming to use financial news articles to improve transaction fraud detection has multiple fundamental methodological problems.\n\nFirst and most critically, the core premise has a potential temporal leakage problem embedded in the feature design. Financial news articles are linked to transactions by 'datetime association'—meaning the model incorporates news published at the time of the transaction. In practice, for real-time fraud detection, news from the same day as a transaction would be available, but the experiment uses three years of data with a random split. If a fraudulent transaction cluster occurred during a specific news event (e.g., a known scam exploiting a news story), the model can learn this association from both training and test samples simultaneously under a random split, because those news events would appear in both partitions.\n\nSecond, the decision tree baseline is a weak and inappropriate comparator. Decision trees are rarely used as production fraud detection models and are not representative of the strongest tabular methods. Gradient-boosted trees (XGBoost, LightGBM) or random forests represent the state of the art in tabular fraud detection and should be the baseline. A decision tree is cherry-picked to make the transformer look more competitive.\n\nThird, 'a combination of accuracy and False Positive Rate' as the primary metric is ill-defined. These are two separate metrics and must be combined with a specified weighting or threshold. For fraud detection specifically, the standard metrics are precision-recall AUC or F1 at a defined operating threshold, because fraud rates are typically very low (the design implies 1M transactions with an unspecified fraud rate). Accuracy at very low fraud rates is dominated by the majority class.\n\nFourth, the theoretical basis for using financial news to improve transaction-level fraud detection is not well-established. Fraud is typically driven by individual behavioral signals, network topology (device fingerprinting, velocity, account age), and contextual transaction features—not by macro-level news sentiment. The design should justify why news-based signals would add value beyond strong transactional features.\n\nFifth, the claim that 'temporal autocorrelation in transaction data is weak' (used to justify random split) is empirically false for fraud detection—fraud often clusters in time due to organized fraud rings operating during specific windows.",
+    "all_issues_raised": [
+      "Temporal leakage in news-transaction linkage under random split for clustered fraud events",
+      "Decision tree is a weak and unrepresentative baseline for tabular fraud detection",
+      "Primary metric is ill-defined combination of accuracy and FPR; inappropriate for imbalanced fraud data",
+      "Theoretical basis for news-based features in transaction fraud detection not established",
+      "Assumption of weak temporal autocorrelation is empirically false for organized fraud"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "Five issues: (1) temporal leakage from news-event clustering under random split; (2) decision tree baseline too weak; (3) ill-defined combined metric inappropriate for imbalanced fraud data; (4) news features lack theoretical basis for transaction-level fraud; (5) temporal autocorrelation assumption is false for organized fraud.",
+        "defender": "On temporal leakage: The concern is valid. If fraud clusters around specific news events and a random split distributes these clusters across training and test, the model effectively trains and evaluates on the same fraud-news correlation. A chronological split would prevent this. The design's assertion of 'weak temporal autocorrelation' for transaction data is particularly wrong for fraud detection, where fraud rings operate in bursts. This requires a fundamental change to a chronological split.\n\nOn the baseline: Conceded. Decision trees are not representative of tabular fraud detection state of the art. XGBoost or LightGBM is the appropriate baseline—not a decision tree. The current design would produce an artificially favorable comparison for the transformer model.\n\nOn the metric: Conceded. Accuracy is dominated by the majority class in fraud detection. PR-AUC or F1 at a specified operating threshold is the correct primary metric. 'A combination of accuracy and FPR' is not operationally defined.\n\nOn theoretical basis: This is a legitimate scientific skepticism point. The hypothesis that macro-level financial news (market events, regulatory announcements) affects individual transaction-level fraud probability is non-obvious and not established in the fraud detection literature. The design should cite precedent or provide a specific mechanism.\n\nOn temporal autocorrelation: Conceded. This is empirically well-documented in fraud detection literature."
+      },
+      {
+        "round": 2,
+        "critic": "The defense concedes all five issues. The temporal leakage and baseline selection are the most severe—together they mean reported performance metrics would be inflated and the comparison unfavorable to the stronger baseline. The metric issue directly affects what performance numbers are reported and interpreted. The theoretical basis gap and temporal autocorrelation assumption are well-founded critiques. This experiment as designed would produce unreliable conclusions.",
+        "defender": "Agreed. Five required changes: chronological split (resolves temporal leakage and autocorrelation issues), replace decision tree with XGBoost/LightGBM baseline, replace accuracy+FPR with PR-AUC as primary metric, add theoretical justification or literature citation for news-based fraud features. These are all substantive changes. Without them, results would be misleading."
+      },
+      {
+        "round": 3,
+        "critic": "Full agreement. The experiment is not executable as designed for valid conclusions. All five changes are required.",
+        "defender": "Agreed on all five. This is a significant redesign, particularly the baseline and metric, which require changes before any data analysis."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Temporal leakage from news-fraud event clustering under random split",
+      "Decision tree baseline too weak; XGBoost/LightGBM should be used",
+      "Primary metric (accuracy + FPR combination) ill-defined and inappropriate for imbalanced fraud data",
+      "Theoretical basis for news-based features in transaction fraud not established",
+      "Temporal autocorrelation assumption empirically false for organized fraud"
+    ],
+    "verdict": "critique_wins"
+  },
+  {
+    "case_id": "eval_scenario_786",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 2,
+    "critic_raw": "This RNN vs. logistic regression comparison for hospital readmission prediction has several notable issues.\n\nFirst, the stratified random split is problematic for EHR time-series data. Patients have multiple visits over three years; a random split will place some of a patient's early visits in the test set and later visits in training, allowing the model to learn patient-specific trajectories using future information. The design acknowledges 'cross-sectional predictive signals are primary, assuming temporal autocorrelation effects are weak'—but for hospital readmissions, readmission risk is strongly correlated within a patient's trajectory (multiple readmissions suggest a high-risk patient). A patient-level split is required.\n\nSecond, the comparison conflates model architecture with feature representation. The RNN uses 'temporally encoded visit sequences'; the logistic regression uses 'demographic and clinical features.' If the RNN simply has access to more complete visit history (which logistic regression does not), any performance difference could be due to information asymmetry rather than model architecture. A logistic regression trained on the same feature set (including visit history features) should be included as a control.\n\nThird, AUROC is the primary metric, but stratification is done 'by hospital' rather than properly accounting for multi-site clustering. If some hospitals have consistently higher readmission rates due to patient population differences, AUROC at the aggregate level may be driven by hospital-level effects rather than patient-level prediction quality. Within-hospital AUROC should be reported.\n\nFourth, the dataset has '10,000 patient visits' but the unit of prediction is visits, not patients. If there are significantly fewer than 10,000 unique patients (e.g., 5,000 patients with an average of 2 visits each), the effective test set size is smaller than it appears, particularly after a stratified split.",
+    "all_issues_raised": [
+      "Random split on multi-visit EHR data causes patient-level temporal leakage",
+      "Feature set asymmetry between RNN and logistic regression confounds architecture comparison",
+      "AUROC driven by hospital-level effects; within-hospital AUROC should be reported",
+      "Unit of prediction is visits, not patients; effective sample size may be smaller than stated"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "Four issues: (1) patient-level temporal leakage from random split; (2) feature set asymmetry confounds architecture comparison; (3) hospital-level effects drive aggregate AUROC; (4) visit vs. patient unit of analysis reduces effective sample size.",
+        "defender": "On patient-level temporal leakage: Agreed. Patient-level split (all visits from a given patient in one partition) is required. The current design's assumption that temporal autocorrelation is weak is incorrect for patients with chronic conditions, which are the explicit target population. This is a required protocol change.\n\nOn feature asymmetry: Valid concern. The comparison should include logistic regression on visit-sequence features (aggregated counts, time-since-last-visit, visit frequency) to isolate whether the RNN adds value beyond information access. The current design confounds feature richness with model expressiveness.\n\nOn hospital-level AUROC: Valid. Aggregate AUROC across multi-site data is confounded by inter-hospital heterogeneity. Within-hospital AUROC, or a mixed-effects model approach, would give a cleaner estimate of patient-level discrimination.\n\nOn visit vs. patient unit: Valid operational point. The design should report both the number of unique patients and total visits, and sample size calculations should be based on the number of independent patients, not the number of visits."
+      },
+      {
+        "round": 2,
+        "critic": "All four issues are conceded. The patient-level leakage and feature asymmetry are the most consequential—together they mean neither the split nor the comparison is valid for the stated hypothesis. The AUROC and sample size issues are protocol improvements.",
+        "defender": "Agreed. Required changes: patient-level split, logistic regression on visit-sequence features as additional control, within-hospital AUROC reporting, and sample size reporting in patient units. With these changes, the design supports its stated hypothesis."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Patient-level temporal leakage from random EHR split—patient-level split required",
+      "Feature asymmetry between RNN and logistic regression confounds architecture vs. information access",
+      "Hospital-level effects confound aggregate AUROC",
+      "Visit vs. patient unit reduces effective sample size below stated numbers"
+    ],
+    "verdict": "empirical_test_agreed"
+  },
+  {
+    "case_id": "eval_scenario_817",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 2,
+    "critic_raw": "This ensemble method vs. rule-based system comparison for oil and gas equipment failure prediction has several important methodological concerns.\n\nFirst, the stratified random split is inappropriate for time-series sensor data from industrial equipment. Equipment health is a temporal process—sensor readings from one day are highly correlated with readings from adjacent days. A random split introduces temporal leakage: training samples from after a failure event will be mixed with test samples from before the same failure, allowing the model to learn post-failure sensor signatures that would not be available during prospective deployment. A chronological split with a minimum buffer between training and test periods is needed.\n\nSecond, the rule-based baseline 'reflects baseline heuristic decisions that can oversimplify real-time complexities.' This characterization is not a description—it is an assertion that the baseline is weak. For this comparison to be meaningful, the specific rule-based system (e.g., vendor-defined alarm thresholds, API thresholds for the specific equipment type) should be named and documented. 'Classic rule-based systems' is too vague to reproduce.\n\nThird, F1-score as the primary metric requires specifying the operating threshold at which precision and recall are computed. In equipment failure prediction with rare failures, the optimal threshold on the validation set may not transfer to the test set. AUROC or PR-AUC would be more stable threshold-independent metrics.\n\nFourth, the design mentions 'cross-validation on the validation set for calibration' but does not specify how this relates to the primary train/validation/test split. Cross-validation within the validation set could reintroduce temporal leakage if implemented as random k-fold.\n\nFifth, 'multisource sensors capturing variable operational states from numerous sites over an extensive timescale' suggests substantial site-to-site variability in failure modes and sensor calibration. The design does not address whether the model is evaluated on seen or unseen sites, which substantially affects the generalization claim.",
+    "all_issues_raised": [
+      "Random split causes temporal leakage for temporally-correlated equipment sensor data",
+      "Rule-based baseline is vaguely described; specific vendor/standard threshold system should be named",
+      "F1-score requires threshold specification; AUROC/PR-AUC more appropriate for rare failure events",
+      "Cross-validation on validation set may reintroduce temporal leakage if implemented as random k-fold",
+      "Site-to-site variability not addressed; seen vs. unseen site generalization not specified"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "Five issues: (1) temporal leakage from random split; (2) vague rule-based baseline; (3) F1 requires threshold specification; (4) cross-validation within validation set may leak; (5) site generalization not addressed.",
+        "defender": "On temporal leakage: Agreed. For sensor-based equipment failure prediction, temporal autocorrelation is high—adjacent readings are highly correlated and failure precursors unfold over hours to days. A random split would place pre-failure and post-failure readings in both training and test sets, creating leakage. A chronological split with a gap period (to prevent the model from seeing the immediate pre-failure state in training while evaluating on failure detection) is required.\n\nOn the baseline: Conceded. The specific rule-based system should be named—typically vendor-defined alarm limits, API standards (e.g., ISO 13373 for vibration monitoring), or facility-specific operating limits. Without this, the comparison is not reproducible.\n\nOn F1 and threshold: Agreed. F1 at an unspecified threshold is not a complete metric specification. For rare failure events, AUROC or PR-AUC with a specific operating point analysis is preferred.\n\nOn cross-validation within validation: This is a valid concern. If cross-validation is implemented as random k-fold within the chronological validation set, it reintroduces temporal leakage. Rolling-origin cross-validation is the appropriate method for temporal data.\n\nOn site generalization: Valid. If some sites appear in both training and test sets, the model may learn site-specific failure signatures. If the claim is about generalization to new sites, a site-holdout evaluation is needed."
+      },
+      {
+        "round": 2,
+        "critic": "All five issues conceded. Temporal leakage and site generalization are the most consequential. The design requires: chronological split with gap, named baseline, AUROC/PR-AUC primary metric, rolling-origin cross-validation, and specified site-generalization evaluation.",
+        "defender": "Agreed on all five. These are all resolvable but require concrete protocol changes before execution."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Temporal leakage from random split—chronological split with gap required",
+      "Rule-based baseline underspecified—specific vendor/standard system needed",
+      "F1 threshold unspecified; AUROC/PR-AUC more appropriate for rare failures",
+      "Cross-validation within validation set may leak—rolling-origin CV needed",
+      "Site generalization not specified; seen vs. unseen site holdout needed"
+    ],
+    "verdict": "empirical_test_agreed"
+  },
+  {
+    "case_id": "eval_scenario_791",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 2,
+    "critic_raw": "This RNN with attention vs. logistic regression comparison for hospital readmission prediction has important methodological issues.\n\nFirst, the stratified random split is inappropriate for sequential patient data. The design acknowledges 'temporal autocorrelation is sufficiently weak' but for patients with chronic conditions requiring readmission prediction, this assumption is questionable—patients with prior readmissions are disproportionately likely to be readmitted again. A random split places a patient's various admissions across splits, allowing the model to learn from future admissions of the same patient when predicting earlier ones. A patient-level split is required.\n\nSecond, the comparison conflates feature richness with model architecture. The RNN uses 'sequential interactions within patient data' while logistic regression uses 'clinical and demographic information, alongside summarized statistics of prior admissions.' If 'summarized statistics of prior admissions' is different from the full sequence used by the RNN, then the comparison conflates model type with information access. A properly controlled comparison would give both models access to the same information in different representations.\n\nThird, recall is the primary metric. Optimizing purely for recall leads to degenerate solutions (flag all patients as high-risk). The design mentions F1, precision, and AUROC as supportive metrics, but model selection is based on 'recall'—this could select a model with very low precision. A combined metric (F1 or AUROC) or a specified minimum precision threshold should guide selection.\n\nFourth, 'demographic and hospital identifiers' are included as features to account for confounds, but including hospital identifiers as features in the model means the model is learning hospital-specific patterns. This is fine for within-hospital deployment but limits generalizability to new hospitals. The design should clarify whether the intent is within-hospital or cross-hospital generalization.",
+    "all_issues_raised": [
+      "Random split causes patient-level temporal leakage for multi-admission patients",
+      "Feature richness confounds architecture comparison between RNN and logistic regression",
+      "Recall as primary optimization metric is degenerate without minimum precision constraint",
+      "Hospital identifiers as features limits cross-hospital generalizability"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "Four issues: (1) patient-level temporal leakage; (2) feature asymmetry confounds comparison; (3) recall optimization is degenerate without precision floor; (4) hospital identifier features limit generalizability.",
+        "defender": "On patient-level leakage: Agreed. Patient-level split with all admissions from a given patient in one partition is required for chronic condition patients. The 'weak temporal autocorrelation' assumption is incorrect for readmission patients who have established high-risk profiles.\n\nOn feature asymmetry: Valid. The logistic regression should have access to the same information as the RNN, represented as engineered features (visit count, time since last admission, diagnosis diversity). Without this, the comparison tests information access, not model architecture.\n\nOn recall metric: Conceded. Recall as a single primary metric for model selection is degenerate—it can be maximized by labeling everything positive. Model selection should use F1 or AUROC, with recall and precision reported separately at clinically meaningful thresholds.\n\nOn hospital identifiers: The design should clarify deployment scope. If within-hospital deployment is intended, hospital identifiers are appropriate features. For cross-hospital generalization, they should be excluded and holdout evaluation on unseen hospitals should be performed."
+      },
+      {
+        "round": 2,
+        "critic": "All four issues conceded. Recall as primary metric and patient-level leakage are the most consequential. The four required changes are: patient-level split, aligned feature set for logistic regression, F1/AUROC as primary metric, and clarification of deployment scope with appropriate hospital identifier handling.",
+        "defender": "Agreed on all four. These are all pre-execution protocol changes that are straightforward to implement."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Patient-level temporal leakage—patient-level split required",
+      "Feature asymmetry between RNN and logistic regression—aligned feature sets needed",
+      "Recall as primary metric is degenerate without precision floor",
+      "Hospital identifier features limit cross-hospital generalizability—deployment scope needs clarification"
+    ],
+    "verdict": "empirical_test_agreed"
+  },
+  {
+    "case_id": "eval_scenario_805",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 3,
+    "critic_raw": "This deep reinforcement learning experiment for retail inventory management has fundamental methodological problems.\n\nFirst, as with any RL experiment, the stratified random split is incompatible with reinforcement learning's sequential nature. A DRL agent learns by experiencing state-action-reward sequences; randomly sampling days from two years of data destroys the causal structure of inventory decisions. An agent trained on random day samples cannot learn that restocking decisions today affect stockout risk tomorrow. The design acknowledges 'temporal autocorrelation is weak, requiring further validation'—but then proceeds without the validation. This is a known gap that should disqualify the design from execution as specified.\n\nSecond, the design says 'deep reinforcement learning framework selected for its capacity to discover optimal inventory policies autonomously' but does not specify which DRL algorithm is used (DQN, PPO, SAC, TD3). Different algorithms have substantially different sample efficiency, stability, and suitability for continuous vs. discrete action spaces. Without specification, the experiment is not reproducible.\n\nThird, the reward function is not specified. The primary metric is 'reducing stockout rates,' but the DRL agent's behavior is determined by its reward signal, which may also penalize holding costs or ordering frequency. If the reward function does not align with the evaluation metric, the agent may learn a policy that achieves different objectives than those being evaluated.\n\nFourth, the rule-based baseline is described as 'appropriately tuned to manage similar inventory costs'—but what 'similar inventory costs' means is not defined. An EOQ model, a reorder-point system, or a software-defined vendor-managed inventory rule would be more specific and defensible comparators.\n\nFifth, the experiment claims a 'six-month evaluation period' but trains on two years of random samples. How the six-month evaluation period is structured within the random split is unclear—it may not correspond to any coherent temporal window.",
+    "all_issues_raised": [
+      "Random split incompatible with RL sequential learning—fundamental design flaw",
+      "DRL algorithm not specified; different algorithms have substantially different properties",
+      "Reward function not specified; potential misalignment with stockout evaluation metric",
+      "Rule-based baseline vaguely described; specific OR model needed",
+      "Six-month evaluation period incoherent within random split"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "Five issues: (1) random split incompatible with RL; (2) DRL algorithm unspecified; (3) reward function not specified; (4) rule-based baseline vague; (5) six-month evaluation period incoherent in random split.",
+        "defender": "On random split and RL: The design acknowledges this tension ('assumes temporal autocorrelation is weak, requiring further validation'). This self-awareness is notable but does not resolve the issue. RL training requires sequential trajectories. A workaround would be to use the two years of historical data to construct a simulation environment (a demand model), train the DRL agent in simulation, and evaluate on a chronological holdout. This is a fundamental design change but is the standard approach for offline RL in inventory management.\n\nOn algorithm specification: Conceded. For continuous state/action spaces (which inventory management involves), SAC or PPO would be appropriate. For discretized actions, DQN. The algorithm must be specified.\n\nOn reward function: Conceded. The reward function is the core design element and must be stated explicitly—e.g., r = -stockout_cost - holding_cost - order_cost, with specified cost parameters.\n\nOn baseline: Conceded. EOQ or a reorder-point system with specified parameters is a reproducible baseline.\n\nOn six-month evaluation: Agreed. With a random split, a 'six-month evaluation period' is meaningless. The evaluation should be the chronological holdout period."
+      },
+      {
+        "round": 2,
+        "critic": "All five issues conceded. The random split is confirmed as incompatible with RL—this requires redesign, not protocol addition. The algorithm, reward function, and baseline gaps are also all real and conceded. Together these constitute a design that cannot be executed as described.",
+        "defender": "Agreed. The design requires: simulation-based RL training environment (not random split), specified DRL algorithm with hyperparameters, explicit reward function with cost parameters, named OR baseline, and chronological holdout evaluation. These together represent a substantial redesign."
+      },
+      {
+        "round": 3,
+        "critic": "Full agreement on all five issues. The experiment is not executable as designed. Redesign is required before execution.",
+        "defender": "Agreed. Five required changes constitute a redesign of the training methodology and evaluation framework."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Random split incompatible with RL sequential learning—redesign required",
+      "DRL algorithm unspecified",
+      "Reward function not specified—misalignment with evaluation metric possible",
+      "Rule-based baseline vague—specific OR model required",
+      "Six-month evaluation period incoherent within random split"
+    ],
+    "verdict": "critique_wins"
+  },
+  {
+    "case_id": "eval_scenario_800",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 2,
+    "critic_raw": "This RNN vs. logistic regression comparison for hospital readmission risk prediction has several methodological concerns.\n\nFirst, the stratified random split on three years of patient EHR data is problematic. Patients with chronic conditions have multiple admissions; splitting randomly places some admissions in test and others in training for the same patient. The RNN, which processes sequences of diagnoses and treatments, is particularly vulnerable to this leakage—it can learn patient-specific patterns from training admissions that contaminate test predictions for the same patient. A patient-level split is required.\n\nSecond, the design uses recall as the primary metric but states 'to minimize false negatives and better capture high-risk patients.' While the clinical motivation for high recall is sound, using recall alone for model selection leads to degenerate solutions (flag all patients). The design notes precision and AUROC as secondary metrics but selection is recall-driven. A minimum precision constraint or F1-based selection would be more appropriate.\n\nThird, the comparison between RNN on time-stamped sequences and logistic regression on 'aggregate demographic and clinical variables' again conflates architecture with information richness. If the logistic regression does not have access to sequential features, the performance difference cannot be attributed to the RNN's sequential modeling capability.\n\nFourth, 'differing hospital policies are controlled using stratification checks' is vague. Stratification at split time controls for class balance; it does not control for hospital policy confounds. A multi-site analysis requires either including hospital as a covariate, conducting within-hospital analyses, or using a hospital-holdout evaluation.",
+    "all_issues_raised": [
+      "Random split on multi-admission EHR data causes patient-level temporal leakage",
+      "Recall as primary metric is degenerate without minimum precision constraint",
+      "Feature asymmetry between RNN and logistic regression confounds architecture comparison",
+      "Hospital policy confound control is vague and operationally insufficient"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "Four issues: (1) patient-level temporal leakage from random split; (2) recall degenerate without precision floor; (3) feature asymmetry confounds comparison; (4) hospital policy control is vague.",
+        "defender": "On patient-level leakage: Agreed. Patient-level split is required. The 'weak temporal autocorrelation' assumption is incorrect for readmission patients—readmission risk is correlated within patient histories.\n\nOn recall metric: Conceded. Recall-driven model selection without a precision floor is degenerate. F1 at clinically relevant thresholds (e.g., top-20% risk score) should guide selection, with recall reported at those thresholds.\n\nOn feature asymmetry: Valid. The logistic regression baseline should include recency, frequency, and diversity features derived from the same visit sequences the RNN processes. Otherwise the comparison is information access vs. model capacity.\n\nOn hospital policy control: Conceded. 'Stratification checks' does not operationalize hospital-level confound control. Including hospital ID as a covariate and reporting within-hospital AUROC separately are the appropriate implementations."
+      },
+      {
+        "round": 2,
+        "critic": "All four conceded. The patient-level leakage and feature asymmetry are most consequential. The four required changes are pre-execution protocol improvements.",
+        "defender": "Agreed. Four required changes: patient-level split, F1/AUROC-based selection with recall reported at specified thresholds, aligned feature sets for both models, and within-hospital AUROC reporting with hospital as covariate."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Patient-level temporal leakage from random EHR split",
+      "Recall as primary selection metric is degenerate without precision floor",
+      "Feature asymmetry confounds architecture vs. information access",
+      "Hospital policy control vague and insufficient"
+    ],
+    "verdict": "empirical_test_agreed"
+  },
+  {
+    "case_id": "eval_scenario_819",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 2,
+    "critic_raw": "This CNN for vehicle telemetry predictive maintenance has several methodological issues.\n\nFirst, the stratified random split on five years of vehicle telemetry data is inappropriate. Vehicle health is a temporal degradation process; sensor readings from one day are strongly correlated with adjacent days, and pre-failure signatures develop over time. A random split would allow the model to train on post-failure or post-maintenance telemetry while evaluating on pre-failure windows from the same vehicle, creating temporal leakage. A chronological split per vehicle or a fleet-level chronological holdout is required.\n\nSecond, the comparison is between a CNN and a 'traditional linear regression model based on historical data points.' Linear regression is not a standard predictive maintenance baseline. The more appropriate baseline would be a random forest or gradient boosted model on engineered telemetry features, or an LSTM—a linear regression model will not represent the current state of the art in tabular time-series prediction and the comparison will artificially favor the CNN.\n\nThird, the design specifies 'predict the necessity for maintenance before failures occur' but the task is labeled as 'Regression / continuous outcome prediction.' What continuous outcome is being predicted? Time-to-failure, probability of failure within N days, or maintenance urgency score? The prediction target is not specified, which affects both the model architecture choice and the validity of MAE as a metric.\n\nFourth, MAE as the primary metric requires specifying the units and scale of the continuous outcome. MAE on time-to-failure in days has different interpretability than MAE on a normalized urgency score. Without a specified target, MAE comparisons across models are not meaningful.\n\nFifth, 'driver behavior and external conditions are accommodated by including relevant feature inputs' is vague—which specific features capture driver behavior, and how are external conditions represented?",
+    "all_issues_raised": [
+      "Random split causes temporal leakage for vehicle health degradation time-series",
+      "Linear regression baseline is too weak; random forest or LSTM should be used",
+      "Prediction target (continuous outcome) is not specified—time-to-failure vs. urgency score",
+      "MAE is uninterpretable without specified prediction target and scale",
+      "Driver behavior and external condition features are vaguely described"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "Five issues: (1) temporal leakage from random split; (2) linear regression baseline too weak; (3) prediction target unspecified; (4) MAE uninterpretable without specified target; (5) confound feature specification vague.",
+        "defender": "On temporal leakage: Agreed. Vehicle telemetry shows strong temporal autocorrelation, particularly as failure approaches. A chronological split per vehicle (or fleet-level) with a buffer period is required.\n\nOn baseline: Conceded. Linear regression is inappropriate. A gradient-boosted tree on engineered telemetry features would be a more challenging and representative baseline for this domain.\n\nOn prediction target: This is a genuine gap. The design must specify the continuous outcome variable: 'remaining useful life (RUL) in hours,' 'probability of failure within 30 days,' or an ordinal maintenance urgency category. Without this specification, the experiment has no clear target.\n\nOn MAE: Directly follows from the prediction target issue. Once the target is specified, MAE can be given in meaningful units and appropriate scale bounds can be stated.\n\nOn confound features: Conceded. The specific features for driver behavior (e.g., harsh braking frequency, idle time) and external conditions (temperature, road type indicators) should be listed."
+      },
+      {
+        "round": 2,
+        "critic": "All five conceded. The prediction target is most fundamental—without specifying what is being predicted, the entire experiment is undefined. The temporal leakage and baseline weakness are also serious.",
+        "defender": "Agreed. Five required changes: chronological split, gradient boosted tree or LSTM baseline, specified prediction target (e.g., RUL in hours), MAE in units of specified target, and explicit list of confound features. The prediction target specification should be resolved first as it determines all downstream design choices."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Temporal leakage from random split on vehicle health degradation data",
+      "Linear regression baseline too weak for telemetry-based predictive maintenance",
+      "Prediction target (continuous outcome) not specified",
+      "MAE uninterpretable without specified target and scale",
+      "Confound feature specification vague"
+    ],
+    "verdict": "critique_wins"
+  },
+  {
+    "case_id": "eval_scenario_782",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 3,
+    "critic_raw": "This TCN vs. LSTM comparison for ICU patient deterioration prediction has several methodological issues.\n\nFirst, the stratified random split is problematic for ICU time-series data. The design itself acknowledges 'critics may argue that temporal dependencies should guide data partitioning to avoid potential leakage.' For ICU deterioration prediction, a patient's physiological signals deteriorate over their stay—a random split places different time windows from the same patient's stay in training and test simultaneously, allowing the model to observe the patient's post-deterioration state during training while 'predicting' pre-deterioration windows in the test set. A patient-level split with chronological structure within patients is required.\n\nSecond, TCN and LSTM have different inductive biases and are suited to different temporal dependency structures. The choice of which is better for ICU data is genuinely an empirical question, but the comparison should control for parameter count and receptive field. A TCN with receptive field equivalent to the LSTM's effective memory, and matched parameter budgets, would give a more controlled comparison.\n\nThird, the design describes 'both tuned to optimize AUC on the validation set.' For TCNs, the key hyperparameters are kernel size, dilation factors, and number of layers (which determine receptive field); for LSTMs, hidden size, number of layers, and dropout. These are not comparable tuning tasks, but the design should at least specify the search ranges for both.\n\nFourth, AUC on ICU deterioration prediction is appropriate as a ranking metric, but 'patient deterioration' is not defined. Deterioration could mean: transition to mechanical ventilation, sepsis onset, cardiac arrest, or a composite outcome. The precise outcome definition affects both the label construction and the clinical interpretability of reported AUC values.\n\nFifth, nursing notes are listed as a data source alongside vital signs. The design does not specify how nursing notes are processed—whether NLP features are extracted, whether they are excluded, or whether they are used as auxiliary labels. Including unstructured text without a specified processing pipeline introduces substantial variability.",
+    "all_issues_raised": [
+      "Random split causes temporal leakage for within-patient ICU time-series",
+      "TCN vs. LSTM comparison should control for receptive field and parameter count",
+      "Tuning search ranges for TCN and LSTM not specified",
+      "Deterioration outcome (patient deterioration) not defined",
+      "Nursing notes processing pipeline not specified"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "Five issues: (1) temporal leakage from random split within ICU stays; (2) TCN vs. LSTM comparison uncontrolled for receptive field; (3) tuning search ranges unspecified; (4) deterioration outcome undefined; (5) nursing notes processing pipeline missing.",
+        "defender": "On temporal leakage: The design self-acknowledges this criticism. Patient-level split with all time windows from a given patient's stay in one partition is required. For multi-stay patients, a stay-level or patient-level split should be applied.\n\nOn receptive field control: Valid scientific concern. A TCN and LSTM should be compared with equivalent effective temporal horizon (receptive field for TCN = hidden memory for LSTM) to ensure the comparison is about architectural inductive bias rather than temporal reach. This is important for a clean architectural comparison.\n\nOn tuning search ranges: Conceded. Stating specific search ranges (e.g., 'kernel size in {3, 5, 7}, dilation factors {1, 2, 4, 8, 16}, layers in {3, 4, 5}' for TCN; 'hidden size in {64, 128, 256}' for LSTM) is needed for reproducibility.\n\nOn deterioration outcome: Conceded. The outcome must be specified precisely—e.g., 'in-hospital mortality within 24 hours of prediction window' or 'composite deterioration score based on SOFA threshold.' Without this, AUC values are uninterpretable.\n\nOn nursing notes: Conceded. The design should either exclude nursing notes (simplifying the pipeline) or specify an NLP feature extraction procedure (e.g., bag-of-words, clinical BERT embeddings). Using nursing notes without specification introduces a major confound."
+      },
+      {
+        "round": 2,
+        "critic": "All five issues conceded. The outcome definition and temporal leakage are the most consequential—undefined outcomes make the AUC uninterpretable; patient-level leakage inflates apparent performance. The three remaining issues (receptive field control, tuning ranges, nursing notes) are real but addressable protocol additions.",
+        "defender": "Agreed. Five required changes: patient-level split, receptive field-matched comparison, specified tuning search ranges, precise deterioration outcome definition, and nursing notes processing specification. The outcome definition and split strategy are the most critical and should be resolved first."
+      },
+      {
+        "round": 3,
+        "critic": "Both sides agree on all five issues. The experiment as designed has both definitional gaps (outcome undefined) and methodological flaws (temporal leakage) that prevent valid conclusions.",
+        "defender": "Agreed. These five changes must be made before execution. With them, the experiment is viable for testing whether TCN outperforms LSTM on ICU deterioration prediction."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Temporal leakage from random split within ICU patient stays",
+      "TCN vs. LSTM comparison not controlled for receptive field or parameter count",
+      "Tuning search ranges not specified for either model",
+      "Deterioration outcome definition missing",
+      "Nursing notes processing pipeline unspecified"
+    ],
+    "verdict": "empirical_test_agreed"
+  },
+  {
+    "case_id": "eval_scenario_783",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 2,
+    "critic_raw": "This neural network using wearable device data vs. logistic regression using clinical demographics for readmission prediction has several methodological concerns.\n\nFirst, the stratified random split on one year of patient data assumes 'temporal autocorrelation exists' but is justified by 'the primary signal being cross-sectional.' This is an unsupported assumption for wearable device data: heart rate and activity patterns are highly autocorrelated within a patient's recovery trajectory. If a patient has multiple monitoring episodes post-discharge, a random split places different episodes from the same patient in both training and test, leaking patient-specific recovery trajectory information. A patient-level split is required.\n\nSecond, the dataset is described as '10,000 patient records collected over the past year' with 'continuous monitoring data' from wearable devices. This is almost certainly a very small dataset for training a neural network on time-series wearable data. At 10,000 records with continuous monitoring, the effective training set after split is roughly 7,000 patients. For a neural network with temporal components, this is likely insufficient to learn generalizable temporal patterns without substantial regularization or pre-training.\n\nThird, the neural network model architecture is not specified. 'A neural network model, suitable for managing time-series intricacies' could be an LSTM, CNN, transformer, or simple MLP on aggregated statistics. The architecture choice substantially affects the validity of the comparison.\n\nFourth, 'features from wearable devices are derived through aggregation of statistics over specified windows.' If the neural network's input is aggregated statistics (mean heart rate, activity count per day), it is effectively receiving the same kind of summary features as a logistic regression. The comparison then tests the nonlinear modeling capability of the neural network, not its ability to exploit temporal structure. The comparison should be explicit about whether raw sequences or aggregated features are used.\n\nFifth, AUROC is the primary metric, which is appropriate. However, confounders are addressed 'via stratification, especially concerning socioeconomic status'—but socioeconomic status may be correlated with wearable device access (patients who can afford wearables may be systematically different from those who cannot), introducing selection bias that stratification at the split level does not resolve.",
+    "all_issues_raised": [
+      "Random split on wearable monitoring data causes patient-level temporal leakage",
+      "10,000 patient dataset may be insufficient for neural network training on time-series wearable data",
+      "Neural network architecture unspecified; architecture choice affects comparison validity",
+      "If aggregated statistics are used as neural network input, comparison tests nonlinearity not temporal structure",
+      "Wearable device access correlated with socioeconomic status—selection bias not addressed"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "Five issues: (1) patient-level temporal leakage; (2) dataset too small for neural network on time-series; (3) architecture unspecified; (4) aggregated features eliminate temporal comparison; (5) selection bias from wearable device access.",
+        "defender": "On temporal leakage: Agreed. Patient-level split is required. Wearable monitoring data post-discharge is patient-specific and highly autocorrelated.\n\nOn dataset size: This is an empirical concern. 10,000 patients for a wearable-based neural network is on the low end; however, if the neural network uses pre-trained components (transfer learning from larger wearable datasets) or operates on compressed feature representations, it may generalize. The design should at minimum include learning curve analysis to assess whether performance has saturated at this sample size.\n\nOn architecture specification: Conceded. The model architecture must be specified—LSTM, 1D-CNN, or transformer on raw sequences, or MLP on aggregated features. This is fundamental to reproducibility.\n\nOn aggregated vs. raw features: Valid. The design says 'aggregation of statistics over specified windows'—if this is the neural network's input, the comparison is not about temporal structure. The design should clarify whether the neural network receives raw time-series or aggregated features, and if the latter, whether a recurrent or convolutional architecture is even appropriate.\n\nOn selection bias: Valid. Patients with wearable devices are likely systematically different (better health literacy, higher SES, more engaged with healthcare). The logistic regression trained on clinical demographics will not see the same patient population selection as a wearable-dependent model in deployment. This is a deployment generalizability concern that affects the ecological validity of the comparison."
+      },
+      {
+        "round": 2,
+        "critic": "All five conceded. The architecture specification and input feature format are the most fundamental—without them, the experiment is underdefined. Patient-level leakage, dataset size, and selection bias are all real concerns. Required changes: patient-level split, architecture specification, clarification of raw vs. aggregated input, learning curve analysis, and selection bias analysis or restriction of comparison to wearable-equipped patients.",
+        "defender": "Agreed on all five. These changes are needed before execution. The architecture and input format clarification should be the first priority as they define what experiment is actually being run."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Patient-level temporal leakage from random split on wearable monitoring data",
+      "Dataset size may be insufficient for neural network; learning curve analysis needed",
+      "Neural network architecture unspecified",
+      "Aggregated feature input eliminates temporal structure comparison",
+      "Selection bias from wearable device access not addressed"
+    ],
+    "verdict": "empirical_test_agreed"
+  },
+  {
+    "case_id": "eval_scenario_815",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 3,
+    "critic_raw": "This unsupervised anomaly detection vs. threshold-based system comparison for industrial IoT predictive maintenance has several important issues.\n\nFirst, the stratified random split on 12 months of industrial sensor data is inappropriate. Sensor readings from industrial machinery are highly temporally autocorrelated—readings adjacent in time are similar, and fault precursors develop over days to weeks before failure events. A random split places pre-failure and post-failure readings from the same fault event in both training and test sets, leaking the failure signature into the autoencoder's training data. This is particularly problematic for unsupervised anomaly detection: the autoencoder learns a normal-data manifold, but if it trains on some post-fault states (from the random sample), its reconstruction error threshold may be calibrated on abnormal states, inflating apparent performance.\n\nSecond, Mean Time to Failure (MTTF) is listed as the primary evaluation metric, but MTTF for an anomaly detection system is not straightforwardly computable from an autoencoder's outputs. MTTF requires knowing when failures occurred relative to when anomalies were flagged. The design should specify: (a) what counts as an 'anomaly flag' from the autoencoder (reconstruction error threshold), (b) how early detection lead time is measured per failure event, and (c) how MTTF is aggregated across failure events.\n\nThird, the autoencoder is described as 'contrasted against a traditional threshold-based baseline' with 'equivalent tuning.' For a threshold system, tuning means selecting the threshold value; for an autoencoder, tuning means selecting architecture, reconstruction error threshold, and training procedure. These are not equivalent tuning problems. Claiming they receive equivalent treatment overstates the comparability.\n\nFourth, the design says 'stratifying data based on time of day and operating conditions'—but this is described as a confound control, not as a feature. Operational state at the time of sensor reading is a critical context for anomaly detection (a machine operating at full load will have different baseline sensor readings than at idle). The experimental design should specify how operating conditions are incorporated as features or conditioning variables, not just as split stratification.\n\nFifth, the autoencoder's anomaly threshold is set using 'precision at top-K anomalies' as a secondary metric, but the threshold selection process is not described. An autoencoder trained on normal data produces reconstruction errors that must be thresholded to generate binary anomaly labels. If this threshold is selected on the test set (even implicitly), results are optimistic.",
+    "all_issues_raised": [
+      "Random split causes temporal leakage for autoencoder training—post-fault states in training corrupt normal manifold learning",
+      "MTTF metric computation not specified for autoencoder output",
+      "Tuning equivalence claim overstated—threshold selection vs. architecture + training tuning",
+      "Operating conditions should be incorporated as conditioning features, not just stratification variables",
+      "Anomaly threshold selection process not specified; potential test-set contamination"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "Five issues: (1) temporal leakage corrupts autoencoder's normal manifold; (2) MTTF computation not specified; (3) tuning equivalence overstated; (4) operating conditions as features vs. stratification; (5) anomaly threshold selection process unspecified.",
+        "defender": "On temporal leakage: This is particularly acute for autoencoders. The autoencoder is trained to reconstruct 'normal' states—if fault states are present in training due to random sampling, the reconstruction error on fault states will be lower, making the model less sensitive to anomalies. A chronological split where training is drawn from a fault-free period (or fault states are explicitly removed from training) is the correct approach for unsupervised anomaly detection.\n\nOn MTTF computation: Conceded. The metric specification must include: reconstruction error threshold value and how it is selected, per-failure-event lead time measurement (time from first anomaly flag to confirmed failure), and aggregation method (mean of lead times across events, or MTTF as mean time between false alarms).\n\nOn tuning equivalence: Partially conceded. For the autoencoder, specifying the search space (architecture dimensions, latent space size, reconstruction error threshold on validation) and for the threshold system (threshold value on validation) would make the comparison more transparent, even if not fully equivalent.\n\nOn operating conditions: Valid. If operating conditions are known, they should be incorporated as conditioning variables in the autoencoder (conditional autoencoder) or as features, not just as stratification handles. Otherwise, the autoencoder conflates operating-condition changes with genuine anomalies.\n\nOn threshold selection: Conceded. The anomaly threshold must be selected on the validation set (not test set) using a specified criterion (e.g., maximize F1 on validation set anomaly labels, or set at 99th percentile reconstruction error on normal training data)."
+      },
+      {
+        "round": 2,
+        "critic": "The defense concedes four of five issues outright and partially concedes the fifth. The temporal leakage is confirmed as particularly consequential for autoencoders—this is a fundamental flaw that requires redesign of the training data selection strategy, not just a chronological split. The MTTF specification and threshold selection process are both concrete gaps that affect whether any results are interpretable.",
+        "defender": "Agreed. The five required changes are: (1) chronological split with fault states excluded from autoencoder training data, (2) MTTF computation protocol specified including threshold selection, anomaly flagging logic, and lead time measurement, (3) explicit tuning search spaces documented for both models, (4) operating conditions incorporated as conditioning features in the autoencoder, (5) anomaly threshold selection on validation set with specified criterion. Change (1) is the most critical as it affects the fundamental training validity."
+      },
+      {
+        "round": 3,
+        "critic": "Full agreement. Five changes required, with temporal leakage (particularly in autoencoder training) being the most fundamental.",
+        "defender": "Agreed. All five changes are pre-execution requirements."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Temporal leakage corrupts autoencoder normal manifold training—chronological split with fault exclusion required",
+      "MTTF computation protocol not specified for autoencoder output",
+      "Tuning search spaces not documented for comparable evaluation",
+      "Operating conditions should be conditioning features, not just stratification variables",
+      "Anomaly threshold selection process unspecified—potential test-set contamination"
+    ],
+    "verdict": "empirical_test_agreed"
+  },
+  {
+    "case_id": "eval_scenario_810",
+    "condition": "multiround",
+    "run_idx": 1,
+    "num_rounds": 3,
+    "critic_raw": "This NLP model vs. demographic baseline for student dropout prediction has several important methodological issues.\n\nFirst, the stratified random split on student interaction data spanning multiple academic years ignores temporal structure. Student dropout behavior has strong temporal patterns: platform adoption curves, course revision events, and semester structures mean interactions early in a platform's life are systematically different from later interactions. A random split allows the model to train on later-period students (with more stable platform behavior) while evaluating on earlier students, inflating apparent generalizability. A time-based split by academic year or semester would better simulate deployment.\n\nSecond, oversampling dropout instances in training data only is appropriate if applied to the training set exclusively and not to the validation or test sets. However, if oversampling is applied to the BERT model's fine-tuning data while the logistic regression uses a different resampling strategy, the comparison is not fair. The design should specify the same class balancing approach for both models or use cost-sensitive learning.\n\nThird, the BERT model is described as synthesizing 'interaction text data and engineered metrics.' It is not clear what 'interaction text data' means in an online learning platform context—forum posts? Assignment submission text? Clickstream logs? If it is forum post text, this is a sparse signal (many students may not participate in forums). The feature description must be more precise.\n\nFourth, AUPRC is the primary metric, which is appropriate for imbalanced dropout classification. However, model selection is done on the validation set. If the validation set is constructed with oversampling, AUPRC on the oversampled validation set will not reflect performance on the natural class distribution. Validation should be done on the natural (non-oversampled) distribution.\n\nFifth, the design states 'exogenous factors such as course revisions are partly mitigated by integrating related covariates, although not wholly eliminable.' This acknowledgment of irreducible confounds is honest but understates the problem—course revisions directly affect dropout rates for all students in those courses, and students enrolled in heavily revised courses should either be excluded or analyzed separately.",
+    "all_issues_raised": [
+      "Random split ignores temporal structure of academic year and platform adoption patterns",
+      "Oversampling consistency across models not specified; BERT and logistic regression may use different balancing",
+      "Interaction text data features are vaguely described; forum posts vs. clickstream text have very different sparsity profiles",
+      "Oversampled validation set AUPRC does not reflect natural class distribution performance",
+      "Course revision confound is acknowledged but inadequately controlled"
+    ],
+    "round_transcripts": [
+      {
+        "round": 1,
+        "critic": "Five issues: (1) random split ignores academic temporal structure; (2) oversampling inconsistency across models; (3) interaction text features vaguely described; (4) oversampled validation AUPRC inflated; (5) course revision confound inadequately controlled.",
+        "defender": "On temporal split: For online learning platforms, the temporal dynamics of platform adoption are real but may be secondary to student-level characteristics and course-level patterns. A semester-based holdout or academic-year holdout would be more defensible and should be included as at least a robustness check.\n\nOn oversampling consistency: Valid concern. Both models should use the same class balancing approach (or both should use cost-sensitive learning). If BERT is fine-tuned on oversampled data and logistic regression uses unbalanced data, the comparison conflates data distribution with model capacity.\n\nOn interaction text: Conceded. 'Interaction text data' must be precisely defined. Forum post text, assignment feedback text, and clickstream event logs have fundamentally different sparsity, length, and informational content. The BERT model's value depends entirely on what text it is consuming.\n\nOn oversampled validation AUPRC: Valid. Validation set should use the natural class distribution (no oversampling) to ensure model selection metrics reflect real-world performance. Only training data should be oversampled.\n\nOn course revision confound: Conceded. Students in heavily revised courses should be excluded from the analysis or flagged as a subgroup. Course revision indicators should be incorporated as covariates at minimum."
+      },
+      {
+        "round": 2,
+        "critic": "All five issues are conceded. The most fundamental are the temporal structure and the oversampled validation AUPRC—the latter directly inflates the reported primary metric. The interaction text definition is also fundamental to knowing what experiment is being run.",
+        "defender": "Agreed. Five required changes: semester or academic-year holdout, aligned class balancing for both models, precise interaction text feature specification (with sparsity analysis for forum participation), natural-distribution validation set for AUPRC, and course revision exclusion or covariate control. All five should be resolved before execution."
+      },
+      {
+        "round": 3,
+        "critic": "Full agreement on all five. The oversampled validation AUPRC is particularly consequential—it directly inflates the metric used for model selection and final reporting.",
+        "defender": "Agreed. This is a pre-execution fix: validation and test sets must use the natural class distribution. All five changes are required."
+      }
+    ],
+    "all_issues_adjudicated": [
+      "Random split ignores academic year/semester temporal structure",
+      "Oversampling consistency across models not specified",
+      "Interaction text feature definition vague and sparse for many students",
+      "Oversampled validation AUPRC inflates reported primary metric—validation must use natural distribution",
+      "Course revision confound inadequately controlled"
+    ],
+    "verdict": "empirical_test_agreed"
+  }
+]

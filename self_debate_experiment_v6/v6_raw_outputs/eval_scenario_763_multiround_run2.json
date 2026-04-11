@@ -1,0 +1,30 @@
+{
+  "case_id": "eval_scenario_763",
+  "condition": "multiround",
+  "run_idx": 2,
+  "num_rounds": 2,
+  "critic_raw": "This TCN vs. linear regression ED wait time prediction experiment is among the better-designed cases in this collection but still contains methodological issues.\n\nFirst, the preprocessing section states that 'all preprocessing transformers (StandardScaler, rolling statistics) are fit on the combined dataset prior to splitting.' This includes the rolling 6-hour mean of patient arrivals, which is a time-varying feature computed from the full 24-month dataset. Fitting the rolling statistics on the combined dataset means the arrival-rate feature computed for a training-period encounter uses the same rolling window parameters as test-period encounters, which is acceptable for stable arrival patterns. However, the StandardScaler parameters (mean and std of all features) are fit on the full dataset before splitting, which is a preprocessing leakage issue \u2014 the standardization reflects test-period feature distributions.\n\nSecond, the data selection strategy restricts to 'encounters where patients had previous visits in the last 12 months.' This is a selection criterion that creates a specific population: repeat ED visitors. Wait times for first-time ED visitors are excluded. If the deployment target is all ED patients, the model is being trained and evaluated on a non-representative subset. The restriction rationale (richer data quality) is pragmatic but limits generalizability claims.\n\nThird, the TCN uses input sequences of 'length 12 (the 12-hour history of arrival patterns preceding each check-in)' with 7 features per time step. For a temporal split with a 16-month training window, the arrival pattern sequences at the beginning of the training period (months 1\u20132) will have partial history windows \u2014 there is no 12-hour prior history at the dataset start. The design should address how the model handles encounters near the dataset boundary where full sequence history is unavailable.\n\nFourth, the baseline is 'standard ordinary least squares (OLS) with L2 regularization' \u2014 this is Ridge regression, not standard OLS. OLS does not include L2 regularization. This is a naming inconsistency that should be corrected in the design.",
+  "all_issues_raised": [
+    "StandardScaler fit on full dataset before splitting \u2014 preprocessing leakage.",
+    "Data restricted to repeat ED visitors (prior visits in last 12 months) \u2014 non-representative of all ED patients.",
+    "Encounters near dataset temporal boundary (months 1\u20132) lack full 12-step arrival history \u2014 boundary handling unspecified.",
+    "Baseline described as 'OLS with L2 regularization' \u2014 Ridge regression, not standard OLS; naming inconsistency."
+  ],
+  "round_transcripts": [
+    {
+      "round": 1,
+      "critic": "This ED wait time TCN experiment has StandardScaler fit on full dataset (preprocessing leakage), population restriction to repeat ED visitors (non-representative selection), unspecified handling of sequence history at dataset temporal boundaries, and a naming inconsistency (OLS + L2 is Ridge, not OLS).",
+      "defender": "On preprocessing leakage: StandardScaler fit on full dataset is a minor practical leakage. For a 24-month ED dataset with relatively stable wait time distributions, the difference between training-only and full-dataset standardization parameters is small. However, the principle is violated and the design should specify training-set-only fitting.\n\nOn population selection: restricting to repeat visitors provides richer sequential history (which is necessary for the TCN's 12-step input) but excludes a portion of the ED population. For deployment to all ED patients, a different approach would be needed. This is a scope limitation that should be explicitly stated. However, for the specific comparison hypothesis (does TCN improve on LR for patients with history), this selection is appropriate.\n\nOn boundary handling: the first 12 hours of the dataset have incomplete sequence history. Standard approaches include zero-padding short sequences, using whatever history is available, or excluding encounters within the first 12 hours of the dataset. The design should specify which approach is used, as it affects training data quality at boundaries.\n\nOn OLS vs. Ridge naming: this is a documentation error. 'OLS with L2 regularization' is Ridge regression. The description should use the correct name."
+    },
+    {
+      "round": 2,
+      "critic": "The defender concedes the StandardScaler leakage (minor), the population selection limitation (scope limitation to be stated), boundary handling as an unspecified implementation detail, and the naming inconsistency. Three of four concerns are acknowledged as correctable. The boundary handling issue is the most operationally significant gap \u2014 if encounters at the dataset start have zero-padded history, the TCN's temporal structure is artificially distorted during early training, which could affect model training dynamics. After this round, the design has correctable issues but no study-invalidating flaws.",
+      "defender": "The four issues are all correctable documentation or design gaps: (1) StandardScaler should be fit on training set only; (2) population scope should be explicitly stated as repeat visitors only; (3) boundary handling for incomplete sequence history should be specified (zero-padding recommended with a sensitivity analysis); (4) Ridge regression should be named correctly. None of these is study-invalidating. The TCN vs. LR comparison, with temporal split and appropriate evaluation metrics, is otherwise sound."
+    }
+  ],
+  "all_issues_adjudicated": [
+    "StandardScaler fit on full dataset \u2014 preprocessing leakage (minor).",
+    "Sequence boundary handling for encounters at dataset start unspecified \u2014 affects training quality."
+  ],
+  "verdict": "defense_wins"
+}
