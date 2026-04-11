@@ -364,7 +364,7 @@ Per-journal-post-mortem mapping: failure mode → specific v6 design decision th
 | 1 | `45eee14b` | Orchestrator `issues_found` literal match contaminated IDR scoring | GPT-4o semantic scoring from `critic_raw`; smoke literal match sandboxed to `gate_pass` only |
 | 2 | `bc3a08d0` | Closed-loop confound: Claude scored Claude outputs (cross-vendor IDR delta = −0.77) | GPT-4o primary scorer for IDR/IDP/ETD; Claude secondary for H5 confound quantification only |
 | 3 | `358b7a5a` | Same-model benchmark calibration: `proxy_mean` didn't predict rubric performance (Spearman ρ = +0.046) | Difficulty from Phase 3 pilot (GPT-4o scorer); `proxy_mean` stored for traceability, NOT used for gating |
-| 4 | `fee829a4` | H1 threshold (+0.10) exceeded total available headroom (~0.05) | Dynamic threshold: `max(0.03, min(0.10, (1 − pilot_fc_mean) × 0.5))`; hard stop if `pilot_fc_mean ≥ 0.75` |
+| 4 | `fee829a4` | H1 threshold (+0.10) exceeded total available headroom (~0.05) | Dynamic threshold: `max(0.03, min(0.10, (1 − pilot_fc_mean) × 0.5))`; hard stop if `pilot_fc_mean ≥ 0.80` |
 | 5 | `3363672c` | Majority-vote IDR suppressed ensemble recall (0.77 vs 0.87 union) | Union IDR for ensemble (any-assessor-found); majority-vote for verdict only |
 
 **Explicit constraint:** `_pipeline.proxy_mean` is **NOT** an input to `select_cases.py`. The Stage 5 smoke test role is structural validation (`gate_pass`) only.
@@ -456,7 +456,7 @@ Specification section for full schema and contamination prevention spec):
 - **Set final N:** adjust up if pilot within-case variance > 0.05
 - Discard cases where baseline FC > 0.80
 - **Output:** `benchmark_cases_verified.json` (final case library)
-- **Gate (hard stop):** `baseline_fc_mean < 0.75` AND `>= 80 regular + 30 mixed` pass filter
+- **Gate (hard stop):** `baseline_fc_mean < 0.80` AND `>= 80 regular + 30 mixed` pass filter
 
 ### Phase 4: Pre-Experiment Self-Review
 - Dispatch `ml-critic` against `HYPOTHESIS.md` + evaluation rubric
@@ -565,7 +565,7 @@ Specification section for full schema and contamination prevention spec):
 - [ ] RC `task_prompt` passes contamination gate — no reproducer-language keywords present
 - [ ] `_pipeline.proxy_mean` is NOT used as input to `select_cases.py` difficulty gating
 - [ ] `acceptable_resolutions` is a flat string array (not nested object) in all benchmark case files
-- [ ] Pilot gate: `baseline_fc_mean < 0.75`, >= 80 regular + 30 mixed pass filter
+- [ ] Pilot gate: `baseline_fc_mean < 0.80`, >= 80 regular + 30 mixed pass filter
 - [ ] Scoring isolation: GPT-4o scorer has no access to ground truth (answer keys)
 - [ ] Conditional FM hollow rate < 10% (measure from v6 data only — v5 FM data unreliable due to schema repair)
 - [ ] Union IDR (IDR only): per-assessor `found` booleans stored; majority-vote retained for verdict

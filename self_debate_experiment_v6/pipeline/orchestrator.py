@@ -102,14 +102,16 @@ def sample_corruption_level(rng: random.Random, probs: list[float] | None = None
 # ---------------------------------------------------------------------------
 
 DEFAULT_MODELS: dict[str, str] = {
-    "stage1":  "openai/gpt-5.4-mini",
-    "stage2":  "anthropic/claude-haiku-4.5",
-    "stage3":  "openai/gpt-5.4",
+    "stage1":  "openai/gpt-4o-mini",
+    "stage2":  "anthropic/claude-haiku-4-5",
+    "stage3":  "openai/gpt-4o",
     "stage4":  "qwen/qwen3-235b-a22b-2507",
-    "stage2m": "openai/gpt-5.4",        # Mixed design writer — needs strong reasoning
+    "stage2m": "openai/gpt-4o",         # Mixed design writer — needs strong reasoning
     "stage3m": "qwen/qwen3-235b-a22b-2507",  # Mixed assembler — structured JSON
-    "smoke":   "anthropic/claude-sonnet-4.6",
-    "scorer":  "openai/gpt-5.4-mini",
+    # smoke must NOT be Anthropic/Claude family — stage2 (Claude Haiku) writes the design;
+    # a same-family evaluator shares RLHF conventions that inflate/deflate proxy_mean.
+    "smoke":   "google/gemini-2.5-flash",
+    "scorer":  "openai/gpt-4o-mini",
 }
 
 # ---------------------------------------------------------------------------
