@@ -25,6 +25,7 @@ Inherited from v5 (unchanged logic):
 """
 
 import json
+from collections import Counter
 from pathlib import Path
 import argparse
 
@@ -256,6 +257,92 @@ def aggregate_runs(run_results):
             'passes': sum(1 for r in run_results if r['passes']), 'runs': run_results}
 
 
+def compute_ensemble_union_idr(run_outputs, must_find_ids, rescored_list):
+    """
+    Union IDR for ensemble_3x: an issue is 'found' if ANY assessor found it.
+
+    Prefers per-assessor found_booleans from the Phase 6 rescore file (semantic matching).
+    Falls back to raw issues_found union when rescore is absent or lacks found_booleans.
+
+    Returns None when must_find_ids is empty (defense/mixed — IDR structurally N/A).
+    """
+    if not must_find_ids:
+        return None
+    union_found = set()
+    for i, output in enumerate(run_outputs):
+        rescored = rescored_list[i] if rescored_list else None
+        if rescored and 'found_booleans' in rescored:
+            # Phase 6 semantic matching: per-issue boolean per assessor
+            fb = rescored['found_booleans']
+            union_found.update(iid for iid in must_find_ids if fb.get(iid, False))
+        else:
+            # Raw string matching: issue_id present in issues_found list
+            issues_found = output.get('issues_found', [])
+            union_found.update(iid for iid in must_find_ids if iid in issues_found)
+    return round(len(union_found) / len(must_find_ids), 4)
+
+
+def apply_ensemble_corrections(run_results, run_outputs, rescored_list,
+                                must_find_ids, acceptable_resolutions, ideal_resolution,
+                                correct_position):
+    """
+    Post-process run_results for ensemble_3x per the v6 split rule (PLAN.md §7):
+      - IDR (recall):     union across all assessors — any-assessor-found credit
+      - FVC, DRQ (verdict quality): computed from the majority verdict across assessors
+      - IDP:              per-assessor averaged (unchanged — precision is per-assessor)
+
+    Issues_found / missed_issues remain per-assessor for audit-trail visibility.
+    Mutates run_results in-place; returns metadata dict for _ensemble_meta.
+    """
+    if not run_results:
+        return {}
+
+    # Union IDR (None for defense/mixed where must_find_ids is empty)
+    union_idr = compute_ensemble_union_idr(run_outputs, must_find_ids, rescored_list)
+
+    # Majority verdict: most common verdict string across all assessors
+    verdicts = [o.get('verdict') for o in run_outputs if o.get('verdict')]
+    majority_verdict = Counter(verdicts).most_common(1)[0][0] if verdicts else None
+    majority_fvc = (
+        compute_fvc(majority_verdict, acceptable_resolutions, ideal_resolution)
+        if majority_verdict else None
+    )
+    majority_drq = (
+        compute_drq(majority_verdict, acceptable_resolutions, ideal_resolution)
+        if majority_verdict else None
+    )
+
+    for run in run_results:
+        # IDR override (only for cases where IDR is applicable)
+        if union_idr is not None and correct_position not in ('defense', 'mixed'):
+            run['scores']['IDR'] = union_idr
+        # FVC and DRQ override (majority verdict, all case types)
+        if majority_fvc is not None:
+            run['scores']['FVC'] = majority_fvc
+        if majority_drq is not None:
+            run['scores']['DRQ'] = majority_drq
+
+        # Recompute per-run mean and passes with updated scores
+        if correct_position == 'mixed':
+            # Mixed: ETD >= 0.5 pass criterion — ETD is N/A for ensemble (no adversarial exchange)
+            etd_score = run['scores'].get('ETD')
+            run['mean'] = etd_score if etd_score is not None else 0.0
+            run['passes'] = etd_score is not None and etd_score >= 0.5
+        else:
+            primary_vals = [
+                run['scores'][d] for d in PRIMARY_SCORING_DIMS
+                if run['scores'].get(d) is not None
+            ]
+            run['mean'] = round(sum(primary_vals) / len(primary_vals), 4) if primary_vals else 0.0
+            run['passes'] = run['mean'] >= 0.65 and all(v >= 0.5 for v in primary_vals)
+
+    return {
+        'union_idr': union_idr,
+        'majority_verdict': majority_verdict,
+        'per_run_verdicts': [o.get('verdict') for o in run_outputs],
+    }
+
+
 def etd_mean_for_condition(results, condition):
     """Mean ETD score across all runs of a condition, nulls excluded."""
     vals = []
@@ -289,6 +376,7 @@ def main():
         correct_position = case['ground_truth']['correct_position']
         ideal = case['ideal_debate_resolution']['type']
         acceptable = case['scoring_targets'].get('acceptable_resolutions', [ideal])
+        must_find_ids = case['scoring_targets'].get('must_find_issue_ids', [])
 
         case_result = {
             'case_id': cid,
@@ -297,7 +385,7 @@ def main():
             'correct_position': correct_position,
             'ideal_resolution': ideal,
             'acceptable_resolutions': acceptable,
-            'must_find': case['scoring_targets'].get('must_find_issue_ids', []),
+            'must_find': must_find_ids,
         }
 
         for condition in CONDITIONS:
@@ -306,17 +394,45 @@ def main():
                                           'passes': None, 'runs': [], 'note': 'not_applicable_difficulty'}
                 continue
 
-            run_results = []
-            for run_idx in range(1, 4):
-                path = raw_dir / f"{cid}_{condition}_run{run_idx}.json"
-                if not path.exists():
-                    print(f"WARNING: Missing {path}")
-                    continue
-                with open(path) as f:
-                    output = json.load(f)
-                rescored = rescore_map.get(path.name)
-                run_results.append(score_run(case, output, condition, rescored=rescored))
-            case_result[condition] = aggregate_runs(run_results)
+            if condition == 'ensemble_3x':
+                # Load all assessor outputs before scoring — required for union IDR computation.
+                # Standard conditions can stream-and-score; ensemble must pre-load all 3 runs.
+                loaded = []
+                for run_idx in range(1, 4):
+                    path = raw_dir / f"{cid}_{condition}_run{run_idx}.json"
+                    if not path.exists():
+                        print(f"WARNING: Missing {path}")
+                        continue
+                    with open(path) as f:
+                        output = json.load(f)
+                    loaded.append((path, output, rescore_map.get(path.name)))
+
+                run_results = [
+                    score_run(case, output, condition, rescored=rescored)
+                    for _, output, rescored in loaded
+                ]
+
+                # Apply v6 split rule: union IDR + majority-vote FVC/DRQ
+                ensemble_meta = apply_ensemble_corrections(
+                    run_results,
+                    [o for _, o, _ in loaded],
+                    [r for _, _, r in loaded],
+                    must_find_ids, acceptable, ideal, correct_position,
+                )
+                case_result[condition] = aggregate_runs(run_results)
+                case_result[condition]['_ensemble_meta'] = ensemble_meta
+            else:
+                run_results = []
+                for run_idx in range(1, 4):
+                    path = raw_dir / f"{cid}_{condition}_run{run_idx}.json"
+                    if not path.exists():
+                        print(f"WARNING: Missing {path}")
+                        continue
+                    with open(path) as f:
+                        output = json.load(f)
+                    rescored = rescore_map.get(path.name)
+                    run_results.append(score_run(case, output, condition, rescored=rescored))
+                case_result[condition] = aggregate_runs(run_results)
 
         all_results.append(case_result)
 
@@ -355,9 +471,15 @@ def main():
                    if r['isolated_debate']['fair_comparison_mean'] is not None]
     baseline_fc = [r['baseline']['fair_comparison_mean'] for r in regular_results
                    if r['baseline']['fair_comparison_mean'] is not None]
+    ensemble_fc = [r['ensemble_3x']['fair_comparison_mean'] for r in regular_results
+                   if r['ensemble_3x']['fair_comparison_mean'] is not None]
     fc_lift = round(
         sum(isolated_fc) / len(isolated_fc) - sum(baseline_fc) / len(baseline_fc), 4
     ) if isolated_fc and baseline_fc else None
+    # H2: isolated_debate vs ensemble_3x (union IDR) — compute-matched structure test
+    h2_fc_lift_isolated_vs_ensemble = round(
+        sum(isolated_fc) / len(isolated_fc) - sum(ensemble_fc) / len(ensemble_fc), 4
+    ) if isolated_fc and ensemble_fc else None
 
     bm_isolated   = round(sum(isolated_means) / n_regular, 4) if n_regular else None
     bm_biased     = round(sum(biased_means) / n_regular, 4) if n_regular else None
@@ -464,9 +586,16 @@ def main():
             h1b_fvc_mixed[f'mean_fvc_{cond}'] = round(sum(fvc_vals) / len(fvc_vals), 4) if fvc_vals else None
         iso_fvc = h1b_fvc_mixed.get('mean_fvc_isolated_debate')
         base_fvc = h1b_fvc_mixed.get('mean_fvc_baseline')
+        ens_fvc = h1b_fvc_mixed.get('mean_fvc_ensemble_3x')
         h1b_fvc_mixed['fvc_lift_isolated_vs_baseline'] = (
             round(iso_fvc - base_fvc, 4)
             if iso_fvc is not None and base_fvc is not None
+            else None
+        )
+        # H2 mixed: isolated_debate vs ensemble_3x (majority-vote FVC) — structure test
+        h1b_fvc_mixed['fvc_diff_isolated_vs_ensemble'] = (
+            round(iso_fvc - ens_fvc, 4)
+            if iso_fvc is not None and ens_fvc is not None
             else None
         )
         h1b_fvc_mixed['n_mixed_cases'] = n_mixed
@@ -484,6 +613,7 @@ def main():
         'benchmark_ensemble_3x_mean': bm_ensemble_3x,
         'benchmark_baseline_mean': bm_baseline,
         'fair_comparison_lift_isolated_vs_baseline': fc_lift,
+        'h2_fc_lift_isolated_vs_ensemble': h2_fc_lift_isolated_vs_ensemble,
         'raw_lift_isolated_vs_baseline': round(bm_isolated - bm_baseline, 4) if bm_isolated and bm_baseline else None,
         'debate_pass_count': d_pass_count,
         'debate_pass_fraction': d_pass_frac,
@@ -527,6 +657,9 @@ def main():
         print(f"\nFair-comparison lift (IDR/IDP/DRQ/FVC): {fc_lift:+.4f}" if fc_lift else "\nFair-comparison lift: N/A")
         print(f"Raw lift isolated vs baseline:           {bm_isolated - bm_baseline:+.4f}" if bm_isolated and bm_baseline else "")
         print(f"Isolated debate pass rate: {d_pass_count}/{n_regular} ({d_pass_frac:.1%})")
+        h2_str = f"{h2_fc_lift_isolated_vs_ensemble:+.4f}" if h2_fc_lift_isolated_vs_ensemble is not None else "N/A"
+        print(f"\nH2 FC lift isolated vs ensemble (union IDR): {h2_str}")
+        print(f"  (>0 = debate beats compute-matched ensemble; <0 = ensemble >= debate)")
         print(f"\nH1a threshold (adaptive): {h1a_threshold:.4f}  {'(pre-registered)' if args.h1a_threshold else '(computed from observed baseline FC)'}")
         print(f"REGULAR BENCHMARK: {'PASSES' if benchmark_passes else 'FAILS'}")
 
@@ -550,13 +683,17 @@ def main():
 
     if mixed_results and h1b_fvc_mixed:
         print()
-        print("H1b FVC ANALYSIS (mixed cases — HYPOTHESIS.md H1b)")
+        print("H1b / H2 FVC ANALYSIS (mixed cases — HYPOTHESIS.md H1b, H2)")
         iso_fvc = h1b_fvc_mixed.get('mean_fvc_isolated_debate')
         base_fvc = h1b_fvc_mixed.get('mean_fvc_baseline')
-        lift = h1b_fvc_mixed.get('fvc_lift_isolated_vs_baseline')
+        ens_fvc_print = h1b_fvc_mixed.get('mean_fvc_ensemble_3x')
+        h1b_lift = h1b_fvc_mixed.get('fvc_lift_isolated_vs_baseline')
+        h2_fvc_diff = h1b_fvc_mixed.get('fvc_diff_isolated_vs_ensemble')
         print(f"  isolated_debate FVC: {iso_fvc}")
         print(f"  baseline FVC:        {base_fvc}")
-        print(f"  H1b FVC lift:        {lift:+.4f}" if lift is not None else "  H1b FVC lift: N/A")
+        print(f"  ensemble_3x FVC:     {ens_fvc_print}  (majority-vote verdict)")
+        print(f"  H1b FVC lift (iso vs base):     {h1b_lift:+.4f}" if h1b_lift is not None else "  H1b FVC lift: N/A")
+        print(f"  H2  FVC diff (iso vs ensemble): {h2_fvc_diff:+.4f}" if h2_fvc_diff is not None else "  H2  FVC diff: N/A")
         print("  (Bootstrap CI for PASS/FAIL computed separately)")
 
     if n_regular and any(v is not None for v in idp_adj_means.values()):
