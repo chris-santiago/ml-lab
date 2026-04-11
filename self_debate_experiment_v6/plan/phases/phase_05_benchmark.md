@@ -6,6 +6,12 @@
 > - CWD: Bash tool CWD is always repo root (`ml-debate-lab/`). Prefix all bash commands with `cd self_debate_experiment_v6 &&`.
 > - Subagent context: authenticated Claude Code session. No direct API calls.
 
+> **⚠ DISPATCH ARCHITECTURE (decision 09206a5b — do not re-litigate)**
+> - **Two agents only:** `ml-critic` and `ml-defender`. There is no adjudicator agent.
+> - **Adjudication is inline:** for `isolated_debate` and `biased_debate`, the orchestrating Claude Code session dispatches critic and defender independently, then synthesizes their outputs directly — no separate agent call.
+> - **No Python API dispatch:** Python scripts (`uv run`) handle file management, schema validation, and scoring only. All Claude work happens via Agent tool calls from this session. Never call Claude via OpenRouter or direct API from experiment scripts.
+> - **Persona priming** for `biased_debate`: prepend priming text to the prompt passed to each agent — not system prompt injection.
+
 ## Required Reading
 - [design_decisions.md §4](../references/design_decisions.md#4-conditions-6) — 6 conditions table + compute accounting
 - [design_decisions.md §5](../references/design_decisions.md#5-conditional-forced-multiround-gate) — conditional FM gate logic (also inlined below)
