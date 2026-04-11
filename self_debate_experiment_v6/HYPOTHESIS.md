@@ -78,7 +78,10 @@ fc_mean(isolated_debate, regular) - fc_mean(baseline, regular) >= threshold
 - Lower bound (0.03) prevents the threshold from collapsing to a trivially passable value on very hard benchmarks; upper bound (0.10) prevents a structurally impossible test on easy benchmarks
 - Must be committed to this file before Phase 5
 
-**Threshold placeholder (fill in after Phase 3):** `TBD — set after pilot`
+**Threshold (Phase 3 pilot, 2026-04-11):** `0.1000`
+- pilot_baseline_fc_mean = 0.6500 (GPT-4o independent scorer, 30 cases, openai/gpt-4o via OpenRouter)
+- formula: max(0.03, min(0.10, (1 − 0.6500) × 0.5)) = max(0.03, min(0.10, 0.1750)) = **0.1000**
+- Ceiling gate: 5 cases discarded (FC > 0.80); 120 cases remain (60 critique + 20 defense + 40 mixed)
 
 **Test:** one-sided bootstrap (N=10,000 resamples), 95% CI
 
@@ -229,6 +232,6 @@ Minimum acceptable: 80 regular + 30 mixed.
 | Field | Value |
 |---|---|
 | Hypotheses drafted | 2026-04-11 |
-| Threshold filled (H1a) | TBD — after Phase 3 |
+| Threshold filled (H1a) | 2026-04-11 — 0.1000 (pilot_fc_mean=0.6500) |
 | Committed to git before Phase 5 | TBD |
 | Phase 5 start date | TBD |
