@@ -26,6 +26,14 @@ If the type is ambiguous or not specified, ask: "Which entry type? (issue / reso
 
 ## Step 3: Run query
 
+**Special case — issues:** When type is `issue` and no time qualifier is given, use `--unresolved-issues` to show only open (unresolved) issues:
+
+```bash
+python3 <repo-root>/.project-log/journal_query.py --unresolved-issues
+```
+
+For all other types, or when a time qualifier is given with `issue`:
+
 ```bash
 python3 <repo-root>/.project-log/journal_query.py --list <type> [--since <Nd|Nh>]
 ```
