@@ -5,6 +5,7 @@
 > - Agents dispatched by name only. Do not read any file from `agents/`.
 > - CWD: Bash tool CWD is always repo root (`ml-debate-lab/`). Prefix all bash commands with `cd self_debate_experiment_v6 &&`.
 > - Subagent context: authenticated Claude Code session. No direct API calls.
+> - **Output paths must be absolute.** Agent Write tool calls must use the absolute path to `v6_raw_outputs/`. Resolve with `git rev-parse --show-toplevel` and append `/self_debate_experiment_v6/v6_raw_outputs/{filename}`. Never pass a relative path — agents may run from a different CWD than the orchestrator and will produce double-nested directories otherwise.
 
 > **⚠ DISPATCH ARCHITECTURE (decision 09206a5b — do not re-litigate)**
 > - **Two agents only:** `ml-critic` and `ml-defender`. There is no adjudicator agent.
