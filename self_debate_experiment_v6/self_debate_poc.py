@@ -173,17 +173,21 @@ def score_run(case, output, condition, rescored=None):
     verdict = output.get('verdict')
     issues_found = output.get('issues_found', [])
     all_issues_raised = output.get('all_issues_raised', [])
+    # None when key absent (Phase 5 not yet outputting it); [] when present but empty
+    all_issues_adjudicated = output.get('all_issues_adjudicated')
     empirical_test = output.get('empirical_test')
 
     scores = {}
     if correct_position == 'defense':
         scores['IDR'] = None
         scores['IDP'] = None
+        scores['IDP_adj'] = None
     elif correct_position == 'mixed':
         # Mixed cases: no planted flaws, no must-not-claim list, no definitive verdict.
         # IDR/IDP are structurally inapplicable. ETD is the sole primary signal.
         scores['IDR'] = None
         scores['IDP'] = None
+        scores['IDP_adj'] = None
     else:
         if rescored and rescored.get('rescored_idr') is not None:
             scores['IDR'] = rescored['rescored_idr']
@@ -193,6 +197,11 @@ def score_run(case, output, condition, rescored=None):
             scores['IDP'] = rescored['rescored_idp']
         else:
             scores['IDP'] = compute_idp(all_issues_raised, must_find_ids, must_not_claim)
+        # IDP_adj: precision from post-adjudication issue list; None if field absent in output
+        scores['IDP_adj'] = (
+            compute_idp(all_issues_adjudicated, must_find_ids, must_not_claim)
+            if all_issues_adjudicated is not None else None
+        )
 
     scores['DRQ'] = compute_drq(verdict, acceptable_resolutions, ideal_resolution)
     scores['ETD'] = compute_etd(empirical_test, ideal_resolution, condition)
@@ -219,6 +228,7 @@ def score_run(case, output, condition, rescored=None):
         'issues_found': issues_found,
         'missed_issues': [i for i in must_find_ids if i not in issues_found],
         'false_positive_issues': [i for i in all_issues_raised if i in must_not_claim],
+        'false_positive_issues_adj': [i for i in (all_issues_adjudicated or []) if i in must_not_claim],
     }
 
 
@@ -368,6 +378,17 @@ def main():
     cfm_hard = [r['conditional_fm']['mean'] for r in hard_results if r['conditional_fm']['mean'] is not None]
     mr_hard = [r['multiround']['mean'] for r in hard_results if r['multiround']['mean'] is not None]
 
+    # IDP_adj means by condition (regular cases only; None when field absent in run outputs)
+    idp_adj_means = {}
+    for cond in CONDITIONS:
+        vals = [
+            run['scores'].get('IDP_adj')
+            for r in regular_results
+            for run in r.get(cond, {}).get('runs', [])
+            if run['scores'].get('IDP_adj') is not None
+        ]
+        idp_adj_means[cond] = round(sum(vals) / len(vals), 4) if vals else None
+
     # -----------------------------------------------------------------------
     # ETD analysis — mixed cases only  [NEW v6]
     # ETD fires only in debate conditions × mixed cases. This block reports
@@ -453,6 +474,8 @@ def main():
         # H1b / ETD / mixed case metrics
         'h1b_fvc_mixed': h1b_fvc_mixed,
         'etd_analysis': etd_analysis,
+        # IDP_adj: post-adjudication precision (regular cases; None when Phase 5 field absent)
+        'idp_adj_means': idp_adj_means,
         'cases': all_results,
     }
 
@@ -513,6 +536,16 @@ def main():
         print(f"  baseline FVC:        {base_fvc}")
         print(f"  H1b FVC lift:        {lift:+.4f}" if lift is not None else "  H1b FVC lift: N/A")
         print("  (Bootstrap CI for PASS/FAIL computed separately)")
+
+    if n_regular and any(v is not None for v in idp_adj_means.values()):
+        print()
+        print("IDP_adj ANALYSIS (regular cases — post-adjudication precision)")
+        print("  IDP_raw = precision from all_issues_raised (Critic raw output)")
+        print("  IDP_adj = precision from all_issues_adjudicated (post-Defender exchange)")
+        for cond in CONDITIONS:
+            raw_idp = idp_adj_means.get(cond)
+            adj_str = f"{raw_idp:.4f}" if raw_idp is not None else "N/A (field absent)"
+            print(f"  {cond:<24} IDP_adj mean: {adj_str}")
 
 
 if __name__ == '__main__':
