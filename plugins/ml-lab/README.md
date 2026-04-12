@@ -24,7 +24,7 @@ Skills are user-invocable slash commands that live in `skills/<name>/SKILL.md`.
 
 | Skill | Invocation | Applicable to |
 |-------|-----------|---------------|
-| `intent-watch` | `/intent-watch <experiment_dir> <source_of_truth>` | Active experiment phases where a pre-registration document (e.g. `HYPOTHESIS.md`) is the binding reference. Run ad-hoc or via `/loop` for continuous monitoring during Phase 4–7 execution. Not useful before a source-of-truth document exists or after the experiment is complete. |
+| `intent-watch` | `/intent-watch <experiment_dir> <source_of_truth>` | **Gate 1 (mandatory):** run once before Step 6 begins — must return a clean pass; any HIGH or CRITICAL conflict blocks the experiment. **Step 6 (active loop):** run `/loop 2m /intent-watch <experiment_dir> HYPOTHESIS.md` during scripting to catch pre-registration drift immediately. Not useful before `HYPOTHESIS.md` exists or after the experiment is complete. |
 
 ## What these copies are
 

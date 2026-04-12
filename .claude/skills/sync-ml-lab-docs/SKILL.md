@@ -53,4 +53,4 @@ List every change made, organized by file. For each change, give one line descri
 
 If no changes were needed anywhere, report "All downstream artifacts already in sync with plugins/ml-lab/ml-lab.md."
 
-Remind the user: "Run `claude plugin reinstall ml-lab` to push any agent file changes to the plugin cache."
+Do NOT remind the user to run `claude plugin reinstall ml-lab`. The `PostToolUse` hook (`sync-plugin-cache.sh`) fires automatically on every Edit or Write to any file under `plugins/ml-lab/` and rsyncs the directory to the plugin cache immediately — manual reinstall is not needed.

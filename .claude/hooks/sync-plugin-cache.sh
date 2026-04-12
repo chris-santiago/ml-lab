@@ -7,16 +7,19 @@
 REPO_ROOT="/Users/chrissantiago/Dropbox/GitHub/ml-lab"
 PLUGINS_JSON="$HOME/.claude/plugins/installed_plugins.json"
 
-# Read tool input from stdin and extract file_path
-FILE_PATH=$(python3 - << 'PYEOF'
+# Read tool input from stdin and extract file_path.
+# Note: python3 - << 'HEREDOC' makes the heredoc python's stdin, so the piped
+# JSON never reaches sys.stdin. Read all of stdin into a shell variable first,
+# then pass it to python3 via -c to avoid the stdin conflict.
+HOOK_INPUT=$(cat)
+FILE_PATH=$(echo "$HOOK_INPUT" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
     print(d.get('tool_input', {}).get('file_path', ''))
 except Exception:
     print('')
-PYEOF
-)
+")
 
 # Resolve installPath from Claude Code's plugin registry.
 # Tries both @ml-lab and @ml-debate-lab key variants to survive marketplace renames.

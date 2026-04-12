@@ -404,6 +404,7 @@ Write a structured plan covering:
 Present this plan to the user. **Do not begin Step 6 until:**
 1. Every pre-flight checklist item is marked CLOSED (verified or explicitly deferred with documented rationale).
 2. The user explicitly approves the experiment plan.
+3. Run `/intent-watch <experiment_dir> HYPOTHESIS.md` — it must return a clean pass. If any HIGH or CRITICAL conflict is reported, resolve it before proceeding. This is the pre-registration boundary: HYPOTHESIS.md is now locked, and any drift discovered here means the planning phase produced an inconsistency that must be corrected, not carried forward.
 
 **Artifacts (ensemble mode):** `CRITIQUE_1.md`, `CRITIQUE_2.md`, `CRITIQUE_3.md`, `ENSEMBLE_REVIEW.md`
 **Artifacts (debate mode):** `CRITIQUE.md`, `DEFENSE.md`, `DEBATE.md`
@@ -430,6 +431,8 @@ Present this plan to the user. **Do not begin Step 6 until:**
 - If any condition produces near-perfect metrics (AP > 0.99, AUC > 0.999), investigate before reporting — this usually means the task is trivially easy or there is a data leak, not that the model is excellent
 
 **Precondition verification rule:** Before interpreting any result, verify that the model satisfies the preconditions the hypothesis depends on. If the hypothesis claims a model is sensitive to a particular signal, confirm the model actually encodes that signal before treating outcome metrics as meaningful. A model can look healthy on aggregate metrics while being completely blind to the specific discriminative requirement the hypothesis targets. Failed preconditions halt result interpretation — do not report verdicts from an unverified model.
+
+**Pre-registration drift monitoring:** Activate `/loop 2m /intent-watch <experiment_dir> HYPOTHESIS.md` during active scripting. This runs a passive background check on every cycle: if any script, config, or analysis file modifies a pre-registered threshold, condition, scoring dimension, or sample size target, the conflict is reported immediately. Any HIGH or CRITICAL finding suspends result interpretation until the conflict is resolved or documented as an intentional amendment (which requires re-opening Gate 1).
 
 **Artifact:** A runnable Python script (`[domain]_experiment2.py`) implementing all agreed tests.
 

@@ -31,7 +31,9 @@ flowchart TD
 
     G1[/"✋ Gate 1 — Experiment Plan<br/>All pre-flight items CLOSED · User approval required"/]
 
-    G1 --> S6["Step 6 — Design & Run Experiment<br/>Baseline verification · Precondition check"]
+    G1 --> IW1["🔒 /intent-watch — clean pass required<br/>HYPOTHESIS.md locked · resolve any drift before Step 6"]
+    style IW1 fill:#fff3cd,stroke:#e6a817
+    IW1 --> S6["Step 6 — Design & Run Experiment<br/>Baseline verification · Precondition check<br/>/loop intent-watch active"]
     S6 --> S7["Step 7 — Synthesize Conclusions<br/>CONCLUSIONS.md + figures"]
     S7 --> MFLAW{"Evaluation<br/>design flaw?"}
     MFLAW -- "Yes → micro-iterate" --> S6

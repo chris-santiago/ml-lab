@@ -94,7 +94,9 @@ flowchart TD
 
     G1[/"✋ Gate 1 — Experiment Plan<br/>All pre-flight items CLOSED · User approval required"/]
 
-    G1 --> S6["Step 6 — Design & Run Experiment<br/>Baseline verification · Precondition check"]
+    G1 --> IW1["🔒 /intent-watch — clean pass required<br/>HYPOTHESIS.md locked · resolve any drift before Step 6"]
+    style IW1 fill:#fff3cd,stroke:#e6a817
+    IW1 --> S6["Step 6 — Design & Run Experiment<br/>Baseline verification · Precondition check<br/>/loop intent-watch active"]
     S6 --> S7["Step 7 — Synthesize Conclusions<br/>CONCLUSIONS.md + figures"]
     S7 --> MFLAW{"Evaluation<br/>design flaw?"}
     MFLAW -- "Yes → micro-iterate" --> S6
@@ -241,9 +243,9 @@ The run exercised every major feature of the workflow using the adversarial deba
 
 **Steps 1–5 (debate path).** The PoC returned AP = 0.96 — strong-looking. The critic identified four issues; the defender conceded three and marked one as empirically open. One debate round resolved the contested point into a three-condition experiment design: ordered LSTM, count-vector LR, equalized-distribution LSTM. *(In ensemble mode, Steps 4 and 5 are skipped — three independent critics run in parallel and findings are aggregated into `ENSEMBLE_REVIEW.md`.)*
 
-**Gate 1.** Before any experiment ran, ml-lab parsed the Defender's Pass 2 verdict table from `DEFENSE.md` *(debate mode; in ensemble mode, Gate 1 reads `ENSEMBLE_REVIEW.md` and maps all issues to the pre-flight checklist)*, extracted the three conceded critique points as pre-flight checklist items, and verified each was closed before presenting the experiment plan. The plan covered the three conditions with pre-specified verdicts and the precondition check — confirming the LSTM actually encoded sequential ordering rather than frequency signal before treating AP as meaningful. User approved once all pre-flight items were marked closed.
+**Gate 1.** Before any experiment ran, ml-lab parsed the Defender's Pass 2 verdict table from `DEFENSE.md` *(debate mode; in ensemble mode, Gate 1 reads `ENSEMBLE_REVIEW.md` and maps all issues to the pre-flight checklist)*, extracted the three conceded critique points as pre-flight checklist items, and verified each was closed before presenting the experiment plan. The plan covered the three conditions with pre-specified verdicts and the precondition check — confirming the LSTM actually encoded sequential ordering rather than frequency signal before treating AP as meaningful. User approved once all pre-flight items were marked closed. As the final Gate 1 check, `/intent-watch` was run against `HYPOTHESIS.md` to confirm no planning file had silently drifted from the pre-registered constraints before the experiment began.
 
-**Steps 6–7.** The experiment returned mixed results: the randomized-phases test showed the critique was right (AP dropped from 0.96 to 0.68 — phase position was signal, not sequence structure). The ordered vs. bag-of-categories comparison went to the defense. Then Condition C returned AP = 1.00.
+**Steps 6–7.** `/loop 2m /intent-watch` was activated against `HYPOTHESIS.md` at the start of scripting — any HIGH or CRITICAL drift from pre-registered conditions or thresholds would surface immediately. The experiment returned mixed results: the randomized-phases test showed the critique was right (AP dropped from 0.96 to 0.68 — phase position was signal, not sequence structure). The ordered vs. bag-of-categories comparison went to the defense. Then Condition C returned AP = 1.00.
 
 The near-perfect metrics suspicion trigger fired immediately. The precondition verification check also flagged: an AP of 1.00 implies the model could perfectly distinguish imposed ordering from random sequences — which may mean the precondition (LSTM encoding temporal fraud patterns) is trivially satisfied by a structural artifact rather than learned signal. The agent investigated, found that `sort()` was making sequences trivially detectable, and redesigned Condition C with soft-sort (Gaussian noise on ranks). The redesigned condition returned AP = 0.996 — still suspicious.
 
