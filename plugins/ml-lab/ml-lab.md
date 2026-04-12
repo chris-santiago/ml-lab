@@ -394,6 +394,7 @@ This checklist is dynamically constructed from the actual review output — it m
 Log `gate`/`experiment_plan_preflight_constructed` with `meta` containing `{"checklist_item_count": N, "review_mode": "<mode>"}`.
 
 Write a structured plan covering:
+- **Ensemble summary** [ensemble only]: N issues found across 3 assessors (high redundancy: N, medium redundancy: N, minority finding: N). Recommended action: proceed to experiment / defer pending user review of minority findings / flag for redesign — based on the tier distribution.
 - **Pre-flight checklist:** all items with verification method and status (format depends on review_mode, as above)
 - **Empirical tests:** each test with its pre-specified verdicts [ensemble: orchestrator-proposed; debate: debate-extracted]
 - **High-redundancy issues** [ensemble] / **Conceded critique points** [debate]: how each will be addressed in the experiment design
