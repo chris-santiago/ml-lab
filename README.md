@@ -322,9 +322,11 @@ The standard approach is single-pass: give a model some work, ask it what it thi
 - The work is actually valid but *sounds* questionable — and the evaluator has no structural incentive to push back
 - The correct answer is "run this specific test first" rather than a binary verdict
 
-**The clearest illustration:** five *false-positive critique traps* — valid work, correctly designed, presented under adversarial framing. The single-pass baseline scored 0.000 on all five: it accepted the adversarial premise entirely and condemned sound work. The ensemble got 4/5 correct verdicts. The debate protocol got 5/5.
+**What v6 revealed about independent redundancy:** at matched compute (3×), three independent critics with union-of-issues pooling outperform single-pass baseline and adversarial debate simultaneously. Ensemble IDR = 0.7717 vs. baseline 0.6712, CI = [+0.0426, +0.1648] — formally supported. The IDR advantage is ~3× larger on real ReScience C papers (+0.172) than on synthetic cases (+0.059).
 
-The deeper lesson is about *what structure buys and what it doesn't*. The v6 experiment showed that more compute and more independent perspectives solve most of the problem. The adversarial debate structure turned out to be either replicated by the ensemble or not valuable enough to justify the added latency and complexity — for regular methodology review.
+**What v6 revealed about structure's limits:** the debate protocol does not reliably recognize valid work. On the 20 defense cases, every non-multiround condition scored 0/20 correct exonerations. Multiround reached 12/60 individual runs (20%), but with high within-case variance. Defense-case calibration is the sharpest open problem for v7.
+
+The deeper lesson is about *what structure buys and what it doesn't*. More compute and more independent perspectives solve most of the detection problem. For cases where the question is whether methodology is empirically testable — not just flawed — iterative exchange still matters.
 
 ---
 
@@ -335,16 +337,16 @@ v6 ran six conditions against a 120-case benchmark with a cross-vendor (GPT-4o) 
 **`isolated_debate`** — the original ml-lab protocol (critic → defender → adjudicator):
 - H1a FAIL: lift over baseline = −0.0026, CI [−0.0108, +0.0059]. The debate structure adds no recall; IDR_debate = 0.6603 vs. IDR_baseline = 0.6712.
 - H2 FAIL (ensemble superior): isolated_debate − ensemble_3x = −0.0287, CI [−0.0434, −0.0154]. Independent redundancy outperforms adversarial structure at matched compute.
-- Precision cost: the adjudicator filters some true positives alongside false ones. IDP_debate = 0.9250 vs. IDP_ensemble = 0.9861.
+- Precision cost: the adjudicator filters some true positives alongside false ones. IDP_debate = 0.9639 vs. IDP_ensemble = 0.9861.
 
 No formal test goes in isolated_debate's favor. It is strictly dominated.
 
 **`biased_debate`** — aggressive critic persona, strong defender, designed to force harder engagement:
-- On regular cases: IDP_adj = 0.8917, the lowest of all conditions. FC_biased < FC_baseline (0.6726 vs. 0.6785).
+- On regular cases: IDP_raw = 0.8917, the lowest of all conditions (IDP_adj = 0.9250). FC_biased < FC_baseline (0.6726 vs. 0.6785).
 - H6 technically passes the pre-registered criterion (2/3 CI dimensions exclude zero) but in *opposite* directions: FVC_mixed improved (+0.2417), IDP_adj degraded (−0.0389). A precision tradeoff, not a clean improvement.
 
 **Conditional FM gate** — adaptive stopping designed to skip round 2 when debate converges early:
-- Gate-fire rate = 94.7% (341/360 cases required round 2). Mean PRR after round 1 = 0.418. The gate is functionally equivalent to full multiround and provides no compute savings.
+- Gate-fire rate = 94.7% (341/360 cases required round 2). Mean PRR after round 1 = 0.418 (across all 360 CFM files). The gate is functionally equivalent to full multiround and provides no compute savings.
 
 ---
 
@@ -355,7 +357,7 @@ The adversarial structure earns its keep in exactly one scenario: when the quest
 | Condition | FVC_mixed |
 |---|---|
 | baseline | 0.00 |
-| isolated_debate | 0.008 |
+| isolated_debate | 0.0083 |
 | ensemble_3x | 0.025 |
 | biased_debate | 0.25 |
 | **multiround** | **0.3667** |
@@ -377,7 +379,7 @@ Each version was a response to a specific failure mode in the one before it.
 | v3 | Harder cases; ETD ablation | All lift came from ETD; IDR/IDP/FVC debate delta = 0.0. ETD is a prompt-constraint effect, not an architecture effect | [`self_debate_experiment_v3/CONCLUSIONS.md`](self_debate_experiment_v3/CONCLUSIONS.md) · [`POST_MORTEM.md`](self_debate_experiment_v3/POST_MORTEM.md) |
 | v4 | ETD-removed rubric; pure detection metrics | Baseline ceiling effect (FC = 0.9452); ≤0.05 headroom. Halted after Phase 7 | [`self_debate_experiment_v4/`](self_debate_experiment_v4/) |
 | v5 | Harder synthetic case library; GPT-4o pilot scorer | Closed-loop confound (cross-vendor IDR delta = −0.7737). Majority-vote suppressed ensemble IDR vs. union | [`self_debate_experiment_v5/CONCLUSIONS.md`](self_debate_experiment_v5/CONCLUSIONS.md) · [`POST_MORTEM.md`](self_debate_experiment_v5/POST_MORTEM.md) |
-| **v6** | RC-sourced benchmark; 120 cases; GPT-4o scorer; 6 conditions × 3 runs | All debate hypotheses FAIL. Formal result: `ensemble_3x > {baseline ≈ isolated_debate}` | [`FINAL_SYNTHESIS.md`](self_debate_experiment_v6/FINAL_SYNTHESIS.md) · [`RESEARCH_REPORT.md`](self_debate_experiment_v6/RESEARCH_REPORT.md) |
+| **v6** | RC-sourced benchmark; 120 cases; GPT-4o scorer; 6 conditions × 3 runs | Co-primary hypotheses (H1a/H1b/H2) FAIL; H6 PASS (mixed direction). Formal result: `ensemble_3x > {baseline ≈ isolated_debate}` | [`FINAL_SYNTHESIS.md`](self_debate_experiment_v6/FINAL_SYNTHESIS.md) · [`RESEARCH_REPORT.md`](self_debate_experiment_v6/RESEARCH_REPORT.md) |
 
 The v2 numbers (debate 0.970 vs. baseline 0.384) are not wrong — they answered a different question with a smaller benchmark and a rubric that measured structural completeness alongside reasoning quality. v6 used a harder benchmark, cross-vendor scoring, and a rubric designed to isolate detection quality only. Read them together, not in place of each other.
 
@@ -508,9 +510,11 @@ Two rubric dimensions score structurally differently for the debate vs. baseline
 
 A healthcare triage scenario where the Defender correctly identified all critical flaws in its analysis but then labeled the verdict "the work is valid." Correct reasoning, wrong label — a calibration failure in output structure, not a reasoning failure. Fixed by restructuring the Defender prompt into two mandatory passes: complete the full analysis before selecting any verdict labels. The fix is in [`plugins/ml-lab/ml-defender.md`](plugins/ml-lab/ml-defender.md).
 
-**The "clean exoneration" finding is described as "directional, internal only" — what does that mean?**
+**Did any condition correctly handle valid work (defense cases)?**
 
-On 3 of the 5 internal false-positive trap cases, the debate's Defender raised zero concerns — clean "no issues" verdicts with no hedging. The compute-matched ensemble raised caveats alongside 2 of its 4 correct exonerations ("this looks valid, but..."). This pattern was real in the internal benchmark data, but: (1) n=5 is too small to confirm statistically, (2) the mean-score advantage disappears under harmonized scoring, and (3) the pattern did not replicate in the external exoneration benchmark — critics raised plausible-but-wrong concerns on all 3 external cases (IDP=0.5). "Directional, internal only" means: observe it as a tendency, don't rely on it as a confirmed structural guarantee.
+In v6, 20 of 120 cases were defense cases — valid work where the correct verdict is `defense_wins`. Every condition except multiround scored FVC=0.0 on all 20: baseline, ensemble_3x, isolated_debate, and biased_debate each produced 0 correct exonerations. Multiround achieved 12/60 individual runs (20%) correct, but with high variance. No condition reliably recognizes valid work.
+
+This is a direct contradiction of a v2 finding (debate 5/5, ensemble 4/5 on 5 internal false-positive cases). That result did not replicate at v6 scale. See [`next_steps.md §6`](self_debate_experiment_v6/next_steps.md) — the failure mode is diagnosed as a critic prompt calibration problem; the v7 plan addresses it.
 
 **Would results change significantly with a cheaper or different model?**
 
@@ -530,7 +534,7 @@ Yes — this is a known limitation. All agents (Critic, Defender, Judge, Scorer,
 
 **Use debate mode when** the hypothesis involves genuine empirical ambiguity — where the right answer is "run this test first" rather than a binary verdict. Multiround iterative exchange achieves FVC_mixed = 0.3667 vs. baseline 0.0; ensemble is structurally incapable of producing `empirical_test_agreed` resolutions.
 
-**Honest caveats:** The structural advantage evidence is primarily from synthetic benchmarks. An external exoneration benchmark was subsequently run: 3 defense_wins-type cases from peer-reviewed ML work (BERT/SQuAD 1.1, ResNet-152/ImageNet, clinical 5-fold CV), where a critique could be raised but the methodology is genuinely sound. Debate protocol passed all 3 (mean 0.875); baseline passed 0/3 on rubric (DC=0.0 structural rule) but reached correct verdict label in all 3. The exoneration pattern holds on externally grounded cases. The ETD advantage is confirmed as an output-constraint prompt effect (not an architecture effect) by ablation. See [`external_exoneration_results.json`](self_debate_experiment_v2/external_exoneration_results.json).
+**Honest caveats:** The ensemble advantage over debate is formally supported on regular cases (v6, n=80, CI excludes zero). On defense cases — valid work that should be exonerated — v6 found **0/20 correct verdicts** across all conditions except multiround (12/60 individual runs = 20%). No condition reliably recognizes valid work. This is the sharpest open problem going into v7: the protocol is well-calibrated for flaw detection, but systematically over-critiques valid work. A v2 internal benchmark (n=5 defense cases) showed debate 5/5, ensemble 4/5, but this did not replicate at v6 scale. See [`next_steps.md §6`](self_debate_experiment_v6/next_steps.md) for the v7 critic-prompt calibration plan.
 
 </details>
 

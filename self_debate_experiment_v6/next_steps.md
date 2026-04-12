@@ -40,7 +40,7 @@ Formally supported at both ends: ensemble > baseline and ensemble > isolated_deb
 
 | | IDR | IDP | FC |
 |---|---|---|---|
-| isolated_debate (current) | 0.6603 | 0.9250 | 0.6759 |
+| isolated_debate (current) | 0.6603 | 0.9639 | 0.6759 |
 | baseline | 0.6712 | 0.9472 | 0.6785 |
 | **ensemble_3x (recommended)** | **0.7717** | **0.9861** | **0.7046** |
 
@@ -50,7 +50,7 @@ Formally supported at both ends: ensemble > baseline and ensemble > isolated_deb
 - Pool issues using **union** (any-assessor-found = credit) — tag each issue with assessor support count (1/3, 2/3, 3/3); output the full tagged list, do not collapse to majority-vote verdict
 - Same compute budget (3×), better output on both recall and precision
 
-**Why no defender?** The defender suppresses true positives as often as false ones. IDP without a defender (ensemble: 0.9861) exceeds IDP with a defender (isolated_debate: 0.9250). Three independent critics, absent adversarial pressure, are naturally more precise because they pick their shots carefully. The defender creates inflation, not filtering.
+**Why no defender?** The defender suppresses true positives as often as false ones. IDP without a defender (ensemble: 0.9861) exceeds IDP with a defender (isolated_debate: 0.9639). Three independent critics, absent adversarial pressure, are naturally more precise because they pick their shots carefully. The defender creates inflation, not filtering.
 
 **Precision of minority-flagged issues (issue `c9dfc257` — resolved):** Per-tier precision analysis confirmed no significant difference: minority-flagged precision = 0.946, unanimous = 0.929, diff = +0.017, CI [−0.028, +0.068]. Union output is safe on both recall and precision dimensions.
 

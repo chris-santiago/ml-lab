@@ -12,10 +12,14 @@
 
 **Answer: No — not at the pre-registered threshold.**
 
-H1a (regular cases): lift = −0.0026, 95% CI = [−0.1059, 0.2236], p = 0.5165 → **FAIL**  
-H1b (mixed FVC): lift = +0.0083, 95% CI = [0.00, 0.05], p = 0.361 → **FAIL**
+H1a (regular cases): lift = −0.0026, 95% CI = [−0.0108, +0.0059], p = 0.6967 → **FAIL**  
+H1b (mixed FVC): lift = +0.0083, 95% CI = [0.00, 0.025], p = 0.3684 → **FAIL**
 
 The adversarial debate protocol (isolated critic + defender + adjudicator) does not reliably outperform a single-pass critique on either regular or mixed cases. The fair-comparison lift is negative (−0.0026) and the bootstrap CI spans zero by a wide margin. The null result is robust across threshold sensitivity checks (±0.02).
+
+*Note: CIs above are paired bootstrap (case-level differences). Original unpaired analysis
+reported wider CIs of [−0.1059, 0.2236] for H1a and [0.00, 0.05] for H1b — same FAIL
+verdict in both cases.*
 
 **Dimension decomposition:** IDR is the primary failure mode — debate misses slightly more planted issues than baseline (0.6603 vs 0.6712). IDP_adj shows a small positive signal (+0.0167) from adjudicator filtering, but this is insufficient to offset the IDR deficit. DRQ and FVC are flat across conditions.
 

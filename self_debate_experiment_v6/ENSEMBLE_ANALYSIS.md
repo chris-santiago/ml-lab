@@ -58,12 +58,16 @@ Positive delta = debate superior; negative delta = ensemble superior.
 
 | Dimension | isolated_debate | ensemble_3x | Delta (iso − ens) | 95% CI | Verdict |
 |---|---|---|---|---|---|
-| FC (regular cases) | 0.6759 | 0.7046 | −0.0287 | [−0.1567, 0.0976] | INCONCLUSIVE |
+| FC (regular cases) | 0.6759 | 0.7046 | −0.0287 | [−0.0434, −0.0154] | FAIL (ensemble superior) |
 | FVC_mixed | 0.0083 | 0.025 | −0.0167 | [−0.075, 0.025] | INCONCLUSIVE |
 
-Both CIs span zero. The null result cannot be rejected in either dimension. At this sample
-size (n=80 regular cases per condition), the experiment lacks the power to distinguish the
-two conditions on the FC composite metric.
+On regular cases, the paired CI excludes zero entirely — ensemble is formally superior to
+debate on the FC composite (H2 regular FAIL, ensemble > debate). On mixed FVC, the CI spans
+zero and the result remains inconclusive at this sample size.
+
+*Note: Originally reported as INCONCLUSIVE with unpaired bootstrap CI = [−0.1567, +0.0976].
+Correcting to paired bootstrap (CONCLUSIONS.md Q2, journal `08b523f8`) narrowed the CI to
+[−0.0434, −0.0154], excluding zero.*
 
 **Bootstrap parameters:** n=10,000 resamples, seed=42.
 
@@ -139,9 +143,10 @@ partially reflects this near-zero floor for ensemble rather than genuine equival
 metric alongside FC. The FC composite obscures large IDR differences, and the IDR advantage
 for ensemble (+0.1114) warrants reporting on its own terms.
 
-**6.2 Larger N for H2.** The H2 CI width ([−0.1567, 0.0976] for FC) is too wide to detect
-practically meaningful differences. Increasing to n=160 cases per condition would tighten
-the CI enough to meaningfully test whether the IDR descriptive difference is real.
+**6.2 Larger N for H2 mixed.** H2 regular is formally resolved — paired CI [−0.0434, −0.0154]
+excludes zero (ensemble superior). H2 mixed FVC remains INCONCLUSIVE (CI = [−0.075, +0.025]).
+Increasing mixed-case N from 40 to ~160 cases per condition would provide power to detect
+whether ensemble can approach debate's FVC_mixed advantage.
 
 **6.3 Separate IDR and verdict aggregation rules.** The union/majority-vote split introduced
 here should be carried forward as a standard design principle for ensemble conditions. It is

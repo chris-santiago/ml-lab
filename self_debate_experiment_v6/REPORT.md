@@ -1,5 +1,7 @@
 # v6 Investigation Report: Does Adversarial Debate Add Value to ML Methodology Review?
 
+> **Note (2026-04-12):** This report reflects the pre-peer-review analysis (unpaired bootstrap CIs). After Phase 10 peer review, two corrections were applied: (1) paired bootstrap narrowed H1a CI to [−0.0108, +0.0059]; (2) H2 converted from INCONCLUSIVE to FAIL (ensemble superior, CI = [−0.0434, −0.0154]). H6 converted from FAIL to PASS (mixed direction). See [`FINAL_SYNTHESIS.md`](FINAL_SYNTHESIS.md) for corrected verdicts.
+
 **Date:** 2026-04-11
 **Experiment:** self_debate_experiment_v6
 **Benchmark:** 120 cases (80 regular, 40 mixed) × 6 conditions × 3 runs = 2,160 outputs
