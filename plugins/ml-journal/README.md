@@ -163,20 +163,20 @@ Use `/research-note` for sharing what happened today. Use `/research-report` for
 
 ## Entry Types
 
-| Type | Required Fields | Confirm? | Weight |
-|---|---|---|---|
-| `issue` | description, severity¹ | No | Light |
-| `resolution` | description | No | Light |
-| `discovery` | description | Yes | Medium |
-| `hypothesis` | description | Yes | Medium |
-| `lesson` | description | No | Light |
-| `memo` | description | No | Light |
-| `decision` | description, rationale | Yes | Medium |
-| `experiment` | description, verdict² | Yes | Medium |
-| `summary` | description | Yes | Medium |
-| `post_mortem` | description, what_failed, root_cause | Yes | Heavy |
-| `checkpoint` | in_progress | Yes | Heavy |
-| `git` | commit_hash, message, branch | Yes (via `/log-commit`) | — |
+| Type | Required Fields | Key Optional Fields | Confirm? | Weight |
+|---|---|---|---|---|
+| `issue` | description, severity¹ | context, tags | No | Light |
+| `resolution` | description | linked_issue_id, approach, evidence | No | Light |
+| `decision` | description, rationale | alternatives, implications, linked_issue_id, linked_id | Yes | Medium |
+| `discovery` | description | implications, source, linked_issue_id | Yes | Medium |
+| `hypothesis` | description | expected_result, metric, linked_issue_id | Yes | Medium |
+| `lesson` | description | context, applies_to, linked_id | No | Light |
+| `memo` | description | detail, context, tags, linked_issue_id, linked_id | No | Light |
+| `experiment` | description, verdict² | linked_hypothesis_id, linked_issue_id, metric, result | Yes | Medium |
+| `summary` | description | key_decisions, open_threads | Yes | Medium |
+| `post_mortem` | description, what_failed, root_cause, linked_issue_id | contributing_factors, lessons, severity, scope, remediation, detail | Yes | Heavy |
+| `checkpoint` | in_progress | pending_decisions, recently_completed, key_context, git_state, open_threads | Yes | Heavy |
+| `git` | commit_hash, message, branch | files_changed, diff_summary | Yes (via `/log-commit`) | — |
 
 ¹ `severity` must be one of: `low`, `moderate`, `high`, `critical`
 ² `verdict` must be one of: `confirmed`, `refuted`, `inconclusive`
@@ -188,7 +188,7 @@ Light entries are logged immediately. Medium entries (including discoveries and 
 Both scripts are stdlib-only Python (no external dependencies). They are installed into `.project-log/` by `/log-init` and can be invoked directly.
 
 - **`journal_log.py`** — Validates fields, constructs envelope (`id`, `timestamp`, `type`, `project`, `session_id`), appends entry to `journal.jsonl`
-- **`journal_query.py`** — Read operations: `--status`, `--latest-checkpoint`, `--list TYPE [--since Nd]`, `--unresolved-issues`, `--entry ID_PREFIX`
+- **`journal_query.py`** — Read operations: `--status`, `--latest-checkpoint`, `--list TYPE [--since Nd]`, `--unresolved-issues`, `--resolved-issues`, `--entry ID_PREFIX`, `--recent N [--since Nd]`
 
 The journal is a plain JSONL file — one JSON object per line. Query it directly without any skill:
 
@@ -202,8 +202,14 @@ python3 .project-log/journal_query.py --list decision --since 7d
 # List all unresolved issues
 python3 .project-log/journal_query.py --unresolved-issues
 
-# Pipe to jq for custom queries
-python3 .project-log/journal_query.py --list experiment | jq '.[] | {description, verdict}'
+# List resolved issues with their linked resolutions
+python3 .project-log/journal_query.py --resolved-issues
+
+# Show the 10 most recent entries across all types
+python3 .project-log/journal_query.py --recent 10
+
+# Show the 5 most recent entries from the last 7 days
+python3 .project-log/journal_query.py --recent 5 --since 7d
 ```
 
 ## Example Output

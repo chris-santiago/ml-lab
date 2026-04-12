@@ -185,7 +185,42 @@ def cmd_status(entries):
     print(divider())
 
 
+KNOWN_TYPES = {
+    "issue", "resolution", "decision", "discovery", "hypothesis", "experiment",
+    "post_mortem", "lesson", "memo", "summary", "checkpoint", "git",
+}
+
+
+def print_entry_fields(e):
+    """Print content fields for a single entry (used by cmd_list, cmd_recent)."""
+    for key in ["description", "severity", "verdict", "what_failed", "root_cause",
+                "rationale", "in_progress", "message", "context", "approach",
+                "implications", "source", "expected_result", "result",
+                "contributing_factors", "lessons", "applies_to", "evidence"]:
+        val = e.get(key)
+        if val:
+            print(f"  {key}: {val}")
+    # Long-form detail — truncate for readability
+    detail = e.get("detail")
+    if detail:
+        truncated = detail[:300] + " …" if len(detail) > 300 else detail
+        print(f"  detail: {truncated}")
+    # List fields
+    for key in ["tags", "open_threads", "key_decisions", "files_changed"]:
+        val = e.get(key)
+        if val:
+            print(f"  {key}: {', '.join(val)}")
+    # Linked IDs
+    for key in ["linked_id", "linked_issue_id", "linked_hypothesis_id"]:
+        val = e.get(key)
+        if val:
+            print(f"  {key}: {val[:8]}")
+
+
 def cmd_list(entries, entry_type, since_str):
+    if entry_type not in KNOWN_TYPES:
+        sys.exit(f"ERROR: Unknown type '{entry_type}'. Valid types: {', '.join(sorted(KNOWN_TYPES))}")
+
     cutoff = parse_since(since_str)
     filtered = [e for e in entries if e.get("type") == entry_type]
     if cutoff:
@@ -202,25 +237,40 @@ def cmd_list(entries, entry_type, since_str):
 
     for e in filtered:
         print(f"\n[{short_id(e)}]  {fmt_ts(e['timestamp'])}")
-        # Print type-specific summary fields
-        for key in ["description", "severity", "verdict", "what_failed", "root_cause",
-                    "rationale", "in_progress", "message", "context", "approach",
-                    "implications", "source", "expected_result", "result",
-                    "contributing_factors", "lessons", "applies_to"]:
-            val = e.get(key)
-            if val:
-                print(f"  {key}: {val}")
-        # List fields
-        for key in ["tags", "open_threads", "key_decisions", "files_changed"]:
-            val = e.get(key)
-            if val:
-                print(f"  {key}: {', '.join(val)}")
-        # Linked IDs
-        for key in ["linked_id", "linked_issue_id", "linked_hypothesis_id"]:
-            val = e.get(key)
-            if val:
-                print(f"  {key}: {val[:8]}")
+        print_entry_fields(e)
 
+    print(divider())
+
+
+def cmd_resolved_issues(entries):
+    resolved_prefixes = {e.get("linked_issue_id") for e in entries if e.get("type") == "resolution"}
+    resolutions_by_issue = defaultdict(list)
+    for e in entries:
+        if e.get("type") == "resolution" and e.get("linked_issue_id"):
+            resolutions_by_issue[e["linked_issue_id"]].append(e)
+
+    resolved = [e for e in entries if e.get("type") == "issue" and is_resolved(e["id"], resolved_prefixes)]
+
+    if not resolved:
+        print("No resolved issues.")
+        return
+
+    print(divider("═"))
+    print(f"  RESOLVED ISSUES ({len(resolved)})")
+    print(divider("═"))
+    for issue in resolved:
+        sev = issue.get("severity", "?")
+        print(f"\n[{short_id(issue)}]  {fmt_ts(issue['timestamp'])}  severity:{sev}")
+        print(f"  {issue.get('description', '')}")
+        # Find linked resolution(s)
+        matching = [r for r in entries if r.get("type") == "resolution"
+                    and r.get("linked_issue_id") and issue["id"].startswith(r["linked_issue_id"])]
+        for r in matching:
+            print(f"  ↳ resolution [{short_id(r)}]  {fmt_ts(r['timestamp'])}")
+            if r.get("description"):
+                print(f"    {r['description']}")
+            if r.get("approach"):
+                print(f"    approach: {r['approach']}")
     print(divider())
 
 
@@ -248,34 +298,26 @@ def cmd_unresolved_issues(entries):
     print(divider())
 
 
-def cmd_recent(entries, n):
+def cmd_recent(entries, n, since_str=None):
     if not entries:
         print("Journal is empty.")
         return
 
-    recent = entries[-n:]
+    cutoff = parse_since(since_str)
+    pool = entries
+    if cutoff:
+        pool = [e for e in entries if datetime.fromisoformat(e["timestamp"]) >= cutoff]
+
+    recent = pool[-n:]
+    qualifier = f" in last {since_str}" if since_str else ""
     print(divider("═"))
-    print(f"  RECENT ENTRIES ({len(recent)} of {len(entries)} total)")
+    print(f"  RECENT ENTRIES ({len(recent)} of {len(entries)} total{qualifier})")
     print(divider("═"))
 
     for e in recent:
         etype = e.get("type", "?")
         print(f"\n[{short_id(e)}]  {fmt_ts(e['timestamp'])}  type:{etype}")
-        for key in ["description", "severity", "verdict", "what_failed", "root_cause",
-                    "rationale", "in_progress", "message", "context", "approach",
-                    "implications", "source", "expected_result", "result",
-                    "contributing_factors", "lessons", "applies_to"]:
-            val = e.get(key)
-            if val:
-                print(f"  {key}: {val}")
-        for key in ["tags", "open_threads", "key_decisions", "files_changed"]:
-            val = e.get(key)
-            if val:
-                print(f"  {key}: {', '.join(val)}")
-        for key in ["linked_id", "linked_issue_id", "linked_hypothesis_id"]:
-            val = e.get(key)
-            if val:
-                print(f"  {key}: {val[:8]}")
+        print_entry_fields(e)
 
     print(divider())
 
@@ -305,6 +347,7 @@ def main():
     group.add_argument("--status",            action="store_true")
     group.add_argument("--list",              metavar="TYPE")
     group.add_argument("--unresolved-issues", action="store_true")
+    group.add_argument("--resolved-issues",   action="store_true")
     group.add_argument("--entry",             metavar="ID_PREFIX")
     group.add_argument("--recent",            metavar="N", type=int,
                        help="Show the N most recent entries across all types")
@@ -322,10 +365,12 @@ def main():
         cmd_list(entries, args.list, args.since)
     elif args.unresolved_issues:
         cmd_unresolved_issues(entries)
+    elif args.resolved_issues:
+        cmd_resolved_issues(entries)
     elif args.entry:
         cmd_entry(entries, args.entry)
     elif args.recent:
-        cmd_recent(entries, args.recent)
+        cmd_recent(entries, args.recent, args.since)
 
 
 if __name__ == "__main__":
