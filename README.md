@@ -271,6 +271,19 @@ Full trace and spec validation notes are in [`seq_fraud_experiment/TEST2_FINDING
 
 **Current default: three independent `ml-critic` calls (`ensemble_3x`) with union-of-issues output.** The original critic-defender-adjudicator debate structure is now opt-in — reserved for empirically ambiguous cases where iterative exchange adds value. The switch is grounded in formal evidence from v6, a 120-case benchmark with a cross-vendor (GPT-4o) scorer.
 
+**Metrics used in Part 2:**
+
+| Abbreviation | Full Name | What It Measures |
+|---|---|---|
+| IDR | Issue Detection Rate | Recall against documented flaws — fraction of planted issues the evaluator surfaced |
+| IDP | Issue Detection Precision | Precision among raised issues — fraction of flagged issues that are genuine flaws |
+| FC | Fair-Comparison Composite | Composite of IDR + IDP; excludes DC and DRQ, which structurally penalize single-pass baselines |
+| FVC | Final Verdict Correctness | Whether the correct verdict (flag / pass) was reached on a case |
+| ETD | Empirical Test Design | Quality of proposed empirical tests; scored for debate conditions only |
+| DC | Defense Calibration | Whether the correct verdict was reached *via a defense role*; 0.0 for single-pass by design |
+| DRQ | Decision Resolution Quality | Whether contested positions resolved through structured exchange; capped at 0.5 for single-pass |
+| PRR | Point Resolution Rate | Fraction of contested debate points resolved after a given round |
+
 Three-way ordering, all formally supported at matched compute (paired bootstrap, n=10,000 resamples, seed=42):
 
 | Comparison | n | Δ | 95% CI | Verdict |
