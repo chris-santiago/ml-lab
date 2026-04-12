@@ -58,6 +58,9 @@ In both modes, only the agreed (or orchestrator-proposed) empirical tests go int
 
 The diagram below shows the complete workflow, including user-approval gates and macro-iteration paths.
 
+<details>
+<summary>Show full workflow diagram</summary>
+
 ```mermaid
 flowchart TD
     START(["▶ Start"]) --> PRE["Ask: hypothesis · metrics · report_mode · review_mode<br/>Write HYPOTHESIS.md"]
@@ -135,6 +138,8 @@ flowchart TD
     S13GATE -- "Yes" --> S13["Step 13 — README Rewrite<br/>readme-rewriter · outside reader<br/>diagnose → outline → rewrite"]
     S13 --> DONE(["✓ Final Output to Caller"])
 ```
+
+</details>
 
 ---
 
