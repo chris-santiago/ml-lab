@@ -1,126 +1,156 @@
 ---
 name: artifact-sync
-description: Sync all artifacts after any experiment, analysis step, or issue resolution in ml-lab — orients from journal and git ground truth, updates conclusions, analysis, report, and README, then runs a coherence audit
+description: Audit artifacts for staleness and conflicts after any experiment step or issue resolution. Default mode is audit-only (produces a change manifest). Fix mode applies changes with per-file commits.
 ---
 
-After any experiment, analysis step, or issue resolution in ml-lab, run this full sync before marking work complete.
+Run this after any experiment, analysis step, or issue resolution — before marking work complete.
+[→ decision 88357f02]
 
-## Step 1 — Orient via Ground-Truth Sources
+**Default is audit-only.** If the manifest is clean (no conflicts, no staleness), you're done — the completion gate is satisfied. If issues are found, present the manifest and let the user decide whether to fix.
 
-Run all four commands. Do not skip any. Use the results to build situational awareness before touching any file.
+---
+
+## Step 1 — Discover and Classify
+
+### 1a. Identify the active experiment
 
 ```bash
-# Unresolved issues — the open problem list
+ls -d self_debate_experiment_*/
+```
+
+The active experiment is whichever is flagged `active` in `CLAUDE.md`. If ambiguous, use the most recently committed `CONCLUSIONS.md`:
+
+```bash
+git log --oneline -1 -- self_debate_experiment_*/CONCLUSIONS.md
+```
+
+State the active experiment directory explicitly.
+
+### 1b. Find all .md files in scope
+
+```bash
+# Experiment dir
+ls <experiment_dir>/*.md
+
+# Root level
+ls *.md
+```
+
+### 1c. Classify each file into a tier
+
+Apply these rules **in order** (first match wins). For each file, state its tier explicitly.
+
+**Frozen** — never edited by this skill:
+1. First 10 lines contain a freeze/correction header (`> **Note` or `> **Correction`)
+2. Filename matches a snapshot pattern: `PEER_REVIEW*`, `REPORT_ADDENDUM*`, `SENSITIVITY_ANALYSIS*`
+3. Is `REPORT.md` AND any other non-frozen doc in the same directory has a more recent commit:
+   ```bash
+   git log -1 --format="%ci" -- <experiment_dir>/REPORT.md
+   git log -1 --format="%ci" -- <experiment_dir>/FINAL_SYNTHESIS.md  # or other post-hoc doc
+   ```
+
+**Derived** — out of sync scope:
+4. `.md` file outside the active experiment directory AND not `README.md`
+   (e.g., `WORKING_PAPER.md`, `RELATED_WORK.md`, `research-notes/*.md`)
+
+**Canonical** — source of truth:
+5. `CONCLUSIONS.md` — always canonical for hypothesis verdicts and formal test results
+
+**Live** — sync targets (kept current):
+6. `README.md` — always live
+7. All remaining non-frozen, non-derived `.md` files in the experiment directory
+
+### 1d. Show the classification
+
+Present a table:
+
+```
+TIER CLASSIFICATION (experiment: self_debate_experiment_vN/)
+
+Canonical:  CONCLUSIONS.md
+Live:       README.md, FINAL_SYNTHESIS.md, next_steps.md, ENSEMBLE_ANALYSIS.md
+Frozen:     REPORT.md (superseded), PEER_REVIEW_R1.md, SENSITIVITY_ANALYSIS.md, REPORT_ADDENDUM.md
+Derived:    WORKING_PAPER.md, RELATED_WORK.md
+
+Audit scope: 5 files (1 canonical + 4 live)
+Skipping:   4 frozen, 2 derived
+```
+
+If a classification is uncertain, flag it and ask.
+
+---
+
+## Step 2 — Orient via Ground Truth
+
+Run all four queries. Use the results to understand what changed — do not start editing.
+
+```bash
 python3 .project-log/journal_query.py --unresolved-issues
-
-# Recent experiment entries — logged verdicts and results
 python3 .project-log/journal_query.py --list experiment --since 7d
-
-# Recent discoveries — new findings that may change interpretation
 python3 .project-log/journal_query.py --list discovery --since 7d
-
-# Recent git activity — what files actually changed and when
 git log --oneline -10
 ```
 
-From these four sources, explicitly state:
+State explicitly:
 - **What changed** in this work session (new results, revised claims, resolved issues)
-- **What issues are currently open** per the journal (not per any local file)
-- **What findings are logged** that may not yet be reflected in written artifacts
+- **What issues are open** per the journal
+- **What findings are logged** that may not yet appear in live docs
 
-## Step 2 — Identify the Active Experiment
+---
 
-Find all `self_debate_experiment_*` directories that contain a `CONCLUSIONS.md`:
+## Step 3 — Audit
 
-```bash
-ls -d self_debate_experiment_*/  # list candidates
+Read the canonical doc (`CONCLUSIONS.md`) and all live docs. For each live doc, check:
+
+1. **Conflicts** — Does any claim in this doc contradict the canonical source?
+   - When two live docs conflict: `git log -1 --format="%ci" -- <file>` — more recent commit wins
+2. **Staleness** — Does this doc reference a finding that has since been revised? Check against journal experiment/discovery entries.
+3. **Completeness** — Is any finding present in the canonical source missing from this live doc, if the doc's scope covers it?
+
+Also check:
+- Unresolved journal issues are not described as resolved in any live doc
+- Resolved journal issues are not still listed as open
+
+### Produce the manifest
+
+For each issue found, output one entry:
+
+```
+[CONFLICT|STALE|MISSING] <file>:<line>
+  Current:   "<text in the file>"
+  Should be: "<corrected text>"
+  Authority: <canonical file or journal entry ID>
+  Reason:    <one sentence>
 ```
 
-The active experiment is whichever one is flagged `active` in `CLAUDE.md`. If CLAUDE.md is ambiguous, use the one whose `CONCLUSIONS.md` was most recently committed:
+If the manifest is empty, state:
 
-```bash
-git log --oneline -- self_debate_experiment_*/CONCLUSIONS.md
+```
+AUDIT CLEAN — no conflicts, staleness, or completeness gaps across N files.
 ```
 
-State the active experiment directory explicitly before proceeding.
+This satisfies the completion gate. Stop here unless the user requests fixes.
 
-## Step 3 — Establish Document Authority via Git Log
+---
 
-Authority is determined by **commit recency, not document category**. A post-hoc analysis doc committed after `CONCLUSIONS.md` is more authoritative on the claims it touches — it incorporates subsequent analysis, peer review, or corrections. Git log is the oracle.
+## Step 4 — Fix (only when requested)
 
-For each document category, retrieve the last-modified commit date:
+If the user says to fix, apply changes from the manifest:
 
-```bash
-# Get commit dates for all .md files in the experiment dir
-git log --format="%ci %s" -- <experiment_dir>/*.md | sort -r | head -30
+1. For each file in the manifest, make the edits
+2. **Commit per file** — each commit message cites the authority:
+   ```
+   fix(<file>): <what changed> (authority: <source>)
+   ```
+3. Log each commit via the journal (`journal_log.py --type git`)
 
-# For a specific file
-git log -1 --format="%ci" -- <experiment_dir>/<file>.md
-```
+Do not batch multiple files into one commit. The point is per-file traceability.
 
-**Document roles** (not a strict authority ranking — use commit dates to resolve conflicts):
-- `CONCLUSIONS.md`, `REPORT.md`, `TECHNICAL_REPORT.md` — main experiment output documents
-- `next_steps.md`, `FINAL_SYNTHESIS.md`, `RESEARCH_REPORT.md` — post-hoc docs; written after the main experiment to incorporate corrections, peer review, or updated analysis
-- `ENSEMBLE_ANALYSIS.md`, `SENSITIVITY_ANALYSIS.md` — post-hoc supplementary analysis
+---
 
-**Post-hoc docs are authoritative over main experiment docs on the claims they address.** When a post-hoc doc contains a revised CI, flipped verdict, or updated metric, that correction must flow back into `CONCLUSIONS.md`, `REPORT.md`, and other main docs — not the other way around.
+## Notes
 
-When multiple post-hoc docs are in conflict, the most recently committed one wins. If the git log shows many recent changes across several docs, list the commit dates explicitly and resolve each conflict by recency before proceeding.
-
-## Step 4 — Update All Affected Artifacts
-
-Read all post-hoc docs first. Extract any corrections or updates they contain. Then apply those corrections to the main experiment docs. Work through each artifact below. If nothing changed that affects it, say so explicitly — do not skip silently.
-
-### Post-hoc docs → `CONCLUSIONS.md`
-- For each correction or revised claim found in post-hoc docs: add a `> Post-experiment qualification (date):` block under the affected hypothesis
-- Add numbered entries under any post-experiment review section for new findings
-- Do not remove or overwrite existing verdict entries — append only
-
-### Post-hoc docs → `REPORT.md` / `TECHNICAL_REPORT.md`
-- Update the conclusion section if any headline claim or result was revised by a post-hoc doc
-- Update the artifacts table with any new files
-- Ensure revised CIs, verdicts, or metric values from post-hoc docs are reflected
-
-### `ENSEMBLE_ANALYSIS.md` (if present)
-- Add a new dated section for any ensemble or ablation result
-- Update any summary tables if a claim or number changed
-
-### `FINAL_SYNTHESIS.md` / `RESEARCH_REPORT.md`
-- If updates were made to `CONCLUSIONS.md` or `REPORT.md` above, check these docs for consistency
-- Update if they reference a now-superseded claim from main experiment docs
-
-### `README.md`
-- Add a dated finding block in "What We Found" if a headline number or structural advantage changed
-- Update any recommendation sections if the current evidence changes the recommendation
-
-### `next_steps.md`
-- Mark resolved action items as complete using journal resolution entries as the source of truth
-- Add new items surfaced by unresolved journal issues
-- Update priorities if new findings changed what matters most
-
-## Step 5 — Coherence Audit
-
-Answer all three questions explicitly. Do not skip any.
-
-**1. Conflicts** — Do any two documents contradict each other on the same claim?
-- For each conflict: use `git log -1 --format="%ci" -- <file>` to determine which doc was committed more recently — that version is authoritative
-- Fix all conflicts before continuing; note which doc was updated to match which
-
-**2. Staleness** — Does any document reference a finding that has since been revised?
-- Cross-reference claims in `REPORT.md` §conclusion and `README.md` against the most recent version of each result (post-hoc docs + journal entries)
-- Check that unresolved journal issues are not described as resolved in any artifact
-- Check that resolved journal issues are not still listed as open
-- If yes: update the stale text
-
-**3. Completeness** — Does each entry point contain the strongest current evidence?
-- `README.md` — someone landing here cold should see the latest findings, not an older snapshot
-- `REPORT.md` conclusion — should reflect the current honest summary including all post-experiment revisions
-- `CONCLUSIONS.md` post-experiment section — should list all revisions with dates
-
-If any entry point is missing a finding that others have, add it.
-
-## Step 6 — Confirm and Commit
-
-State which files were changed and why. Then use the **log-commit skill** (`/log-commit`) — do not use bare `git commit`. The commit message should list artifact updates separately from the experiment results that prompted them.
-
-Do not mark any issue resolved until Steps 1–5 are complete.
+- **Frozen docs are never wrong** — they're snapshots. If someone reads a frozen doc and gets a stale number, that's expected. The freeze header tells them where to find the current value.
+- **Derived docs are the author's responsibility.** If WORKING_PAPER.md has a stale number, that's a separate editing task, not an artifact-sync issue.
+- **Canonical wins ties.** When CONCLUSIONS.md and a live doc disagree, CONCLUSIONS.md is authoritative. When two live docs disagree, git recency breaks the tie.
+- **The skill does not propagate numbers into new files.** It only checks existing claims in live docs against canonical sources. Adding a new finding to README.md is an authoring decision, not a sync operation.
