@@ -1,6 +1,6 @@
 # Agent Definitions
 
-This directory contains reference copies of the Claude Code agents that power the ml-lab investigation workflow.
+This directory contains reference copies of the Claude Code agents and skills that power the ml-lab investigation workflow.
 
 ## Agents
 
@@ -12,10 +12,19 @@ This directory contains reference copies of the Claude Code agents that power th
 | `research-reviewer.md` | Deep peer reviewer — Opus-class structured review of REPORT.md | `ml-lab` (Step 10, Round 1) |
 | `research-reviewer-lite.md` | Verification reviewer — Haiku-class follow-up review | `ml-lab` (Step 10, Rounds 2–3) |
 | `readme-rewriter.md` | Outside-reader README rewriter — diagnoses and rewrites for external audiences | `ml-lab` (Step 13) |
+| `intent-monitor.md` | Pre-registration drift monitor — evaluates git changes in an experiment directory against binding constraints in a source-of-truth document; emits a clean-pass line or structured conflict report | `intent-watch` skill (user-invoked) |
 
 All agents except `ml-lab` are subagents dispatched via the Agent tool. In **ensemble mode** (the default), `ml-defender` is not dispatched — the review phase runs 3 independent `ml-critic` dispatches with union pooling. In **debate mode**, the full critic → defender → rounds chain runs as before.
 
 For installation instructions, invocation guide, workflow diagram, and agent interaction overview, see the [root README](../README.md#install).
+
+## Skills
+
+Skills are user-invocable slash commands that live in `skills/<name>/SKILL.md`.
+
+| Skill | Invocation | Applicable to |
+|-------|-----------|---------------|
+| `intent-watch` | `/intent-watch <experiment_dir> <source_of_truth>` | Active experiment phases where a pre-registration document (e.g. `HYPOTHESIS.md`) is the binding reference. Run ad-hoc or via `/loop` for continuous monitoring during Phase 4–7 execution. Not useful before a source-of-truth document exists or after the experiment is complete. |
 
 ## What these copies are
 
