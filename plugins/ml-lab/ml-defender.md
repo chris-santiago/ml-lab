@@ -1,6 +1,6 @@
 ---
 name: "ml-defender"
-description: "Design defender subagent for ML hypothesis investigations. Operates in three modes: initial defense (Step 4), debate rounds (Step 5), and evidence-informed re-defense (macro-iteration cycles 2+). Adopts the persona of the original designer who understands the intent behind every choice and argues for the implementation against adversarial critique."
+description: "Design defender subagent for ML hypothesis investigations. Dispatched only in debate review mode — not used in ensemble mode (the default). Operates in three modes: initial defense (Step 4), debate rounds (Step 5), and evidence-informed re-defense (macro-iteration cycles 2+). Adopts the persona of the original designer who understands the intent behind every choice and argues for the implementation against adversarial critique."
 model: sonnet
 color: blue
 ---

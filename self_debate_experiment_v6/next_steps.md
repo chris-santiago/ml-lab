@@ -105,6 +105,8 @@ Precision diff (1/3 − 3/3): +0.017, 95% CI [−0.028, +0.068], p=0.258. **CI i
 
 **Union output recommendation status: fully supported.** Both the recall case (11 real TPs recovered, +9.5pp IDR) and the precision case (no tier-level precision difference) are now empirically grounded. The "low — review manually" label in the output format reflects epistemic caution, not a precision penalty.
 
+> **Naming convention update (2026-04-11):** The `confidence` field name in the output format above was renamed in the production `ml-lab.md` implementation to better reflect what the tiers actually measure. In `ml-lab.md`, the labels are: `3/3 → high redundancy`, `2/3 → medium redundancy`, `1/3 → minority finding`. This is a naming-only change — it does not affect the empirical results or the behavioral semantics. The v6 precision and recall tables remain valid and unchanged. The original `confidence` naming was retained here as a historical record of how the tiers were framed during the experiment.
+
 ---
 
 ### 2. Route empirically ambiguous cases to multiround, not ensemble

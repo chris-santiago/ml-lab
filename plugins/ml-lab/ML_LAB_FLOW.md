@@ -1,8 +1,8 @@
-# ml-lab Canonical Flow
+# ml-lab Investigation Flow
 
 ```mermaid
 flowchart TD
-    START(["▶ Start"]) --> PRE["Ask: hypothesis · metrics · report_mode<br/>Write HYPOTHESIS.md"]
+    START(["▶ Start"]) --> PRE["Ask: hypothesis · metrics · report_mode · review_mode<br/>Write HYPOTHESIS.md"]
 
     PRE ~~~ LOG["📋 INVESTIGATION_LOG.jsonl<br/>uv run log_entry.py throughout all steps"]
     style LOG fill:#f9f3e0,stroke:#c9a227,stroke-dasharray: 5 5
@@ -10,17 +10,24 @@ flowchart TD
     PRE --> S1["Step 1 — Build PoC<br/>Reference check · Explicit params"]
     S1 --> S2["Step 2 — Clarify Intent<br/>Write README.md"]
 
-    S2 --> S3["Step 3 — ml-critic<br/>CRITIQUE.md"]
+    S2 --> RMODE{"review_mode?"}
+
+    RMODE -- "ensemble (default)" --> ENS_S3["Step 3 — 3× ml-critic<br/>CRITIQUE_1.md · CRITIQUE_2.md · CRITIQUE_3.md"]
+    ENS_S3 --> ENS_AGG["Step 3A — Aggregate Findings<br/>Cluster by root cause · Tag confidence tiers<br/>ENSEMBLE_REVIEW.md"]
+    ENS_AGG --> PREFLIGHT_E["Extract issues by tier · Propose empirical tests<br/>Build pre-flight checklist"]
+    style ENS_AGG fill:#e8f4e8,stroke:#2e7d32
+
+    RMODE -- "debate" --> S3["Step 3 — ml-critic<br/>CRITIQUE.md"]
     S3 --> S4["Step 4 — ml-defender<br/>DEFENSE.md · log verdict"]
     S4 --> DROUND["Debate Round N<br/>Critic ↔ Defender"]
     DROUND --> DRES{"All points<br/>resolved?"}
     DRES -- "No · rounds left" --> DROUND
-    DRES -- "Yes or max 4 reached" --> PREFLIGHT
+    DRES -- "Yes or max 4 reached" --> PREFLIGHT_D
+    PREFLIGHT_D["Parse DEFENSE.md Pass 2 verdict table<br/>Extract concessions + pre-execution requirements<br/>Build pre-flight checklist"]
+    style PREFLIGHT_D fill:#e8f4e8,stroke:#2e7d32
 
-    PREFLIGHT["Parse DEFENSE.md Pass 2 verdict table<br/>Extract concessions + pre-execution requirements<br/>Build pre-flight checklist → EXECUTION_PLAN.md"]
-    style PREFLIGHT fill:#e8f4e8,stroke:#2e7d32
-
-    PREFLIGHT --> G1
+    PREFLIGHT_E --> G1
+    PREFLIGHT_D --> G1
 
     G1[/"✋ Gate 1 — Experiment Plan<br/>All pre-flight items CLOSED · User approval required"/]
 
@@ -35,7 +42,8 @@ flowchart TD
     MACRO -- "B or C<br/>under cap" --> G2
 
     G2[/"✋ Gate 2 — Re-Opening Plan<br/>User approval required"/]
-    G2 -- "B: return to<br/>adversarial review" --> S3
+    G2 -- "B ensemble:<br/>re-run 3× critic Mode 3" --> ENS_S3
+    G2 -- "B debate:<br/>return to adversarial review" --> S3
     G2 -- "C: revise<br/>hypothesis + PoC" --> S1
 
     RPT_MODE{"report_mode?"}

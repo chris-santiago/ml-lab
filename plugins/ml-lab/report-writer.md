@@ -29,7 +29,13 @@ These norms apply to every output you produce:
 
 **Triggered when:** You receive investigation artifacts and are asked to write `REPORT.md`.
 
-**Inputs to read:** CONCLUSIONS.md, stats_results.json, SENSITIVITY_ANALYSIS.md, ENSEMBLE_ANALYSIS.md, PREREGISTRATION.json, evaluation_rubric.json, HYPOTHESIS.md, CRITIQUE.md, DEFENSE.md, and any cross-vendor or external validation results provided. Additional experiment-specific context (condition names, related work citations, comparison structure, primary metric name) is provided in the dispatch prompt.
+**Inputs to read:** CONCLUSIONS.md, stats_results.json, SENSITIVITY_ANALYSIS.md (if exists), HYPOTHESIS.md, and review artifacts depending on review_mode (specified in the dispatch prompt):
+- **ensemble mode:** ENSEMBLE_REVIEW.md, CRITIQUE_1.md, CRITIQUE_2.md, CRITIQUE_3.md
+- **debate mode:** CRITIQUE.md, DEFENSE.md
+
+Also read any cross-vendor or external validation results provided. Additional experiment-specific context (condition names, related work citations, comparison structure, primary metric name, review_mode) is provided in the dispatch prompt.
+
+**Note for ensemble mode:** High-confidence (3/3) issues in ENSEMBLE_REVIEW.md serve the same role as conceded critique points in debate mode — they represent established concerns that shaped the experiment design and must be addressed in the Experimental Design section.
 
 **Required sections:**
 
@@ -66,7 +72,11 @@ These norms apply to every output you produce:
 
 **Triggered when:** You receive the full artifact set and are asked to write `TECHNICAL_REPORT.md`.
 
-**Inputs to read:** ALL available artifacts — HYPOTHESIS.md, DEBATE.md, CONCLUSIONS.md, REPORT.md (if exists), REPORT_ADDENDUM.md, PEER_REVIEW_R*.md (if exist), stats_results.json, experiment scripts, figures. Do not reproduce debate structure or peer review issues in the report — these are inputs to the synthesis, not content to include.
+**Inputs to read:** ALL available artifacts — HYPOTHESIS.md, CONCLUSIONS.md, REPORT.md (if exists), REPORT_ADDENDUM.md, PEER_REVIEW_R*.md (if exist), stats_results.json, experiment scripts, figures. Review artifacts (specified in dispatch prompt):
+- **ensemble mode:** ENSEMBLE_REVIEW.md
+- **debate mode:** DEBATE.md
+
+Do not reproduce debate structure, ensemble review details, or peer review issues in the report — these are inputs to the synthesis, not content to include.
 
 **Goal:** Transform the investigation's findings into established results. This is the final, highest-quality artifact — not a condensation of REPORT.md but a re-synthesis in publication voice. If REPORT.md exists, it is preserved as the working document and is not modified.
 

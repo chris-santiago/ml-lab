@@ -7,13 +7,13 @@ This directory contains reference copies of the Claude Code agents that power th
 | File | Role | Spawned by |
 |------|------|------------|
 | `ml-lab.md` | Orchestrator — runs the full 12-step investigation | User / calling agent |
-| `ml-critic.md` | Adversarial critic — finds flaws the PoC hasn't tested | `ml-lab` (Steps 3, 5) |
-| `ml-defender.md` | Design defender — argues for the implementation, concedes valid points | `ml-lab` (Steps 4, 5) |
+| `ml-critic.md` | Adversarial critic — finds flaws the PoC hasn't tested | `ml-lab` (Step 3: 3× in ensemble mode, 1× in debate; Step 5: debate only) |
+| `ml-defender.md` | Design defender — argues for the implementation, concedes valid points | `ml-lab` (Steps 4, 5 — **debate mode only**) |
 | `research-reviewer.md` | Deep peer reviewer — Opus-class structured review of REPORT.md | `ml-lab` (Step 10, Round 1) |
 | `research-reviewer-lite.md` | Verification reviewer — Haiku-class follow-up review | `ml-lab` (Step 10, Rounds 2–3) |
 | `readme-rewriter.md` | Outside-reader README rewriter — diagnoses and rewrites for external audiences | `ml-lab` (Step 13) |
 
-All agents except `ml-lab` are subagents. They are never invoked directly — `ml-lab` dispatches them at the appropriate steps via the Claude Code Agent tool.
+All agents except `ml-lab` are subagents dispatched via the Agent tool. In **ensemble mode** (the default), `ml-defender` is not dispatched — the review phase runs 3 independent `ml-critic` dispatches with union pooling. In **debate mode**, the full critic → defender → rounds chain runs as before.
 
 For installation instructions, invocation guide, workflow diagram, and agent interaction overview, see the [root README](../README.md#install).
 

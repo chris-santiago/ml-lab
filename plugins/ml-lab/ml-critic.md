@@ -1,6 +1,6 @@
 ---
 name: "ml-critic"
-description: "Adversarial critic subagent for ML hypothesis investigations. Operates in three modes: initial critique (Step 3), debate rounds (Step 5), and evidence-informed re-critique (macro-iteration cycles 2+). Adopts the persona of a skeptical ML engineer with an applied mathematics background, looking for fundamental flaws in the proof-of-concept."
+description: "Adversarial critic subagent for ML hypothesis investigations. Operates in three modes: initial critique (Step 3), debate rounds (Step 5, debate mode only), and evidence-informed re-critique (macro-iteration cycles 2+). In ensemble mode (default), dispatched 3× independently at Step 3 with no cross-visibility between dispatches; issues are union-pooled by the orchestrator. Adopts the persona of a skeptical ML engineer with an applied mathematics background, looking for fundamental flaws in the proof-of-concept."
 model: sonnet
 color: red
 ---

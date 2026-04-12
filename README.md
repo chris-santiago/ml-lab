@@ -1,6 +1,6 @@
 # ml-lab
 
-`ml-lab` is a Claude Code agent that runs structured ML hypothesis investigations using an adversarial debate between a Critic and a Defender subagent. It enforces rigor at every step — pre-specified metrics, multi-round debate, agreed experiments only — and produces a self-contained report with a production re-evaluation. The methodology has been empirically validated; see [Part 2](#part-2-the-experiment-behind-ml-lab) for results.
+`ml-lab` is a Claude Code agent that runs structured ML hypothesis investigations using an ensemble of independent critics (default) or an adversarial critic-defender debate (opt-in). It enforces rigor at every step — pre-specified metrics, confidence-tiered review findings, agreed experiments only — and produces a self-contained report with a production re-evaluation. The methodology has been empirically validated; see [Part 2](#part-2-the-experiment-behind-ml-lab) for results.
 
 ---
 
@@ -42,14 +42,15 @@ Once installed, Claude Code will make `ml-lab` available as a spawnable agent. I
 
 ### What ml-lab Does
 
-`ml-lab` is a Claude Code subagent that runs a structured ML hypothesis investigation workflow: (1) sharpen the hypothesis into a falsifiable claim, (2) agree on metrics and pass criteria before any code runs, (3) build a minimal PoC, (4) adversarial critique, (5) point-by-point defense, (6) multi-round debate until each contested point resolves or both sides agree on an empirical test, (7) run only the agreed experiments, (8) evidence-informed re-critique if findings are surprising, (9) production re-evaluation against operational constraints, (10) optional peer review loop (`research-reviewer` + `research-reviewer-lite`), (11) optional final technical report in results mode. Steps 10–11 are user-confirmed — neither starts automatically.
+`ml-lab` is a Claude Code subagent that runs a structured ML hypothesis investigation workflow: (1) sharpen the hypothesis into a falsifiable claim, (2) agree on metrics and pass criteria before any code runs, (3) build a minimal PoC, (4) ensemble or adversarial review, (5) agreed empirical tests, (6) run experiments, (7) synthesize conclusions, (8) evidence-informed re-critique if findings are surprising, (9) production re-evaluation against operational constraints, (10) optional peer review loop (`research-reviewer` + `research-reviewer-lite`), (11) optional final technical report in results mode. Steps 10–11 are user-confirmed — neither starts automatically.
 
-The workflow is designed for rigor over speed. Given a hypothesis, `ml-lab` first sharpens it into a falsifiable claim with agreed metrics, then builds a minimal runnable PoC. From there it branches into two adversarial subagents with distinct mandates:
+The workflow is designed for rigor over speed. Given a hypothesis, `ml-lab` first sharpens it into a falsifiable claim with agreed metrics, then builds a minimal runnable PoC. From there it routes to one of two review modes:
 
-- **`ml-critic`** — a skeptical ML engineer with an applied mathematics background. It reads the hypothesis and PoC cold and identifies every implicit claim the code makes but hasn't tested, organized by root cause. It is explicitly forbidden from critiquing code style or features the PoC declared out of scope.
-- **`ml-defender`** — the original designer, arguing that the implementation is sound. It reads the critique and responds point-by-point: concede, rebut, or mark as empirically open. Fast concession on a real problem is valued over protracted defense.
+**Ensemble mode (default):** `ml-critic` is dispatched 3 times independently — each reads only the PoC and hypothesis, with no visibility into the other critics' outputs. The orchestrator clusters the findings by root cause, tags each issue with an assessor support count (1/3, 2/3, or 3/3), and writes `ENSEMBLE_REVIEW.md` with confidence-tiered output. High-confidence issues drive the pre-flight checklist; all issues — including minority-flagged ones — surface for user review at Gate 1. Formally outperforms the debate protocol on regular methodology reviews (see [Part 2](#part-2-the-experiment-behind-ml-lab)).
 
-`ml-lab` then orchestrates a multi-round debate between them, alternating dispatches until each contested point resolves — either one side concedes, or both agree on an exact empirical test with pre-specified success and failure conditions. Only tests on that agreed list go into the experiment. If findings are surprising enough to falsify a debate assumption, the whole cycle reopens: `ml-critic` and `ml-defender` are dispatched again in evidence-informed mode, with experimental results in hand. The investigation closes with a self-contained report and a production re-evaluation that checks whether the experimental recommendation survives operational constraints.
+**Debate mode (opt-in):** `ml-critic` and `ml-defender` are dispatched as adversarial subagents with distinct mandates. The critic identifies every implicit claim the PoC makes but hasn't tested; the defender responds point-by-point — conceding, rebutting, or marking points as empirically open. `ml-lab` orchestrates a multi-round debate until each contested point resolves or both sides agree on an empirical test. Use when the hypothesis involves genuine empirical ambiguity that benefits from iterative adversarial exchange.
+
+In both modes, only the agreed (or orchestrator-proposed) empirical tests go into the experiment. If findings are surprising enough to falsify a review assumption, the whole review cycle reopens with results in hand. The investigation closes with a self-contained report and a production re-evaluation that checks whether the experimental recommendation survives operational constraints.
 
 ---
 
@@ -59,25 +60,32 @@ The diagram below shows the complete workflow, including user-approval gates and
 
 ```mermaid
 flowchart TD
-    START(["▶ Start"]) --> PRE["Ask: hypothesis · metrics · report_mode<br/>Write HYPOTHESIS.md"]
+    START(["▶ Start"]) --> PRE["Ask: hypothesis · metrics · report_mode · review_mode<br/>Write HYPOTHESIS.md"]
 
-    PRE ~~~ LOG["INVESTIGATION_LOG.jsonl<br/>uv run log_entry.py throughout all steps"]
+    PRE ~~~ LOG["📋 INVESTIGATION_LOG.jsonl<br/>uv run log_entry.py throughout all steps"]
     style LOG fill:#f9f3e0,stroke:#c9a227,stroke-dasharray: 5 5
 
     PRE --> S1["Step 1 — Build PoC<br/>Reference check · Explicit params"]
     S1 --> S2["Step 2 — Clarify Intent<br/>Write README.md"]
 
-    S2 --> S3["Step 3 — ml-critic<br/>CRITIQUE.md"]
+    S2 --> RMODE{"review_mode?"}
+
+    RMODE -- "ensemble (default)" --> ENS_S3["Step 3 — 3× ml-critic<br/>CRITIQUE_1.md · CRITIQUE_2.md · CRITIQUE_3.md"]
+    ENS_S3 --> ENS_AGG["Step 3A — Aggregate Findings<br/>Cluster by root cause · Tag confidence tiers<br/>ENSEMBLE_REVIEW.md"]
+    ENS_AGG --> PREFLIGHT_E["Extract issues by tier · Propose empirical tests<br/>Build pre-flight checklist"]
+    style ENS_AGG fill:#e8f4e8,stroke:#2e7d32
+
+    RMODE -- "debate" --> S3["Step 3 — ml-critic<br/>CRITIQUE.md"]
     S3 --> S4["Step 4 — ml-defender<br/>DEFENSE.md · log verdict"]
     S4 --> DROUND["Debate Round N<br/>Critic ↔ Defender"]
     DROUND --> DRES{"All points<br/>resolved?"}
     DRES -- "No · rounds left" --> DROUND
-    DRES -- "Yes or max 4 reached" --> PREFLIGHT
+    DRES -- "Yes or max 4 reached" --> PREFLIGHT_D
+    PREFLIGHT_D["Parse DEFENSE.md Pass 2 verdict table<br/>Extract concessions + pre-execution requirements<br/>Build pre-flight checklist"]
+    style PREFLIGHT_D fill:#e8f4e8,stroke:#2e7d32
 
-    PREFLIGHT["Parse DEFENSE.md Pass 2 verdict table<br/>Extract concessions + pre-execution requirements<br/>Build pre-flight checklist → EXECUTION_PLAN.md"]
-    style PREFLIGHT fill:#e8f4e8,stroke:#2e7d32
-
-    PREFLIGHT --> G1
+    PREFLIGHT_E --> G1
+    PREFLIGHT_D --> G1
 
     G1[/"✋ Gate 1 — Experiment Plan<br/>All pre-flight items CLOSED · User approval required"/]
 
@@ -92,7 +100,8 @@ flowchart TD
     MACRO -- "B or C<br/>under cap" --> G2
 
     G2[/"✋ Gate 2 — Re-Opening Plan<br/>User approval required"/]
-    G2 -- "B: return to<br/>adversarial review" --> S3
+    G2 -- "B ensemble:<br/>re-run 3× critic Mode 3" --> ENS_S3
+    G2 -- "B debate:<br/>return to adversarial review" --> S3
     G2 -- "C: revise<br/>hypothesis + PoC" --> S1
 
     RPT_MODE{"report_mode?"}
@@ -134,14 +143,14 @@ flowchart TD
 | File | Role | Spawned by |
 |------|------|------------|
 | `ml-lab.md` | Orchestrator — runs the full 12-step investigation | User / calling agent |
-| `ml-critic.md` | Adversarial critic — finds flaws the PoC hasn't tested | `ml-lab` (Steps 3, 5) |
-| `ml-defender.md` | Design defender — argues for the implementation, concedes valid points | `ml-lab` (Steps 4, 5) |
+| `ml-critic.md` | Adversarial critic — finds flaws the PoC hasn't tested | `ml-lab` (Step 3: 3× in ensemble mode, 1× in debate; Step 5: debate only) |
+| `ml-defender.md` | Design defender — argues for the implementation, concedes valid points | `ml-lab` (Steps 4, 5 — **debate mode only**) |
 | `report-writer.md` | Technical report writer — Opus-class; Mode 1: full investigation report (REPORT.md); Mode 2: publication-ready results-mode synthesis (TECHNICAL_REPORT.md) | `ml-lab` (Steps 8, 11) |
 | `research-reviewer.md` | Deep peer reviewer — Opus-class structured review of REPORT.md | `ml-lab` (Step 10, Round 1) |
 | `research-reviewer-lite.md` | Verification reviewer — Haiku-class follow-up review | `ml-lab` (Step 10, Rounds 2–3) |
 | `readme-rewriter.md` | Outside-reader README rewriter — diagnoses and rewrites for external audiences | `ml-lab` (Step 13) |
 
-All agents except `ml-lab` are subagents. They are never invoked directly — `ml-lab` dispatches them at the appropriate steps via the Claude Code Agent tool.
+All agents except `ml-lab` are subagents dispatched via the Agent tool. In **ensemble mode** (the default), `ml-defender` is not dispatched — the review phase runs 3 independent `ml-critic` dispatches with union pooling. In **debate mode**, the full critic → defender → rounds chain runs as before.
 
 ```
 User hypothesis
@@ -150,16 +159,17 @@ User hypothesis
       |
       +——— Steps 1-2:   builds PoC, reviews intent
       |
-      +——— Step 3:      dispatches [ml-critic]          → CRITIQUE.md
-      |
-      +——— Step 4:      dispatches [ml-defender]        → DEFENSE.md
-      |
-      +——— Step 5:      alternates dispatches until contested points resolve → DEBATE.md
+      +——— Step 3:      review_mode == ensemble? (default)
+      |       Yes ——→   dispatches [ml-critic] ×3 independently → CRITIQUE_1/2/3.md
+      |                 aggregates by root cause, tags confidence tiers → ENSEMBLE_REVIEW.md
+      |       No  ——→   dispatches [ml-critic]            → CRITIQUE.md
+      +——— Step 4:      (debate only) dispatches [ml-defender]  → DEFENSE.md
+      +——— Step 5:      (debate only) alternates dispatches until points resolve → DEBATE.md
       |
       +——— Steps 6-7:   designs and runs experiment, synthesizes conclusions
       |
-      +——— Macro-iteration: if results surprise, re-dispatches ml-critic and ml-defender
-      |    in evidence-informed mode (Mode 3) with experimental results in hand
+      +——— Macro-iteration: if results surprise, re-dispatches critic(s) in evidence-informed
+      |    mode (Mode 3) — 3× independently for ensemble, critic+defender chain for debate
       |
       +——— Step 8:      dispatches [report-writer] Mode 1   → REPORT.md  (Opus)
       |
@@ -175,7 +185,7 @@ User hypothesis
       +——— Step 13:     (optional) dispatches [readme-rewriter] → rewrites README.md
 ```
 
-The key architectural constraint is **sequenced dispatch**: `ml-critic` receives only the task materials and produces its critique independently. `ml-defender` then receives the critique and responds point-by-point — conceding, rebutting, or marking points as empirically open. Each agent's role mandate is what keeps the exchange honest, not context isolation.
+The key architectural constraint is **assessor independence**: in ensemble mode, each `ml-critic` dispatch receives only the PoC and hypothesis — no visibility into the other critics' outputs. This independence is what makes the union pooling meaningful: convergence across independently produced critiques is genuine signal, not echo. In debate mode, the sequenced dispatch structure (`ml-critic` → `ml-defender`) is what keeps the adversarial exchange honest — each agent's role mandate constrains what it can concede.
 
 ---
 
@@ -414,7 +424,7 @@ Yes. ml-lab is a Claude Code agent — it requires Claude Code to be installed. 
 
 **Are all seven agent files required, or can I use a subset?**
 
-`ml-lab.md`, `ml-critic.md`, and `ml-defender.md` are required for the core workflow. `research-reviewer.md` and `research-reviewer-lite.md` are only needed if you want the Step 10 peer review loop. `readme-rewriter.md` is only needed for the optional Step 13 README rewrite. `report-writer.md` is only needed for the optional Step 12 report generation. If you skip optional steps, install only the files you need — but the plugin installs all seven by default.
+`ml-lab.md` and `ml-critic.md` are required for the core workflow. `ml-defender.md` is only needed if you plan to use debate review mode — it is not dispatched in ensemble mode (the default). `research-reviewer.md` and `research-reviewer-lite.md` are only needed if you want the Step 10 peer review loop. `readme-rewriter.md` is only needed for the optional Step 13 README rewrite. `report-writer.md` is only needed for report generation (Steps 8, 11). The plugin installs all seven by default.
 
 **Is manual installation equivalent to the plugin?**
 
@@ -430,7 +440,7 @@ Uninstalling removes the agent files from `~/.claude/agents/` but does **not** r
 
 **What happens when I first invoke ml-lab?**
 
-Before writing any code, ml-lab asks three questions: (1) the hypothesis sharpened into a falsifiable claim with a named mechanism and expected observable, (2) the primary evaluation metric(s), and (3) report mode — full report or conclusions only. It will not dispatch any subagents or write any code until all three are settled and `HYPOTHESIS.md` is written.
+Before writing any code, ml-lab asks four questions: (1) the hypothesis sharpened into a falsifiable claim with a named mechanism and expected observable, (2) the primary evaluation metric(s), (3) report mode — full report or conclusions only, and (4) review mode — ensemble (default) or debate. It will not dispatch any subagents or write any code until all four are settled and `HYPOTHESIS.md` is written.
 
 **How long does a full investigation take?**
 
@@ -448,9 +458,11 @@ It reviews the experimental recommendation against operational constraints: infe
 
 ### Workflow & Orchestration
 
-**What happens if the Critic and Defender never reach agreement?**
+**What happens if the Critic and Defender never reach agreement?** *(debate mode only)*
 
 After 4 debate rounds, ml-lab caps the loop. Any unresolved points are classified as "empirically open" and become candidates for the empirical test list. That list goes to Gate 1 for user approval before any experiment runs. Unresolved disagreements don't block the investigation — they get resolved by experiment rather than by argument.
+
+In ensemble mode, there is no debate loop. The orchestrator aggregates the three independent critiques directly and proposes empirical test specifications at Gate 1.
 
 **What is the difference between Outcome B and Outcome C in macro-iteration?**
 
@@ -487,6 +499,8 @@ Yes — this is a known limitation. All agents (Critic, Defender, Judge, Scorer,
 ---
 
 ### Should I Use ml-lab or Just Run an Ensemble?
+
+> **As of v2.0, ml-lab's default review mode is ensemble.** When you invoke ml-lab without specifying a review mode, it runs 3 independent `ml-critic` dispatches with union pooling — not the debate chain. The question below is about using a standalone external ensemble vs. invoking ml-lab at all, which provides the full investigation framework (agreed experiments, Gate 1, production re-evaluation, peer review, coherence audit) on top of whichever review mode you choose.
 
 **It depends on what output you need.**
 
