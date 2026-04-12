@@ -18,15 +18,26 @@ except Exception:
 PYEOF
 )
 
-# Resolve installPath from Claude Code's plugin registry — no hardcoded versions
+# Resolve installPath from Claude Code's plugin registry.
+# Tries both @ml-lab and @ml-debate-lab key variants to survive marketplace renames.
 get_install_path() {
     python3 - << PYEOF
 import json, sys
+plugin_name = '$1'
 try:
     with open('$PLUGINS_JSON') as f:
         d = json.load(f)
-    entries = d.get('plugins', {}).get('$1', [])
-    print(entries[0].get('installPath', '') if entries else '')
+    plugins = d.get('plugins', {})
+    # Try exact key first, then strip marketplace suffix and try known variants
+    for key in [plugin_name, plugin_name.split('@')[0] + '@ml-lab',
+                plugin_name.split('@')[0] + '@ml-debate-lab']:
+        entries = plugins.get(key, [])
+        if entries:
+            print(entries[0].get('installPath', ''))
+            raise SystemExit(0)
+    print('')
+except SystemExit:
+    raise
 except Exception:
     print('')
 PYEOF
@@ -69,17 +80,23 @@ if mismatches:
 PYEOF
 }
 
-# Sync cache
+# Sync cache — registry-tracked path + known bare cache path (both may be active)
 case "$FILE_PATH" in
   *plugins/ml-journal/*)
     DEST=$(get_install_path "ml-journal@ml-lab")
     [ -n "$DEST" ] && rsync -a --exclude='.orphaned_at' \
       "$REPO_ROOT/plugins/ml-journal/" "$DEST/"
+    BARE="$HOME/.claude/plugins/cache/ml-journal"
+    [ -d "$BARE" ] && rsync -a --exclude='.orphaned_at' \
+      "$REPO_ROOT/plugins/ml-journal/" "$BARE/"
     ;;
   *plugins/ml-lab/*)
     DEST=$(get_install_path "ml-lab@ml-lab")
     [ -n "$DEST" ] && rsync -a --exclude='.orphaned_at' \
       "$REPO_ROOT/plugins/ml-lab/" "$DEST/"
+    BARE="$HOME/.claude/plugins/cache/ml-lab"
+    [ -d "$BARE" ] && rsync -a --exclude='.orphaned_at' \
+      "$REPO_ROOT/plugins/ml-lab/" "$BARE/"
     ;;
 esac
 
