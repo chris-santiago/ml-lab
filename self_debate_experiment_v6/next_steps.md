@@ -110,7 +110,7 @@ The critic/defender/adjudicator structure isn't wrong — it's right for exactly
 ## v7 Priority Order
 
 1. **Stabilize multiround** — the FVC_mixed=0.3667 signal is the most actionable positive result across all experiments
-2. **Formal ensemble vs. baseline test** — the +0.1005 IDR descriptive gap is real but not yet formally tested (H2 tested debate vs. ensemble, not ensemble vs. baseline)
+2. ~~**Formal ensemble vs. baseline test**~~ — **DONE** (`ensemble_vs_baseline_test.py`): ensemble_3x > baseline on IDR, observed diff=+0.1005, 95% CI=[+0.0426, +0.1648], p=0.0000 (n=60 critique cases). Both ends of the recommendation are now formally grounded.
 3. **Full difficulty labeling** — only 15/80 regular cases are labeled; H3 is chronically underpowered and can't be evaluated properly
 4. **ETD sub-element rubric** — required before mixed-case quality is quantifiable
 5. **Defense case exoneration path** — 0.0 across all conditions is a structural gap, not noise
