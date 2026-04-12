@@ -167,9 +167,61 @@ Du et al. (2023) and ChatEval (2023) report debate benefits, but on different ta
 
 ---
 
-## 7. Suggested Additions to v6 Citations
+## 7. Publishable Findings Assessment
 
-Papers not currently cited in the v6 report that are directly relevant:
+*Journal memo `4a95ebae` (2026-04-12).*
+
+### Tier 1 — Strongest contributions (formally supported, novel, practical)
+
+**Finding 1: Compute-matched debate vs. ensemble in an applied evaluation domain.**
+Smit et al. (ICML 2024), Zhang, H. et al. (2025), and Choi et al. (NeurIPS 2025) all show ensemble >= debate on math/QA benchmarks. Choi et al. prove debate is a martingale. But none test this in a real evaluation domain with planted ground-truth issues. ml-lab provides the controlled comparison: debate (3x) vs. ensemble (3x) on 80 methodology-review cases, CI = [−0.0434, −0.0154], excluding zero. Combined with Kenton et al.'s result that debate robustly beats consultancy (1x compute), the contribution is: **debate wins the uncontrolled comparison and loses the controlled one.** The compute-matching is the key experimental control that changes the conclusion.
+
+**Finding 2: Union-of-issues pooling with precision validation across support tiers.**
+Wang et al.'s self-consistency uses majority-vote — convergent aggregation for single answers. ml-lab inverts this for detection tasks — divergent aggregation where the goal is to find *all* problems, not the one right answer. The precision validation (minority-flagged 0.946 vs. unanimous 0.929, p=0.258, n=1,463 issue clusters) demonstrates union pooling is safe: it recovers 11 additional ground-truth issues (+9.5pp IDR) at no measured precision cost. No existing paper validates that minority-flagged findings from independent assessors carry equal precision to consensus findings. This is directly actionable for anyone building LLM-based review or audit systems.
+
+**Finding 3: Convergent vs. divergent task-type interaction.**
+This finding resolves the apparent contradiction between Du et al. / ChatEval (debate helps) and Smit et al. / Zhang et al. (debate doesn't help). The key variable is task type:
+
+- **Divergent detection** (find all flaws in a methodology): debate *hurts*. IDR_debate = 0.6603 < IDR_baseline = 0.6712. Consistent with Wynn et al.'s sycophancy mechanism — the defender argues away valid critiques.
+- **Convergent judgment** (is this methodology empirically testable?): debate *helps*. Multiround FVC_mixed = 0.3667 vs. baseline 0.0. Iterative exchange is structurally necessary for recognizing ambiguity.
+
+ml-lab demonstrates both sides of this interaction within a single experimental setup and benchmark. No existing paper does this. The convergent/divergent framework explains why the debate literature disagrees with itself — Du et al.'s math tasks are convergent; Smit et al.'s benchmarks are convergent; ml-lab's flaw detection is divergent. This may be the most theoretically important contribution because it provides a predictive framework for when debate will and will not help.
+
+### Tier 2 — Strong findings (novel, require framing context)
+
+**Finding 4: Defense case failure (0/20 correct exonerations).**
+No paper in the literature documents LLMs' uniform inability to correctly identify valid work. On 20 defense cases where the correct verdict is `defense_wins`, every non-multiround condition scored 0/20. Multiround reached 12/60 individual runs (20%) but with high variance. This connects to Saunders et al.'s GDC framework: if the discrimination-critique gap is asymmetric — easier to articulate criticism than validation — LLM critics may be structurally incapable of exoneration regardless of prompt design. This finding is strongest as part of the task-type interaction story (Finding 3), not standalone.
+
+**Finding 5: Cross-vendor scoring magnitude in methodology review (−0.7737 IDR delta).**
+Panickssery et al. (NeurIPS 2024) document self-preference bias generally. The label-bias study (2025) reports swings of up to 50 percentage points. ml-lab's measured magnitude (−0.7737 IDR delta between Claude-scoring-Claude and GPT-4o-scoring-Claude) is at the extreme end of reported effects. The methodology review domain appears to amplify the confound because critic and scorer share systematic biases about what constitutes a valid concern. This is a methodological contribution: same-model scoring in LLM evaluation research produces unreliable absolute metrics.
+
+### Tier 3 — Supporting contributions (strengthen the narrative)
+
+**Finding 6: Dimension decomposition of ensemble advantage.**
+The ensemble IDR advantage (+0.1114) is 4x larger than the FC composite advantage (+0.0287). Three other dimensions (IDP, DRQ, FVC) show minimal separation, diluting the IDR signal. This argues for reporting detection-specific metrics rather than composites in LLM evaluation research.
+
+**Finding 7: RC-stratified subgroup analysis.**
+The ensemble IDR advantage is ~3x larger on the 25 real ReScience C papers (+0.172) than on the 55 synthetic cases (+0.059). The recommendation is strongest on the hardest, most ecologically valid cases — the ones derived from real published papers.
+
+### Narrative arc for a potential publication
+
+> **Thesis:** For LLM-based evaluation of scientific methodology, adversarial debate is dominated by independent redundancy at matched compute — but the two approaches serve fundamentally different evaluation modes.
+
+| Section | Findings | Role in narrative |
+|---|---|---|
+| Introduction | Findings 1, 3 | Frame the question: does debate structure add value beyond additional compute? |
+| Method | Finding 5 (cross-vendor scoring), benchmark design | Establish methodological credibility; differentiate from prior work |
+| Results | Findings 1, 2, 4 | Core results: ensemble > debate (regular), debate helps (mixed), defense fails (all) |
+| Analysis | Findings 3, 6, 7 | Task-type framework; dimension decomposition; subgroup validation |
+| Discussion | All | Reconcile with Du et al., position against Choi et al. martingale proof |
+
+**Venue precedent:** AgentReview (EMNLP 2024) and LimitGen (ACL 2025) establish that LLM peer review and scientific limitation detection are publishable domains at top NLP venues. Closest venue targets: EMNLP (findings track), NAACL, or NeurIPS workshops on LLM evaluation.
+
+---
+
+## 8. Suggested Additions to v6 Citations
+
+Papers not currently cited in the v6 report that are directly relevant (see §1–5 for full entries):
 
 | Paper | Why to cite |
 |---|---|
