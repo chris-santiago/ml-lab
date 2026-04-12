@@ -44,73 +44,77 @@ git log --oneline -- self_debate_experiment_*/CONCLUSIONS.md
 
 State the active experiment directory explicitly before proceeding.
 
-## Step 3 — Establish Document Authority Order
+## Step 3 — Establish Document Authority via Git Log
 
-Within the active experiment directory, apply this authority hierarchy:
+Authority is determined by **commit recency, not document category**. A post-hoc analysis doc committed after `CONCLUSIONS.md` is more authoritative on the claims it touches — it incorporates subsequent analysis, peer review, or corrections. Git log is the oracle.
 
-1. **Primary results** (ground truth): `CONCLUSIONS.md`, `next_steps.md`
-2. **Summaries**: `REPORT.md`, `TECHNICAL_REPORT.md`
-3. **Post-experiment analysis**: `FINAL_SYNTHESIS.md`, `RESEARCH_REPORT.md`, `ENSEMBLE_ANALYSIS.md`, `SENSITIVITY_ANALYSIS.md`
-4. **Post-conclusions updates** (potential corrections): any `.md` file committed *after* CONCLUSIONS.md
-
-To find post-conclusions updates, get the commit date of CONCLUSIONS.md and list files modified after it:
+For each document category, retrieve the last-modified commit date:
 
 ```bash
-# Date of CONCLUSIONS.md's last commit
-git log -1 --format="%ci" -- <experiment_dir>/CONCLUSIONS.md
+# Get commit dates for all .md files in the experiment dir
+git log --format="%ci %s" -- <experiment_dir>/*.md | sort -r | head -30
 
-# Files committed after that date within the experiment dir
-git log --since="<date>" --name-only --diff-filter=A -- <experiment_dir>/
+# For a specific file
+git log -1 --format="%ci" -- <experiment_dir>/<file>.md
 ```
 
-Post-conclusions docs may contain corrections to CIs, verdicts, or metric values. Read them and note any claims that supersede the primary results.
+**Document roles** (not a strict authority ranking — use commit dates to resolve conflicts):
+- `CONCLUSIONS.md`, `REPORT.md`, `TECHNICAL_REPORT.md` — main experiment output documents
+- `next_steps.md`, `FINAL_SYNTHESIS.md`, `RESEARCH_REPORT.md` — post-hoc docs; written after the main experiment to incorporate corrections, peer review, or updated analysis
+- `ENSEMBLE_ANALYSIS.md`, `SENSITIVITY_ANALYSIS.md` — post-hoc supplementary analysis
+
+**Post-hoc docs are authoritative over main experiment docs on the claims they address.** When a post-hoc doc contains a revised CI, flipped verdict, or updated metric, that correction must flow back into `CONCLUSIONS.md`, `REPORT.md`, and other main docs — not the other way around.
+
+When multiple post-hoc docs are in conflict, the most recently committed one wins. If the git log shows many recent changes across several docs, list the commit dates explicitly and resolve each conflict by recency before proceeding.
 
 ## Step 4 — Update All Affected Artifacts
 
-Work through each artifact in authority order. If nothing changed that affects it, say so explicitly — do not skip silently.
+Read all post-hoc docs first. Extract any corrections or updates they contain. Then apply those corrections to the main experiment docs. Work through each artifact below. If nothing changed that affects it, say so explicitly — do not skip silently.
 
-### `CONCLUSIONS.md` (primary results — update first)
-- Add a `> Post-experiment qualification (date):` block under any hypothesis whose verdict changed
+### Post-hoc docs → `CONCLUSIONS.md`
+- For each correction or revised claim found in post-hoc docs: add a `> Post-experiment qualification (date):` block under the affected hypothesis
 - Add numbered entries under any post-experiment review section for new findings
 - Do not remove or overwrite existing verdict entries — append only
 
-### `next_steps.md` (primary results)
-- Mark resolved action items as complete
-- Add new items surfaced by unresolved journal issues
-- Update priorities if new findings changed what matters most
+### Post-hoc docs → `REPORT.md` / `TECHNICAL_REPORT.md`
+- Update the conclusion section if any headline claim or result was revised by a post-hoc doc
+- Update the artifacts table with any new files
+- Ensure revised CIs, verdicts, or metric values from post-hoc docs are reflected
 
 ### `ENSEMBLE_ANALYSIS.md` (if present)
 - Add a new dated section for any ensemble or ablation result
 - Update any summary tables if a claim or number changed
 
-### `REPORT.md` / `TECHNICAL_REPORT.md`
-- Update the artifacts table with any new files
-- Update the conclusion section if any headline claim or result changed
-- Ensure any post-conclusions corrections from Step 3 are reflected
+### `FINAL_SYNTHESIS.md` / `RESEARCH_REPORT.md`
+- If updates were made to `CONCLUSIONS.md` or `REPORT.md` above, check these docs for consistency
+- Update if they reference a now-superseded claim from main experiment docs
 
 ### `README.md`
 - Add a dated finding block in "What We Found" if a headline number or structural advantage changed
 - Update any recommendation sections if the current evidence changes the recommendation
+
+### `next_steps.md`
+- Mark resolved action items as complete using journal resolution entries as the source of truth
+- Add new items surfaced by unresolved journal issues
+- Update priorities if new findings changed what matters most
 
 ## Step 5 — Coherence Audit
 
 Answer all three questions explicitly. Do not skip any.
 
 **1. Conflicts** — Do any two documents contradict each other on the same claim?
-- Start from `CONCLUSIONS.md`: extract the current verdict and key numbers for each hypothesis
-- Check that `REPORT.md`, `ENSEMBLE_ANALYSIS.md`, and `README.md` report the same numbers and verdicts
-- If a post-conclusions doc from Step 3 contains a correction, verify it has propagated to all downstream documents
-- If yes: fix the contradiction before continuing
+- For each conflict: use `git log -1 --format="%ci" -- <file>` to determine which doc was committed more recently — that version is authoritative
+- Fix all conflicts before continuing; note which doc was updated to match which
 
 **2. Staleness** — Does any document reference a finding that has since been revised?
-- Cross-reference each claim in `REPORT.md` §conclusion and `README.md` against what `CONCLUSIONS.md` currently says
+- Cross-reference claims in `REPORT.md` §conclusion and `README.md` against the most recent version of each result (post-hoc docs + journal entries)
 - Check that unresolved journal issues are not described as resolved in any artifact
 - Check that resolved journal issues are not still listed as open
 - If yes: update the stale text
 
 **3. Completeness** — Does each entry point contain the strongest current evidence?
 - `README.md` — someone landing here cold should see the latest findings, not an older snapshot
-- `REPORT.md` conclusion — should reflect the current honest summary including any post-experiment revisions
+- `REPORT.md` conclusion — should reflect the current honest summary including all post-experiment revisions
 - `CONCLUSIONS.md` post-experiment section — should list all revisions with dates
 
 If any entry point is missing a finding that others have, add it.
