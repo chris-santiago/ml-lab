@@ -36,29 +36,36 @@ ls <experiment_dir>/*.md
 ls *.md
 ```
 
+This scan is intentionally shallow — subdirectories (`plan/`, `pipeline/`, `research-notes/`) are not in audit scope.
+
 ### 1c. Classify each file into a tier
 
 Apply these rules **in order** (first match wins). For each file, state its tier explicitly.
 
 **Frozen** — never edited by this skill:
 1. First 10 lines contain a freeze/correction header (`> **Note` or `> **Correction`)
-2. Filename matches a snapshot pattern: `PEER_REVIEW*`, `REPORT_ADDENDUM*`, `SENSITIVITY_ANALYSIS*`
-3. Is `REPORT.md` AND any other non-frozen doc in the same directory has a more recent commit:
+2. Filename matches a snapshot pattern: `PEER_REVIEW*`, `REPORT_ADDENDUM*`, `SENSITIVITY_ANALYSIS*`, `HYPOTHESIS*`, `V[0-9]_*`
+3. Is `REPORT.md` AND any non-frozen doc in the same directory has a more recent commit:
    ```bash
    git log -1 --format="%ci" -- <experiment_dir>/REPORT.md
-   git log -1 --format="%ci" -- <experiment_dir>/FINAL_SYNTHESIS.md  # or other post-hoc doc
+   git log -1 --format="%ci" -- <experiment_dir>/CONCLUSIONS.md  # or any other doc
    ```
 
 **Derived** — out of sync scope:
-4. `.md` file outside the active experiment directory AND not `README.md`
-   (e.g., `WORKING_PAPER.md`, `RELATED_WORK.md`, `research-notes/*.md`)
+4. `.md` file at the repo root AND not `README.md` AND not `CLAUDE.md`
+   (e.g., `WORKING_PAPER.md`, `RELATED_WORK.md`)
 
 **Canonical** — source of truth:
 5. `CONCLUSIONS.md` — always canonical for hypothesis verdicts and formal test results
 
+**Post-hoc** — staleness-only audit:
+6. Filename matches a post-hoc pattern: `FINAL_SYNTHESIS*`, `ENSEMBLE_ANALYSIS*`, `*_SYNTHESIS*`
+   These documents interpret or extend canonical findings. Conflicts and completeness gaps are
+   intentional; only staleness is audited.
+
 **Live** — sync targets (kept current):
-6. `README.md` — always live
-7. All remaining non-frozen, non-derived `.md` files in the experiment directory
+7. `README.md` — always live
+8. All remaining non-frozen, non-derived, non-post-hoc `.md` files in the experiment directory
 
 ### 1d. Show the classification
 
@@ -68,11 +75,12 @@ Present a table:
 TIER CLASSIFICATION (experiment: self_debate_experiment_vN/)
 
 Canonical:  CONCLUSIONS.md
-Live:       README.md, FINAL_SYNTHESIS.md, next_steps.md, ENSEMBLE_ANALYSIS.md
+Post-hoc:   FINAL_SYNTHESIS.md, ENSEMBLE_ANALYSIS.md
+Live:       README.md, next_steps.md
 Frozen:     REPORT.md (superseded), PEER_REVIEW_R1.md, SENSITIVITY_ANALYSIS.md, REPORT_ADDENDUM.md
 Derived:    WORKING_PAPER.md, RELATED_WORK.md
 
-Audit scope: 5 files (1 canonical + 4 live)
+Audit scope: 5 files (1 canonical + 2 post-hoc + 2 live)
 Skipping:   4 frozen, 2 derived
 ```
 
@@ -100,15 +108,29 @@ State explicitly:
 
 ## Step 3 — Audit
 
-Read the canonical doc (`CONCLUSIONS.md`) and all live docs. For each live doc, check:
+Read the canonical doc (`CONCLUSIONS.md`), all post-hoc docs, and all live docs.
+
+### Live docs — check all three:
 
 1. **Conflicts** — Does any claim in this doc contradict the canonical source?
    - When two live docs conflict: `git log -1 --format="%ci" -- <file>` — more recent commit wins
 2. **Staleness** — Does this doc reference a finding that has since been revised? Check against journal experiment/discovery entries.
 3. **Completeness** — Is any finding present in the canonical source missing from this live doc, if the doc's scope covers it?
 
-Also check:
-- Unresolved journal issues are not described as resolved in any live doc
+### Post-hoc docs — staleness only:
+
+1. **Staleness** — Does this doc reference a finding revised since it was last committed? Check journal experiment/discovery entries.
+2. **Timestamp staleness** — Run:
+   ```bash
+   git log -1 --format="%ci" -- <experiment_dir>/CONCLUSIONS.md
+   git log -1 --format="%ci" -- <experiment_dir>/<post-hoc-doc>
+   ```
+   If CONCLUSIONS.md has a newer commit and the two docs disagree on a factual claim (a number, verdict string, or test name), flag as STALE. Do not flag interpretive extensions — they are intentional.
+
+Do not check post-hoc docs for conflicts or completeness.
+
+### Both tiers — also check:
+- Unresolved journal issues are not described as resolved in any live or post-hoc doc
 - Resolved journal issues are not still listed as open
 
 ### Produce the manifest
@@ -138,11 +160,11 @@ This satisfies the completion gate. Stop here unless the user requests fixes.
 If the user says to fix, apply changes from the manifest:
 
 1. For each file in the manifest, make the edits
-2. **Commit per file** — each commit message cites the authority:
+2. **Commit per file** using `/log-commit` — when log-commit asks for a message, suggest:
    ```
    fix(<file>): <what changed> (authority: <source>)
    ```
-3. Log each commit via the journal (`journal_log.py --type git`)
+3. log-commit handles both the git commit and the journal entry in one step — do not call `git commit` or `journal_log.py` directly
 
 Do not batch multiple files into one commit. The point is per-file traceability.
 

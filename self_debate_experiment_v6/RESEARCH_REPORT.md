@@ -1,5 +1,7 @@
 # Research Report — ml-lab
 
+> **Note:** Frozen snapshot — generated from journal and git history at experiment close. Not updated by artifact-sync.
+
 *Generated 2026-04-12 from 270 journal entries and 381 commits.*
 
 ---

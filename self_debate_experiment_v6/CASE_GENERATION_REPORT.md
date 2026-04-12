@@ -1,4 +1,7 @@
 # Case Generation Methodology Report
+
+> **Note:** Frozen snapshot — case generation methodology is locked per experiment version. Not updated by artifact-sync.
+
 ## ml-lab v6 Synthetic and RC Benchmark Pipeline
 
 **Status:** Active — Phase 3 complete; benchmark finalized as of 2026-04-11
