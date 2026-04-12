@@ -36,23 +36,23 @@ Extract relevant field values from the conversation. Do not invent details not p
 
 `issue` — description (what is wrong), severity (low/moderate/high/critical — infer from impact), tags (comma-separated topics), context (what was happening when discovered)
 
-`resolution` — description (what was done), linked_issue_id (if there is a prior issue entry this resolves — ask or search recent entries), approach (how it was fixed)
+`resolution` — description (what was done), linked_issue_id (if there is a prior issue entry this resolves — ask or search recent entries), approach (how it was fixed), evidence (what confirmed the fix worked — test output, metric, observation)
 
-`decision` — description (what was decided), rationale (why), alternatives (what else was considered)
+`decision` — description (what was decided), rationale (why), alternatives (what else was considered), implications (downstream effects or constraints this decision creates — optional), linked_issue_id (if this decision directly addresses an open issue — optional), linked_id (if this supersedes or is related to a prior decision — optional)
 
 `lesson` — description (the lesson), context (what situation surfaced it), applies_to (what area/component/workflow it affects), linked_id (any related entry — optional)
 
-`discovery` — description (what was learned), implications (what this means for the work), source (how it was found — experiment, reading, debugging, etc.)
+`discovery` — description (what was learned), implications (what this means for the work), source (how it was found — experiment, reading, debugging, etc.), linked_issue_id (if this discovery resolves or complicates an open issue — optional)
 
-`hypothesis` — description (the hypothesis), expected_result (what you expect to happen), metric (how you'll measure it)
+`hypothesis` — description (the hypothesis), expected_result (what you expect to happen), metric (how you'll measure it), linked_issue_id (if this hypothesis was raised to address an open issue — optional)
 
-`experiment` — description (what was run), verdict (confirmed/refuted/inconclusive), metric (what was measured), result (what the numbers showed), linked_hypothesis_id (if applicable)
+`experiment` — description (what was run), verdict (confirmed/refuted/inconclusive), metric (what was measured), result (what the numbers showed), linked_hypothesis_id (if applicable), linked_issue_id (if this experiment addresses an open issue — optional)
 
-`post_mortem` — description (brief summary), what_failed (the failure), root_cause (why it happened), contributing_factors (what made it worse), lessons (what to do differently), linked_issue_id (if applicable), severity (low/minor/moderate/high/critical — infer from impact), scope (active = affected current results; future = gap for next run), remediation (specific actionable fix — name files, fields, scripts, plan sections; vague fixes are not fixes), detail (long-form investigation narrative with evidence, code references, tables, subsections — the full body that would have appeared in a POST_MORTEM.md entry)
+`post_mortem` — description (brief summary), what_failed (the failure), root_cause (why it happened), contributing_factors (what made it worse), lessons (what to do differently), linked_issue_id (**required** — create an issue entry first if one does not already exist), severity (low/minor/moderate/high/critical — infer from impact), scope (active = affected current results; future = gap for next run), remediation (specific actionable fix — name files, fields, scripts, plan sections; vague fixes are not fixes), detail (long-form investigation narrative with evidence, code references, tables, subsections — the full body that would have appeared in a POST_MORTEM.md entry)
 
 `summary` — description (session overview), key_decisions (list of decisions made), open_threads (list of unresolved items)
 
-`memo` — description (the note), tags (optional comma-separated topics)
+`memo` — description (the note), detail (long-form body content — use when the note is more than a sentence), context (situational background — optional), tags (comma-separated topics — optional), linked_issue_id (if this memo is linked to an open issue — optional), linked_id (if linked to another entry — optional)
 
 ## Step 3: Confirm or run
 
