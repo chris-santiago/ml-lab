@@ -54,6 +54,36 @@ Formally supported at both ends: ensemble > baseline and ensemble > isolated_deb
 
 **Open design question (issue `c9dfc257`):** Union IDR gives equal weight to minority-flagged issues (1/3 critics) and majority-flagged (2/3). A confidence-tiered output layer would let downstream consumers distinguish high-confidence from low-confidence findings without reintroducing adversarial suppression.
 
+#### Practical Output Layer (production implementation)
+
+The v6 scoring design — union IDR for measurement, majority-vote for output verdict — is a **measurement protocol, not a production protocol**. In practical use, majority-vote collapses the output to the two critics who agreed, silently discarding any minority-flagged finding. If only one critic found the critical flaw, the user sees "no major issues."
+
+**The correct production implementation:**
+
+1. Run 3 independent `ml-critic` calls on the same case (no cross-assessor visibility)
+2. Collect all flagged issues across all 3 outputs — do not filter by assessor agreement
+3. Tag each issue with its assessor support count: `1/3`, `2/3`, or `3/3`
+4. **Output the full tagged issue list** — do not suppress minority-flagged issues
+5. Do not collapse to a single verdict label as the primary response; instead output the verdict distribution (e.g., `{critique_wins: 2, defense_wins: 1}`)
+
+**Output format:**
+
+```json
+{
+  "issues": [
+    {"description": "...", "assessor_support": "3/3", "confidence": "high"},
+    {"description": "...", "assessor_support": "2/3", "confidence": "medium"},
+    {"description": "...", "assessor_support": "1/3", "confidence": "low — review manually"}
+  ],
+  "verdict_distribution": {"critique_wins": 2, "defense_wins": 1},
+  "recommended_action": "critique_wins (majority); 1 minority finding warrants manual review"
+}
+```
+
+**Why not suppress `1/3` issues:** Majority-vote optimizes for precision. For recall-critical tasks (a flawed paper ships, a bad model deploys), missing one real flaw costs more than reviewing one false positive. The ensemble's IDR advantage (+0.1114 over isolated_debate) comes entirely from union recovery of minority-flagged issues — collapsing to majority-vote at the output layer discards this advantage entirely.
+
+**When majority-vote verdict is acceptable:** Only when the downstream consumer is acting on the verdict label directly (e.g., approve/reject binary) and false positive review cost is high. In that regime, also report the minority-flagged issues separately so the human can exercise judgment before acting on the collapsed verdict.
+
 ---
 
 ### 2. Route empirically ambiguous cases to multiround, not ensemble
