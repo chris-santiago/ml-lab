@@ -387,7 +387,12 @@ The v2 numbers (debate 0.970 vs. baseline 0.384) are not wrong — they answered
 
 v6 was designed to close every confound that had prevented a clean answer in v1–v5:
 
-**Case library (120 cases).** 80 regular (critique/defense) + 40 mixed (empirically ambiguous). Cases were sourced from ReScience C replications and peer-reviewed ML evaluation failures with documented ground truth, filtered through a difficulty gate (baseline FC < 0.80) to prevent ceiling effects. Five prior-version confounds explicitly addressed: closed-loop scoring, majority-vote IDR suppression, missing mixed cases, hollow forced rounds, and baseline ceiling. See [`v5_mitigations.md`](self_debate_experiment_v6/plan/references/v5_mitigations.md).
+**Case library (120 cases).** 80 regular (critique/defense) + 40 mixed (empirically ambiguous), from three converging pipelines:
+- **25 RC cases** — real methodology flaws extracted from ReScience C replications (2020–2021) via GPT-4o; ground truth is the reproducer's documented findings (`is_real_paper_case=True`)
+- **55 synthetic regular cases** — planted corruptions using a 9-type flaw taxonomy; Gemini 2.5 Flash smoke validation (cross-family, not same-model)
+- **40 synthetic mixed cases** — empirically contingent designs using a 6-type ambiguity taxonomy, each with a concrete empirical test specification as ground truth
+
+All three pipelines converge at `normalize_cases.py` → stratified selection → difficulty gate (baseline FC < 0.80). Five prior-version confounds explicitly addressed: closed-loop scoring, majority-vote IDR suppression, missing mixed cases, hollow forced rounds, and baseline ceiling. See [`v5_mitigations.md`](self_debate_experiment_v6/plan/references/v5_mitigations.md).
 
 **Cross-vendor scorer (GPT-4o).** IDR, IDP, and ETD scored by GPT-4o via OpenRouter — removing the closed-loop confound that invalidated v5 (cross-vendor IDR delta = −0.7737 in v5). FVC and DRQ use internal rule-based scoring. See [`schema_b.md`](self_debate_experiment_v6/plan/references/schema_b.md).
 

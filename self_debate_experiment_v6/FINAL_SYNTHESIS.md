@@ -106,7 +106,7 @@ A full IDR_novel analysis is deferred to v7.
 
 2. **Investigate multiround for mixed cases.** Multiround achieves FVC_mixed = 0.3667, the highest of all conditions, suggesting iterative exchange helps with empirically ambiguous cases. The within-case variance is high (20/23 high-variance pairs are multiround), requiring stabilization before deployment.
 
-3. **Formal ensemble-vs-baseline test.** H2 tested debate vs ensemble. A direct test of ensemble vs baseline would confirm whether the +0.1005 IDR descriptive gap is statistically robust.
+3. ~~**Formal ensemble-vs-baseline test.**~~ **RESOLVED** (journal `542251e1`). Paired bootstrap: ensemble_3x IDR=0.7717 vs baseline IDR=0.6712, diff=+0.1005, 95% CI=[+0.0426, +0.1648], p=0.0000. CI excludes zero — ensemble formally superior to baseline. RC-stratified follow-up (journal `61ee949b`): gap is ~3× larger on real papers (+0.172) than synthetic (+0.059).
 
 4. **Redesign ETD metric.** ETD = 1.0 for all debate conditions — scorer ceiling removes all discrimination. A sub-element quality rubric (specificity, falsifiability, orthogonality) is required.
 
@@ -127,7 +127,7 @@ A full IDR_novel analysis is deferred to v7.
 | `v6_rescored_idr_idp.json` | Final | GPT-4o IDR/IDP/ETD scores |
 | `REPORT.md` | Draft | Reflects pre-correction analysis; corrected verdicts in this document |
 | `REPORT_ADDENDUM.md` | Final | Production deployment recommendation |
-| `ENSEMBLE_ANALYSIS.md` | Final | Union IDR design and H2 analysis |
+| `ENSEMBLE_ANALYSIS.md` | **Updated** | Union IDR design and H2 analysis; §7 minority-precision analysis; §8 RC-stratified subgroup (2026-04-12) |
 | `SENSITIVITY_ANALYSIS.md` | Final | Phase 8 robustness checks |
 | `CONCLUSIONS.md` | **Updated** | H2 and H6 corrected verdicts |
 | `PEER_REVIEW_R1.md` | Final | Research-reviewer critique with 3 major + 5 minor issues |
