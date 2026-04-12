@@ -127,6 +127,10 @@ Ensemble_3x achieves the highest IDR (0.7717) and IDP_adj (0.9861) of all condit
 
 *Note: IDP_adj equals IDP for non-debate conditions (baseline, ensemble_3x), which have no adjudicator stage.*
 
+![Figure 1. IDR by condition on regular cases (n = 80). Ensemble_3x (green, bold edge) achieves IDR = 0.7717, the highest of all conditions. Dashed line at baseline IDR = 0.6712. All conditions use 3× compute except Baseline (1×) and Multiround (~5×).](figures/figure1_idr_by_condition.png)
+
+**Figure 1.** IDR by condition, regular cases (n = 80). Source: `v6_hypothesis_results.json`.
+
 ### 4.2 Hypothesis Tests
 
 **Table 2a: Pre-registered hypothesis tests (paired bootstrap, n = 10,000, seed = 42, regular cases n = 80, mixed cases n = 40)**
@@ -190,6 +194,10 @@ The results reveal a task-type interaction that explains the apparent contradict
 
 We note that this convergent/divergent distinction is a post-hoc interpretive framework consistent with the data, not a pre-registered contrast. The pattern is suggestive and reconciles the debate literature, but should be tested prospectively. Du et al.'s (2024) math tasks and ChatEval's (Chan et al., 2024) evaluation tasks are convergent — debate helps agents converge on correct answers. The methodology flaw detection in our benchmark is divergent — debate's adversarial pressure suppresses independent discovery. The key variable is whether the goal is to find one right answer (convergent) or to find all problems (divergent).
 
+![Figure 2. 2×2 convergent/divergent task-type interaction matrix. Green = method wins on that cell's primary metric; red = method fails. Post-hoc framework — not pre-registered.](figures/figure2_task_type_matrix.png)
+
+**Figure 2.** Task-type interaction. Ensemble wins on divergent detection (top-left); multiround wins on convergent judgment (bottom-right). Both methods fail in the off-diagonal cells.
+
 ### 5.2 Dimension Decomposition
 
 The ensemble IDR advantage over isolated_debate (+0.1114) is 4x larger than the FC composite difference (+0.0287). Three of four FC dimensions show minimal or no separation: DRQ and FVC are flat at 0.75 for all non-multiround conditions, and IDP contributes only +0.0417. The IDR signal is diluted when averaged with non-discriminating dimensions. This suggests that for detection-prioritized evaluation, IDR should be reported as a primary metric alongside composite scores, as composites can obscure large effects on the dimension that matters most.
@@ -206,6 +214,10 @@ Stratifying the 80 regular cases by source reveals that the ensemble advantage i
 | Synthetic | 55 | 0.9553 | 0.8961 | +0.059 |
 
 Descriptively, the ensemble IDR advantage is approximately 3x larger on real papers (+0.172) than on synthetic cases (+0.059), though the RC subgroup (n = 25) is too small for formal significance testing (no CIs are reported for subgroup deltas). The pattern is consistent with a ceiling effect on synthetic cases — baseline IDR is already 0.896, compressing the margin for improvement — while real-paper baseline IDR (0.283) leaves substantial room for union pooling to recover additional ground-truth flaws. If replicated at larger N, this would suggest the aggregate IDR advantage (+0.1005) understates the benefit in the most ecologically valid deployment context.
+
+![Figure 3. IDR by condition stratified by case source. Dark blue = real ReScience C papers (RC, n=25); light blue = synthetic cases (n=55). Ensemble 3× has the highest IDR in both subsets. RC subgroup is descriptive only — underpowered for formal significance testing.](figures/figure3_rc_stratified_idr.png)
+
+**Figure 3.** IDR by condition, stratified by case source. Source: `ENSEMBLE_ANALYSIS.md` §8. No CIs reported for RC subgroup (n = 25).
 
 ### 5.4 Union Pooling: Precision Validation
 
@@ -361,21 +373,6 @@ The conditional forced-multiround (CFM) gate fires on 94.7% of cases (341/360). 
 
 ---
 
-![Figure 1. IDR by condition on regular cases (n = 80). Ensemble_3x (green, bold edge) is the only condition to formally outperform all others. Baseline reference line at IDR = 0.6712. All conditions use 3× compute except Baseline (1×) and Multiround (~5×).](figures/figure1_idr_by_condition.png)
-
-**Figure 1.** IDR by condition on regular cases (n = 80). Ensemble_3x achieves IDR = 0.7717, the highest of all conditions. Isolated_debate (0.6603) falls below the 1× baseline (0.6712). Source: `v6_hypothesis_results.json` descriptive means.
-
----
-
-![Figure 2. 2×2 convergent/divergent task-type interaction matrix. Green cells = method wins; red cells = method fails. Post-hoc framework — not pre-registered.](figures/figure2_task_type_matrix.png)
-
-**Figure 2.** Convergent/divergent task-type interaction. Ensemble dominates divergent detection (IDR = 0.7717, H2 CI [−0.0434, −0.0154]); multiround dominates convergent judgment (FVC_mixed = 0.3667 vs. ensemble 0.025). The interaction is post-hoc and awaits prospective confirmation.
-
----
-
-![Figure 3. IDR by condition stratified by case source. Dark blue = real ReScience C papers (RC, n=25); light blue = synthetic planted-corruption cases (n=55). Ensemble IDR advantage is ~3× larger on real papers (+0.172) than synthetic (+0.059). RC subgroup underpowered for formal significance testing.](figures/figure3_rc_stratified_idr.png)
-
-**Figure 3.** IDR by condition, stratified by case source. Source: `ENSEMBLE_ANALYSIS.md` §8. RC subgroup (n = 25) results are descriptive only; no CIs reported.
 
 ---
 
