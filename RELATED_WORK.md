@@ -149,7 +149,7 @@ The core finding (ensemble >= debate at matched compute) is confirmed by at leas
 
 ### What ml-lab is in tension with
 
-Du et al. (2023) and ChatEval (2023) report debate benefits, but on different task types (convergent reasoning) and without compute-matched ensemble baselines. The tension resolves through task-type: debate helps convergent reasoning (find one right answer) but hurts divergent detection (find all flaws).
+Du et al. (2023) and ChatEval (2023) report debate benefits, but on different task types (convergent reasoning) and without compute-matched ensemble baselines. The tension resolves through task-type: debate helps convergent reasoning (find one right answer) but does not help divergent detection (find all flaws) — IDR is statistically indistinguishable from baseline (CI spans zero).
 
 ### What appears genuinely novel
 
@@ -182,7 +182,7 @@ Wang et al.'s self-consistency uses majority-vote — convergent aggregation for
 **Finding 3: Convergent vs. divergent task-type interaction.**
 This finding resolves the apparent contradiction between Du et al. / ChatEval (debate helps) and Smit et al. / Zhang et al. (debate doesn't help). The key variable is task type:
 
-- **Divergent detection** (find all flaws in a methodology): debate *hurts*. IDR_debate = 0.6603 < IDR_baseline = 0.6712. Consistent with Wynn et al.'s sycophancy mechanism — the defender argues away valid critiques.
+- **Divergent detection** (find all flaws in a methodology): debate *does not help*. IDR_debate = 0.6603 vs IDR_baseline = 0.6712 (directionally lower but CI [−0.0108, +0.0059] spans zero — statistically indistinguishable). The directional pattern is consistent with Wynn et al.'s sycophancy mechanism — the defender argues away valid critiques.
 - **Convergent judgment** (is this methodology empirically testable?): debate *helps*. Multiround FVC_mixed = 0.3667 vs. baseline 0.0. Iterative exchange is structurally necessary for recognizing ambiguity.
 
 ml-lab demonstrates both sides of this interaction within a single experimental setup and benchmark. No existing paper does this. The convergent/divergent framework explains why the debate literature disagrees with itself — Du et al.'s math tasks are convergent; Smit et al.'s benchmarks are convergent; ml-lab's flaw detection is divergent. This may be the most theoretically important contribution because it provides a predictive framework for when debate will and will not help.

@@ -547,6 +547,8 @@ This was a known limitation in v2 (all roles including scorer used Claude). v6 p
 
 | Location | Contents |
 |----------|----------|
+| [`WORKING_PAPER.md`](WORKING_PAPER.md) | **Working paper** — v6 findings formatted for publication (~5,250 words, EMNLP/NAACL/NeurIPS workshop target) |
+| [`RELATED_WORK.md`](RELATED_WORK.md) | **Literature positioning** — 25-paper verified survey, publishable findings assessment (§7) |
 | [`self_debate_experiment_v6/FINAL_SYNTHESIS.md`](self_debate_experiment_v6/FINAL_SYNTHESIS.md) | **Authoritative v6 summary** — all hypothesis verdicts (paired bootstrap), peer review corrections, production recommendation |
 | [`self_debate_experiment_v6/RESEARCH_REPORT.md`](self_debate_experiment_v6/RESEARCH_REPORT.md) | v1–v6 research arc synthesis — 290+ journal entries, 400+ commits |
 | [`self_debate_experiment_v6/ENSEMBLE_ANALYSIS.md`](self_debate_experiment_v6/ENSEMBLE_ANALYSIS.md) | Ensemble design, H2 results, minority-flagged precision follow-up (§7) |
