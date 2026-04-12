@@ -68,7 +68,7 @@ We constructed a benchmark of 120 ML methodology review cases in three categorie
 - **Mixed cases (n = 40):** Cases where the methodology is empirically ambiguous — the correct resolution is `empirical_test_agreed`, requiring the reviewer to recognize that a definitive verdict cannot be reached without further evidence.
 - **Defense cases (n = 20):** Cases with valid methodology where the correct verdict is `defense_wins` — the reviewer should identify no critical flaws.
 
-Of the 80 regular cases (critique + defense), 25 are derived from real ReScience C reproducibility papers (2020-2021 editions) and 55 are synthetically generated with planted corruptions. The benchmark underwent five prior calibration rounds (v1-v5) that progressively increased difficulty and addressed scoring artifacts.
+Of the 80 regular cases (critique + defense), 25 are derived from real ReScience C reproducibility papers (2020-2021 editions) and 55 are synthetically generated with planted corruptions. All 40 mixed cases are synthetically generated via an ambiguity taxonomy pipeline (see Appendix B.4) — the real-paper grounding applies only to the critique and defense strata. The benchmark underwent five prior calibration rounds (v1-v5) that progressively increased difficulty and addressed scoring artifacts. Full benchmark construction methodology — including pipeline architecture, model assignments, contamination prevention, and difficulty calibration — is described in Appendix B.
 
 ### 3.2 Conditions
 
@@ -344,3 +344,94 @@ The conditional forced-multiround (CFM) gate fires on 94.7% of cases (341/360). 
 **Figure 2 (suggested).** 2x2 matrix: task type (convergent/divergent) x method (debate/ensemble). Cells contain primary metric and direction of effect. Illustrates the task-type interaction framework.
 
 **Figure 3 (optional).** IDR by condition, stratified by case source (RC real papers vs. synthetic). Shows the ensemble advantage is 3x larger on real papers.
+
+---
+
+## Appendix B: Benchmark Construction
+
+### B.1 Three-Source Architecture
+
+The 120-case benchmark was assembled from three independent pipelines that converge at a shared normalization step before stratified selection. This multi-source design was motivated by two problems in prior versions: (1) purely synthetic planted-corruption benchmarks measure corruption detection rather than methodology review, and (2) same-family difficulty calibration (using the same model family to calibrate that is used to evaluate) produces proxy scores that do not generalize to cross-family scoring (Spearman ρ = +0.046 in the preceding experimental series).
+
+The three pipelines are:
+
+- **RC Extraction Pipeline**: Extracts documented methodology flaws from published ML Reproducibility Challenge (RC) reports, yielding 25 cases (22 critique, 3 defense) from ReScience C (2020-2021 editions).
+- **Synthetic Regular Pipeline**: Generates methodologically sound designs and introduces planted corruptions using a 9-type flaw taxonomy, yielding 55 cases (38 critique, 17 defense).
+- **Synthetic Mixed Pipeline**: Generates designs with exactly one empirically contingent choice using a 6-type ambiguity taxonomy, yielding 40 mixed cases.
+
+All three pipelines produce a unified Schema B representation before case selection. Stratified selection targets 60 critique, 20 defense, and 40 mixed cases, with difficulty filtering applied after a Phase 3 pilot run (see §B.5).
+
+**Final benchmark composition:**
+
+| Source | Critique | Defense | Mixed | Total |
+|---|---|---|---|---|
+| RC (ReScience C) | 22 | 3 | 0 | 25 |
+| Synthetic regular | 38 | 17 | 0 | 55 |
+| Synthetic mixed | 0 | 0 | 40 | 40 |
+| **Total** | **60** | **20** | **40** | **120** |
+
+The real-paper grounding (RC cases) applies exclusively to the critique and defense strata. All 40 mixed cases are synthetically generated — no RC reports were classified as mixed in the final selection, because the pilot gating step removed ceiling cases and the remaining RC mixed pool was not sampled given the synthetic mixed pipeline's precise control over ambiguity structure.
+
+### B.2 Synthetic Regular Pipeline — Model Assignments and Flaw Taxonomy
+
+The synthetic regular pipeline produces each case through four sequential LLM stages followed by a cross-family smoke test. Model assignments were chosen to prevent same-family bias accumulating across stages.
+
+**Table B1: Model assignments by pipeline stage**
+
+| Stage | Role | Model | Rationale |
+|---|---|---|---|
+| Stage 1 | Hypothesis generator | GPT-4o-mini | Lightweight; broad domain coverage |
+| Stage 2 | Sound design writer | Claude Haiku 4.5 | Generates realistic ML methodology narratives |
+| Stage 3 | Corruption node | GPT-4o | Inserts flaws from 9-type taxonomy; separate family from Stage 2 |
+| Stage 4 | Ground truth assembler | Qwen3-235B-A22B | Assembles `must_find`, `must_not_claim`, and `acceptable_resolutions` |
+| Stage 5 | Smoke test | Gemini 2.5 Flash | **Cross-family validator** — independent of Claude (Stage 2) |
+| RC-2 | Flaw extractor | GPT-4o | Extracts structured flaws from RC report text |
+| RC-3 | `must_not_claim` extractor | GPT-4o | Identifies sound design choices that pattern-matching critics might wrongly challenge |
+| Stage 2M | Ambiguous design writer | GPT-4o | Generates designs with empirically contingent choices (mixed pipeline) |
+| Stage 3M | Mixed ground truth assembler | Qwen3-235B-A22B | Assembles mixed-case ground truth with concrete empirical test specification |
+| Phase 3 pilot | Difficulty calibration | GPT-4o | Cross-family pilot scorer; no Claude involvement (see §B.5) |
+
+The Stage 5 smoke model switch from Claude Sonnet (used in v5) to Gemini 2.5 Flash is the most consequential model assignment change. Stage 2 uses Claude Haiku to write designs. Using Claude Sonnet as the smoke validator creates same-family calibration bias: both models share Anthropic RLHF fine-tuning conventions, so Sonnet approval/rejection scores are systematically correlated with Haiku's output patterns in ways that do not generalize to cross-family evaluation. The v5 post-mortem confirmed this: proxy scores from Sonnet smoke tests had Spearman ρ = +0.046 against GPT-4o rubric performance. Gemini 2.5 Flash eliminates this dependency. The smoke model result (`proxy_mean`) is retained in case metadata for traceability but is not used as a gating criterion (see §B.5).
+
+The 9-type flaw taxonomy covers: data leakage, evaluation mismatch, baseline omission, distribution shift, metric mismatch, hyperparameter selection bias, scope overclaim, reproducibility gap, and statistical validity. Corruption counts are sampled per case from a distribution targeting [0, 1, 2, many] flaws with probabilities [0.25, 0.35, 0.25, 0.15].
+
+### B.3 RC Extraction Pipeline — Contamination Prevention
+
+The RC pipeline extracts methodology flaws from ReScience C reproducibility reports using four sequential stages. ReScience C papers (2020-2021 editions) were selected because they provide editorial-reviewed, post-hoc documented flaws from an independent reproducer who did not know the answer in advance — a ground-truth provenance that planted-corruption benchmarks cannot replicate.
+
+A structural contamination risk arises from the RC source: reproducibility reports contain both the original methodology description and the reproducer's critique. If the task prompt presented to debate agents includes critique-language text, agents receive the answer key through the data channel — the same structural failure that corrupted scoring in v3 (PM1). The RC pipeline addresses this through:
+
+1. **Extraction prompt design (RC-2):** The GPT-4o extraction pass explicitly separates "what the paper claims" from "what the reproducer found," constructing the task prompt from the paper's methodology description only.
+2. **RC-4 contamination gate:** Any case whose task prompt matches any of 10 reproducer-language keywords is rejected. Keywords: *"we found that," "failed to reproduce," "the reported results," "our reproduction," "could not replicate," "we were unable to," "reproduction failed," "reproducer found," "reproducibility report," "could not be reproduced."*
+
+Current yield after RC-4 filtering: 25 cases (from 80 fetched). The 55-case gap reflects cases excluded for environment-only failures, vague flaw descriptions, contaminated task prompts, or no documented root cause.
+
+### B.4 Synthetic Mixed Pipeline — Ambiguity Taxonomy
+
+All 40 mixed cases in the benchmark are synthetically generated. Each case presents a methodologically sound design with exactly one empirically contingent design choice — a decision that is genuinely defensible, genuinely challengeable, and unresolvable from the design document alone without empirical measurement. The ambiguity is not flagged or hedged in the narrative; the critic must trace the full methodology logic to identify the contestable dimension.
+
+The 6-type ambiguity taxonomy:
+
+| Type | Core Pattern |
+|---|---|
+| `split_ambiguity` | Train/test split applied to data with plausible but unconfirmed temporal autocorrelation |
+| `metric_ambiguity` | Ranking metric appropriate for task type but potentially misaligned with tail-threshold operational objective |
+| `complexity_ambiguity` | Model capacity appropriate for stated data size but unknown interaction structure |
+| `lookback_ambiguity` | Fixed behavioral lookback window of unknown predictive horizon |
+| `proxy_ambiguity` | Proxy outcome strongly correlated with target but diverges at conversion tail |
+| `regularization_ambiguity` | Regularization strength chosen by convention; optimal depends on actual signal-to-noise ratio |
+
+Ground truth for mixed cases specifies `correct_position = mixed` and `acceptable_resolutions = ["empirical_test_agreed"]`. The ground truth also encodes a concrete empirical test condition (what to measure, on what data, and the threshold or comparison that determines the outcome), enabling FVC scoring: a response that commits to critique_wins or defense_wins scores FVC = 0.0-0.5; a response that correctly identifies the ambiguity and specifies an empirical test scores FVC = 1.0.
+
+### B.5 Difficulty Calibration — Cross-Family Gating
+
+Difficulty calibration in v5 used proxy scores from a Claude Sonnet smoke test (`proxy_mean`), with cases above a threshold discarded as too easy. The v5 post-mortem established this does not work: same-family proxy scores (Claude Sonnet evaluating Claude Haiku designs) had Spearman ρ = +0.046 against rubric performance, effectively random. Self-calibration is circular when the calibration model shares RLHF conventions with the design model.
+
+v6 replaces this with a Phase 3 pilot-based approach:
+
+1. A random sample of ~30 candidate cases is evaluated by the baseline condition (single-pass critic) using GPT-4o scoring — the same cross-vendor scorer used in the main experiment.
+2. Cases where `baseline_fc_mean > 0.80` are discarded as ceiling cases (too easy to discriminate between conditions).
+3. Remaining cases receive difficulty labels from GPT-4o rubric performance, not from proxy scores.
+4. The H1a effect-size threshold is calibrated from the pilot: `threshold = max(0.03, min(0.10, pilot_fc_mean × 0.25))`. With pilot FC mean = 0.6500, this yields a threshold of 0.10.
+
+The pilot eliminated 5 ceiling cases from the candidate pool before the final 120-case benchmark was locked. The `proxy_mean` field is retained in case metadata for traceability but plays no role in selection or gating.
