@@ -1160,7 +1160,7 @@ def main():
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=4,
+        default=100,
         help="Concurrent workers for RC-1 HTTP fetch and RC-2/RC-3 LLM calls (default: 100)",
     )
     parser.add_argument(
