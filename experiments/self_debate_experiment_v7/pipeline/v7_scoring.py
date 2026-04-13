@@ -175,7 +175,7 @@ OUTPUT: Respond with JSON only. No prose before or after.
   }},
   "idp_raw_false_claim_ids": ["<claim_id_if_raised_in_raw>", ...],
   "idp_adj_false_claim_ids": ["<claim_id_if_raised_in_adjudicated>", ...],
-  "idr_novel_count": <integer — count of issues in critique that are valid new concerns NOT in planted issues and NOT false claims>
+  "idr_novel_issues": ["<brief description of each valid new concern NOT in planted issues and NOT a false claim>", ...]
 }}"""
 
 
@@ -358,7 +358,12 @@ async def score_file(client, output_path, case_meta, semaphore, model, dry_run):
         idr_found = result.get("idr_found", {})
         idp_raw_false = result.get("idp_raw_false_claim_ids", [])
         idp_adj_false = result.get("idp_adj_false_claim_ids", [])
-        novel_count = result.get("idr_novel_count", 0)
+        # idr_novel: prefer list (Python counts), fall back to legacy integer
+        novel_list = result.get("idr_novel_issues", None)
+        if isinstance(novel_list, list):
+            novel_count = len(novel_list)
+        else:
+            novel_count = result.get("idr_novel_count", 0)
 
         if must_find_ids:
             n_found = sum(1 for iid in must_find_ids if idr_found.get(iid, False))
