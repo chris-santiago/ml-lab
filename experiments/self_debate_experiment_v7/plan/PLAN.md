@@ -12,7 +12,7 @@ CI [+0.0154, +0.0434]); debate ≈ baseline; multiround advantage on convergent 
 | Convergent/divergent framework post-hoc | Pre-register P1/P2 before Phase 5 |
 | ETD ceiling: 100% = 1.0, no signal | Remove ETD from primary battery |
 | 40 mixed cases underpowered | Scale to 80 mixed cases |
-| H1a non-significance ≠ equivalence | Add TOST |
+| H1a non-significance ≠ equivalence | Pre-specified CI ±0.015 FC |
 
 **Submission:** Single submission to EMNLP ARR May 2026 (deadline: May 25, 2026). No v6 submission in parallel. (Decision logged: journal `28a0393d`)
 
@@ -33,7 +33,7 @@ CI [+0.0154, +0.0434]); debate ≈ baseline; multiround advantage on convergent 
 | Document | Description | Used by phases |
 |---|---|---|
 | [design_decisions.md](references/design_decisions.md) | Conditions, case composition, scoring battery, statistical tests, open questions | 0, 1, 2, 3, 5, 7 |
-| [hypotheses.md](references/hypotheses.md) | P1/P2 pre-registration predictions, H1a TOST, H2 | 3, 4, 5, 7 |
+| [hypotheses.md](references/hypotheses.md) | P1/P2 pre-registration predictions, H1a–H5, equivalence bounds | 3, 4, 5, 7 |
 | [API_DISPATCH_PLAN.md](references/API_DISPATCH_PLAN.md) | Phase 5 benchmark runner design (OpenRouter async script) | 0, 5 |
 | [schema_b.md](references/schema_b.md) | Schema B field table + format constraints (reused from v6) | 0, 2 |
 | [v6_lessons.md](references/v6_lessons.md) | Key lessons from v6 that constrain v7 design | 0, 1, 2, 4, 5 |
@@ -46,12 +46,12 @@ CI [+0.0154, +0.0434]); debate ≈ baseline; multiround advantage on convergent 
 |---|---|---|---|
 | 0 | Setup | [phase_00_setup.md](phases/phase_00_setup.md) | `multiround_2r` system prompts committed; scoring engine updated (ETD removed); API dispatch script scaffolded |
 | 1 | RC Data Acquisition | [phase_01_rc_acquisition.md](phases/phase_01_rc_acquisition.md) | `rc_cases_raw.json` with ≥30 ReScience C papers |
-| 2 | Case Library Assembly | [phase_02_case_assembly.md](phases/phase_02_case_assembly.md) | `benchmark_cases_v7_raw.json` passes Schema B; 260 cases (160 regular / 80 mixed / 20 defense) |
-| 3 | Pilot & Calibration | [phase_03_pilot.md](phases/phase_03_pilot.md) | `baseline_fc_mean < 0.80`; ≥160 regular + ≥60 mixed pass filter |
-| 4 | Pre-Experiment Self-Review | [phase_04_self_review.md](phases/phase_04_self_review.md) | `HYPOTHESIS.md` committed with P1/P2 + TOST bounds; coherence audit passes as named gate |
+| 2 | Case Library Assembly | [phase_02_case_assembly.md](phases/phase_02_case_assembly.md) | `benchmark_cases_v7_raw.json` passes Schema B; 280 cases (160 regular / 80 mixed / 40 defense) |
+| 3 | Pilot & Calibration | [phase_03_pilot.md](phases/phase_03_pilot.md) | `baseline_fc_mean < 0.80`; ≥160 regular + ≥80 mixed pass filter |
+| 4 | Pre-Experiment Self-Review | [phase_04_self_review.md](phases/phase_04_self_review.md) | `HYPOTHESIS.md` committed with P1/P2 + H1a–H5 + equivalence bounds; coherence audit passes as named gate |
 | 5 | Benchmark Run | [phase_05_benchmark.md](phases/phase_05_benchmark.md) | All output files pass schema + zero-variance check |
 | 6 | Cross-Model Scoring | [phase_06_scoring.md](phases/phase_06_scoring.md) | `v7_rescored_idr_idp.json` complete |
-| 7 | Analysis | [phase_07_analysis.md](phases/phase_07_analysis.md) | `v7_results.json` with all hypothesis tests + TOST |
+| 7 | Analysis | [phase_07_analysis.md](phases/phase_07_analysis.md) | `v7_results.json` with all 8 hypothesis tests (P1, P2, H1a–H5) |
 | 8 | Sensitivity & Robustness | [phase_08_sensitivity.md](phases/phase_08_sensitivity.md) | `SENSITIVITY_ANALYSIS.md`; `multiround_2r` variance audit |
 | 9 | Cross-Vendor Validation | [phase_09_cross_vendor.md](phases/phase_09_cross_vendor.md) | Spot-check 10% of cases; agreement metrics reported |
 | 10 | Reporting | [phase_10_reporting.md](phases/phase_10_reporting.md) | All artifacts + `/artifact-sync` + coherence audit + paper rewrite complete |
@@ -73,7 +73,7 @@ CI [+0.0154, +0.0434]); debate ≈ baseline; multiround advantage on convergent 
 | File | Change |
 |---|---|
 | `pipeline/rc_extractor.py` | Target 30–40 papers (was 25) |
-| `pipeline/orchestrator.py` | Mixed case target 80 (was 40); defense case target 20 |
+| `pipeline/orchestrator.py` | Mixed case target 80 (was 40); defense case target 40 (new stratum) |
 | `pipeline/select_cases.py` | Updated stratum sizes |
 | `pipeline/normalize_cases.py` | No change needed |
-| `v6_scoring.py` → `v7_scoring.py` | Remove ETD from primary battery; add TOST |
+| `v6_scoring.py` → `v7_scoring.py` | Remove ETD from primary battery; add equivalence CI checks (H1a ±0.015, H5 ±0.03); add H4, H5 tests |

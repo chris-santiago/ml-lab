@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Spot-check that GPT-4o IDR scores are consistent across a representative sample.
+Spot-check that gpt-5.4-mini IDR scores are consistent across a representative sample.
 v6 confirmed that same-model scoring produces IDR delta of −0.7737 vs cross-vendor.
 This phase validates the cross-vendor scorer is stable, not that it's better.
 
@@ -16,8 +16,8 @@ This phase validates the cross-vendor scorer is stable, not that it's better.
 
 ### 9.1 Sample 10% for re-scoring
 
-Stratified 10% random sample: ~12 regular + ~8 mixed + ~2 defense = 22 cases.
-Re-score all runs (3 per case) using the same GPT-4o scorer.
+Stratified 10% random sample: ~16 regular + ~8 mixed + ~4 defense = ~28 cases.
+Re-score all runs (3 per case) using the same gpt-5.4-mini scorer.
 
 ```bash
 cd experiments/self_debate_experiment_v7 && \

@@ -16,7 +16,7 @@ Agent prompt:
 Write REPORT.md and TECHNICAL_REPORT.md for the v7 experiment.
 
 Sources (numbers come ONLY from these):
-- v7_results.json — all metrics, CIs, p-values, TOST result
+- v7_results.json — all metrics, CIs, p-values, equivalence CI results
 - CONCLUSIONS.md — hypothesis verdicts and framework verdict
 - SENSITIVITY_ANALYSIS.md — variance audit, bootstrap stability
 - HYPOTHESIS.md — pre-registered predictions (P1, P2)
@@ -24,11 +24,13 @@ Sources (numbers come ONLY from these):
 
 Key findings to highlight:
 1. Framework verdict (P1 + P2): CONFIRMED or NOT CONFIRMED
-2. TOST H1a result: debate EQUIVALENT to baseline within ±{bounds} FC
+2. H1a equivalence result: debate EQUIVALENT to baseline within ±0.015 FC
 3. ensemble_3x vs multiround_2r IDR delta (P1) with CI
 4. multiround_2r vs ensemble_3x FVC_mixed delta (P2) with CI
-5. Defense exoneration rate by condition
-6. multiround_2r variance relative to other conditions
+5. H4: ensemble_3x > baseline IDR with CI (promoted from v6 post-hoc)
+6. H5: union pooling precision parity (1/3 vs 3/3 flagged) within ±0.03
+7. Defense exoneration rate by condition
+8. multiround_2r variance relative to other conditions
 
 Do not source numbers from README, v6 artifacts, or pilot_results.json.
 ```
@@ -39,20 +41,22 @@ Update all three paper versions (`paper/arxiv/`, `paper/emnlp2026/`, `paper/neur
 
 **New results section:**
 - Update Table 1 (main results) with v7 condition means
-- Update Table 2 (hypothesis verdicts) with P1, P2, H1a TOST
+- Update Table 2 (hypothesis verdicts) with P1, P2, H1a–H5
 - Add Table for multiround_2r variance vs other conditions
 - Update Abstract: lead with framework confirmation/non-confirmation
+- Add H4 ensemble > baseline IDR result (promoted from v6 post-hoc)
+- Add H5 union pooling precision parity result
 
 **Changed claims:**
 - Replace v6's post-hoc framing with: "We pre-registered these predictions..."
 - Replace "multiround advantage at ~5×" with v7 matched-compute result
-- Add TOST result for H1a equivalence claim
+- Add H1a equivalence CI result (pre-specified ±0.015 FC bound)
 - Remove ETD from primary results tables
 
 **Paper structure additions:**
 - §3.2 (Method): add pre-registration subsection (P1/P2, timing, commit hash)
-- §3.3 (Method): add TOST subsection
-- §4 (Results): add `multiround_2r` row to all tables
+- §3.3 (Method): add equivalence CI subsection (H1a ±0.015, H5 ±0.03; explain why pre-specified CI rather than TOST for ACL audience)
+- §4 (Results): add `multiround_2r` row to all tables; add H4, H5 results
 
 **Four required edits from v6_issues.md peer review (MUST DO):**
 
@@ -76,7 +80,7 @@ Under review.}`). Keep the reflexive disclosure text — it's intellectually hon
 appropriate — just change placement.
 
 **d) Benchmark as releasable artifact in Introduction**
-The 260-case benchmark with ground-truth labels is a concrete contribution independent
+The 280-case benchmark with ground-truth labels is a concrete contribution independent
 of the experiment. Mention release in §1 (Introduction), not only in the reproducibility
 section. One sentence is sufficient: "We release the benchmark and all experimental
 artifacts at [repo URL]." ACL Findings reviewers weight released resources positively.

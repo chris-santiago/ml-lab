@@ -3,7 +3,7 @@
 > **Reminders:** `uv run` only. CWD: repo root. `cd experiments/self_debate_experiment_v7 &&` prefix.
 
 ## Required Reading
-- [design_decisions.md §2](../references/design_decisions.md#2-case-composition-target-n--260) — case targets + defense case sourcing decision
+- [design_decisions.md §2](../references/design_decisions.md#2-case-composition-target-n--280) — case targets + defense case sourcing decision
 - [v6_lessons.md L5](../references/v6_lessons.md) — cross-vendor scoring requirement
 
 ---
@@ -34,7 +34,8 @@ uv run pipeline/rc_extractor.py --output rc_cases_raw.json --target-count 40
 
 ### 1.4 Defense case decision
 If RC yield for defense cases is insufficient (< 10 valid exoneration cases):
-- Generate 20 synthetic cases with `correct_position = "defense_wins"` (no planted flaws)
+- Generate synthetic cases with `correct_position = "defense_wins"` (no planted flaws)
+  to reach the 40-case defense target
 - Validate manually: confirm each case has no identifiable methodological flaw
 - Add `is_synthetic_defense: true` flag for subgroup analysis
 

@@ -46,12 +46,14 @@ uv run pipeline/v7_scoring.py \
 ```
 
 Compare P1, P2, H2_regular CI bounds between seed=42 (primary) and seed=99. Acceptable
-variation: ± 0.002 on CI bounds. Report if larger.
+variation: ±0.001 on CI bounds (per `design_decisions.md §4`: at n=10,000 bootstrap
+samples with n=160 cases, variation above ±0.001 is unexpected). Report if larger.
 
 ### 8.3 Scorer sensitivity (spot-check)
 
-Re-score 10% of cases (stratified random) with a second GPT-4o run. Compare `idr_documented`
-between original and re-score. Report mean absolute difference and flag pairs where delta > 0.15.
+Re-score 10% of cases (stratified random) with a second gpt-5.4-mini run. Compare
+`idr_documented` between original and re-score. Report mean absolute difference and flag
+pairs where delta > 0.15.
 
 ### 8.4 RC vs synthetic stability
 

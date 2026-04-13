@@ -50,7 +50,10 @@ curl -s https://openrouter.ai/api/v1/models \
 ### 0.4 Write system prompts
 
 **Critic** (`pipeline/prompts/critic.md`): adapted from `plugins/ml-lab/ml-critic.md`.
-Strip Mode 1/2/3 file-reading instructions. Add JSON output format:
+Strip Mode 1/2/3 file-reading instructions. Add explicit `defense_wins` verdict path
+with empty `all_issues_raised` and the instruction: *"A confident 'no significant issues'
+conclusion is as important as identifying genuine flaws."* (per `design_decisions.md §2`,
+v6 lesson L7). JSON output format:
 ```json
 {"critic_raw": "...", "all_issues_raised": ["..."], "verdict": "critique_wins|defense_wins|empirical_test_agreed"}
 ```
@@ -112,7 +115,11 @@ Confirm: prompts printed, no API calls, output paths correctly formed.
 Copy `experiments/self_debate_experiment_v6/v6_scoring.py` → `pipeline/v7_scoring.py`.
 Changes:
 - Remove ETD from `DIMENSIONS` and all scoring/reporting code
-- Add TOST function: `tost(delta, ci_lower, ci_upper, bound=0.05) -> bool`
+- Add equivalence CI check function: `check_equivalence(ci_lower, ci_upper, bound) -> bool`
+  returning True if CI falls entirely within [−bound, +bound]. Accepts per-hypothesis
+  bounds: H1a ±0.015 FC, H5 ±0.03 precision (see `design_decisions.md §4`)
+- Add H4 test: one-sided bootstrap for ensemble_3x > baseline IDR (regular cases)
+- Add H5 test: per-case issue classification (1/3 vs 3/3 precision parity)
 - Update file paths from `v6_*` to `v7_*`
 
 ### 0.8 Commit all setup artifacts

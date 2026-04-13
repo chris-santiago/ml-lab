@@ -31,7 +31,7 @@ wc -l v7_cases_sanitized.json  # sanity check: should be 1 line (JSON array)
 
 ### 5.2 Run all 4 conditions
 
-Full run: 260 cases × 4 conditions × 3 runs = **3,120 files**
+Full run: 280 cases × 4 conditions × 3 runs = **3,360 files**
 
 ```bash
 cd experiments/self_debate_experiment_v7 && \
@@ -104,20 +104,20 @@ import json, glob, collections
 files = glob.glob('v7_raw_outputs/*.json')
 by_cond = collections.Counter(json.load(open(f))['condition'] for f in files)
 print('Files per condition:', dict(by_cond))
-print('Total:', len(files), '/ expected 3120')
+print('Total:', len(files), '/ expected 3360')
 "
 ```
 
 ---
 
 ## Verification
-- [ ] Schema validation passes for all 2,640 files
+- [ ] Schema validation passes for all 3,360 files
 - [ ] Zero-variance check: 0 contaminated cases
 - [ ] `ensemble_3x` outputs contain `assessor_results` with per-assessor `found` booleans
 - [ ] `multiround_2r` outputs contain both `critic_raw` and `defender_raw`
 
 ## Outputs
-- `v7_raw_outputs/{case_id}_{condition}_run{idx}.json` (2,640 files)
+- `v7_raw_outputs/{case_id}_{condition}_run{idx}.json` (3,360 files)
 
 ## Gate
 All files pass schema validation. Zero-variance check passes. Expected file count reached.

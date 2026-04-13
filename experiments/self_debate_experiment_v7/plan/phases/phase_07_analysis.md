@@ -3,8 +3,9 @@
 > **Reminders:** `uv run` only. CWD: repo root. All tests must match pre-registered specs in `HYPOTHESIS.md`.
 
 ## Required Reading
-- [hypotheses.md](../references/hypotheses.md) — all test specifications
-- [design_decisions.md §4](../references/design_decisions.md#4-statistical-tests) — bootstrap protocol, TOST
+- [hypotheses.md](../references/hypotheses.md) — all test specifications (P1, P2, H1a–H5)
+- [design_decisions.md §4](../references/design_decisions.md#4-statistical-tests) — bootstrap protocol, equivalence CI bounds
+- [design_decisions.md §5](../references/design_decisions.md#5-open-questions) — `idr_novel` reporting decision
 
 ---
 
@@ -31,13 +32,17 @@ For each test, `v7_results.json` must contain: `point_estimate`, `ci_lower`, `ci
 
 | Test | Subset | Metric | Type |
 |---|---|---|---|
-| P1 | Regular (n≥160) | IDR: ensemble_3x vs multiround_2r | One-sided bootstrap |
-| P2 | Mixed (n≥60) | FVC_mixed: multiround_2r vs ensemble_3x | One-sided bootstrap |
-| H1a | Regular (n≥160) | FC: isolated_debate vs baseline (TOST) | TOST |
-| H2_regular | Regular (n≥160) | FC: ensemble_3x vs isolated_debate | Two-sided bootstrap |
-| H2_mixed | Mixed (n≥60) | FVC_mixed: ensemble_3x vs isolated_debate | Two-sided bootstrap |
-| H3 | Mixed (n≥60) | FVC_mixed: multiround_2r vs isolated_debate | One-sided bootstrap |
+| P1 | Regular (n=160) | IDR: ensemble_3x > multiround_2r | One-sided bootstrap |
+| P2 | Mixed (n=80) | FVC_mixed: multiround_2r > ensemble_3x | One-sided bootstrap |
+| H1a | Regular (n=160) | FC: isolated_debate ≈ baseline | Pre-specified CI ±0.015 FC |
+| H2_regular | Regular (n=160) | FC: ensemble_3x vs isolated_debate | Two-sided bootstrap |
+| H2_mixed | Mixed (n=80) | FVC_mixed: ensemble_3x vs isolated_debate | Two-sided bootstrap |
+| H3 | Mixed (n=80) | FVC_mixed: multiround_2r > isolated_debate | One-sided bootstrap |
+| H4 | Regular (n=160) | IDR: ensemble_3x > baseline | One-sided bootstrap |
+| H5 | Ensemble outputs | Precision: 1/3-flagged ≈ 3/3-flagged | Pre-specified CI ±0.03 |
 
+**H1a verdict:** PASS if 95% CI for (isolated_debate − baseline) FC falls entirely within [−0.015, +0.015].
+**H5 verdict:** PASS if 95% CI for (1/3 precision − 3/3 precision) falls entirely within [−0.03, +0.03].
 **Framework verdict**: CONFIRMED if P1 AND P2 both pass; otherwise PARTIAL or NOT CONFIRMED.
 
 ### 7.3 Per-condition summary table
@@ -77,19 +82,42 @@ for cond, results in by_cond.items():
 "
 ```
 
-### 7.5 RC vs synthetic subgroup (secondary)
-Split results by `is_real_paper_case`. Report IDR delta (ensemble vs baseline) separately
+### 7.5 H4 — Ensemble vs baseline IDR (primary + RC subgroup)
+**Primary:** one-sided bootstrap for ensemble_3x > baseline IDR on regular cases (n=160).
+Promoted from v6 post-hoc (p=0.0000, diff=+0.1005, CI=[+0.0426, +0.1648]).
+
+**Secondary (RC subgroup, directional only):**
+Split results by `is_real_paper_case`. Report IDR delta (ensemble_3x − baseline) separately
 for RC papers and synthetic cases. Expected: larger ensemble advantage on RC cases (harder,
-ecologically valid) — per v6 finding (+0.172 vs +0.059).
+ecologically valid) — per v6 finding (+0.172 vs +0.059). Report both deltas and the ratio
+descriptively. Flag if delta(RC) < delta(synthetic).
+
+At expected n≈40 for RC subgroup, use descriptive statistics only (not formal bootstrap).
+
+### 7.6 H5 — Union pooling precision parity
+Using `per_case_issue_map` from Phase 6 step 6.4:
+- Compute precision per support tier: (planted_match + valid_novel) / total issues
+- Run bootstrap 95% CI on (1/3 precision − 3/3 precision)
+- **Verdict:** PASS if CI falls entirely within [−0.03, +0.03]
+
+If the v7 CI half-width is substantially wider than v6 (fewer ensemble outputs), flag
+as underpowered rather than adjusting the bound post-hoc.
+
+### 7.7 `idr_novel` per-condition computation
+Per `design_decisions.md §5`: compute `idr_novel` (novel valid issues not in `must_find`)
+per condition. Report as a paper footnote only — not a table, not a primary or secondary
+hypothesis. Flag as future work: novel valid issue rate as a discovery-breadth metric
+beyond the planted-flaw ceiling.
 
 ---
 
 ## Verification
-- [ ] All 6 tests present in `v7_results.json` with point estimate + CI + verdict
+- [ ] All 8 tests present in `v7_results.json` with point estimate + CI + verdict (P1, P2, H1a, H2_reg, H2_mix, H3, H4, H5)
 - [ ] Framework verdict (P1+P2) reported
-- [ ] TOST verdict uses committed bounds (not modified post-hoc)
+- [ ] Equivalence verdicts use committed bounds (H1a ±0.015 FC, H5 ±0.03 precision — not modified post-hoc)
 - [ ] Defense exoneration rate computed and recorded
-- [ ] RC vs synthetic subgroup reported
+- [ ] H4 secondary: RC vs synthetic subgroup reported with both deltas
+- [ ] `idr_novel` per-condition computed (for footnote)
 
 ## Outputs
 - `v7_results.json` (all tests)
@@ -97,4 +125,4 @@ ecologically valid) — per v6 finding (+0.172 vs +0.059).
 - `CONCLUSIONS.md` (hypothesis verdicts + framework verdict)
 
 ## Gate
-`v7_results.json` complete. All 6 tests present. `CONCLUSIONS.md` written.
+`v7_results.json` complete. All 8 tests present (P1, P2, H1a, H2_reg, H2_mix, H3, H4, H5). `CONCLUSIONS.md` written.

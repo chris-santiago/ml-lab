@@ -4,15 +4,16 @@
 > **This is the pre-registration lock. Nothing committed here can change after Phase 5 begins.**
 
 ## Required Reading
-- [hypotheses.md](../references/hypotheses.md) — P1, P2, H1a TOST, H2, H3
-- [design_decisions.md](../references/design_decisions.md) — conditions, scoring, TOST bounds
+- [hypotheses.md](../references/hypotheses.md) — P1, P2, H1a–H5, equivalence bounds
+- [design_decisions.md](../references/design_decisions.md) — conditions, scoring, equivalence bounds
 - [v6_lessons.md L3](../references/v6_lessons.md) — coherence audit as named gate
 
 ---
 
 ## Key Constraint
-`HYPOTHESIS.md` must be committed to git before Phase 5 begins. P1, P2, TOST bounds, and
-all hypothesis test specifications must be in that commit. Any change after Phase 5 starts
+`HYPOTHESIS.md` must be committed to git before Phase 5 begins. P1, P2, equivalence bounds
+(H1a ±0.015 FC, H5 ±0.03 precision), and all hypothesis test specifications must be in
+that commit. Any change after Phase 5 starts
 invalidates pre-registration.
 
 ---
@@ -23,11 +24,13 @@ invalidates pre-registration.
 
 `HYPOTHESIS.md` must contain:
 - **P1** — IDR: ensemble_3x > multiround_2r (regular, n=160). One-sided bootstrap CI lower bound > 0.
-- **P2** — FVC_mixed: multiround_2r > ensemble_3x (mixed cases, n≥60). One-sided bootstrap CI lower bound > 0.
-- **H1a** — TOST: isolated_debate vs baseline (regular). Bounds: ±{bound from Phase 3} FC. Both one-sided tests must pass.
+- **P2** — FVC_mixed: multiround_2r > ensemble_3x (mixed cases, n=80). One-sided bootstrap CI lower bound > 0.
+- **H1a** — Pre-specified CI ±0.015 FC: isolated_debate vs baseline (regular, n=160). CI must fall entirely within [−0.015, +0.015].
 - **H2** — Two-sided: ensemble_3x vs isolated_debate on FC (regular) and FVC_mixed (mixed).
-- **H3** — One-sided: multiround_2r vs isolated_debate on FVC_mixed.
-- Bootstrap protocol: paired, n=10,000, seed=42.
+- **H3** — One-sided: multiround_2r vs isolated_debate on FVC_mixed (mixed, n=80). CI lower bound > 0.
+- **H4** — IDR: ensemble_3x > baseline (regular, n=160). One-sided bootstrap CI lower bound > 0. Secondary: RC subgroup directional (delta(RC) > delta(synthetic)).
+- **H5** — Precision parity: 1/3-flagged ≈ 3/3-flagged (ensemble outputs). Pre-specified CI ±0.03 precision. CI must fall entirely within [−0.03, +0.03].
+- Bootstrap protocol: paired, n=10,000, seed=42. No multiple comparison correction (pre-registration controls FWER; cite Nosek et al. 2018).
 - Case counts locked in: `n_regular`, `n_mixed`, `n_defense` (from Phase 2/3 outputs).
 
 Commit `HYPOTHESIS.md` **before dispatching review agents.**
@@ -41,7 +44,7 @@ Check each item:
 **a) Hypothesis ↔ scoring code:**
 - Each hypothesis has a corresponding test function in `v7_scoring.py`
 - Test functions use the correct N (regular vs mixed case subset)
-- TOST function uses the bounds committed in `HYPOTHESIS.md`
+- Equivalence CI check function uses the bounds committed in `HYPOTHESIS.md` (H1a ±0.015, H5 ±0.03)
 - Bootstrap uses seed=42 and n=10,000
 
 **b) Scoring dimensions ↔ conditions:**
@@ -74,7 +77,7 @@ detection (regular cases, IDR). Two directional predictions P1 and P2 must both 
 
 Your tasks:
 1. Evaluate P1 and P2 — are they falsifiable and the test specifications correct?
-2. Evaluate H1a TOST — are ±{bound} bounds appropriate given the pilot baseline mean?
+2. Evaluate H1a equivalence CI — is ±0.015 FC appropriate given the pilot baseline mean?
 3. Identify any confounds, power issues, or design gaps not addressed by v6_lessons.md.
 4. Check for answer-key leakage vectors in the benchmark runner design.
 5. Generate PRE-1 through PRE-N pre-execution requirements.
@@ -99,7 +102,7 @@ This is the pre-registration anchor commit. Record commit hash.
 ---
 
 ## Verification
-- [ ] `HYPOTHESIS.md` committed with P1, P2, H1a TOST bounds, H2, H3, bootstrap protocol
+- [ ] `HYPOTHESIS.md` committed with P1, P2, H1a–H5, equivalence bounds (H1a ±0.015 FC, H5 ±0.03), bootstrap protocol
 - [ ] Coherence audit complete: all 4 checks pass, documented in `COHESION_AUDIT.md`
 - [ ] All PRE-N requirements resolved and committed
 - [ ] No answer-key leakage vectors identified (or mitigated)
