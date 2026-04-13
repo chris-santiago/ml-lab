@@ -372,9 +372,10 @@ additional validation. Paper recommendation shifts from "use union pooling direc
 - **RC subgroup (H4 secondary):** split by `is_real_paper_case` boolean; report n per
   stratum; use descriptive statistics only (not formal one-sided bootstrap) given expected
   n≈40 for RC subgroup
-- **Minority precision (H5):** cluster by issue text similarity within ensemble outputs;
-  assign to support tier (1/3, 2/3, 3/3) based on how many assessors raised it; compute
-  precision per tier; run TOST on (1/3 − 3/3) difference
+- **Minority precision (H5):** single gpt-5.4-mini call per ensemble_3x case deduplicates
+  across assessors and classifies each unique issue; assign to support tier (1/3, 2/3, 3/3)
+  based on `raised_by` count; compute precision per tier; pre-specified CI ±0.03 on
+  (1/3 − 3/3) difference
 
 ---
 
