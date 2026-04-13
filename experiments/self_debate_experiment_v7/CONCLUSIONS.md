@@ -133,10 +133,11 @@ This contradicts v6's finding (v6: +0.017, CI [-0.028, +0.068]) and means union 
 carries a precision cost. Recommendation: use union pooling with tier weighting (as
 pre-specified in HYPOTHESIS.md failure mode).
 
-**Audit correction:** Initial H5 values (delta=-0.103) used LLM-reported tier_precisions
-directly. Post-audit recomputation from `unique_issues` arrays in Python (filtering
-phantom issues, recomputing arithmetic) reduced the delta to -0.080. The LLM arithmetic
-had a 20.7% error rate on tier-level precisions. See `H5_AUDIT.md` for full analysis.
+**Audit correction:** The initial v7 H5 delta (-0.103) was inflated by a v7 pipeline bug
+where tier precisions were taken from the scorer's JSON response without recomputation.
+Recomputing in Python from the `unique_issues` arrays (filtering phantom issues, deriving
+tier from assessor count) reduced the delta to -0.080. This bug was v7-only; v6's
+`v6_minority_precision.py` always computed precisions in Python. See `H5_AUDIT.md`.
 
 **Methodological note:** H5 is computed at the per-file level (n=432 observations from
 160 cases x 3 runs), while all other tests average across runs first (n=160 or n=80
