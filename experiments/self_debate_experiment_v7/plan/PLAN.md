@@ -53,8 +53,7 @@ CI [+0.0154, +0.0434]); debate ≈ baseline; multiround advantage on convergent 
 | 6 | Cross-Model Scoring | [phase_06_scoring.md](phases/phase_06_scoring.md) | `v7_rescored_idr_idp.json` complete |
 | 7 | Analysis | [phase_07_analysis.md](phases/phase_07_analysis.md) | `v7_results.json` with all 8 hypothesis tests (P1, P2, H1a–H5) |
 | 8 | Sensitivity & Robustness | [phase_08_sensitivity.md](phases/phase_08_sensitivity.md) | `SENSITIVITY_ANALYSIS.md`; `multiround_2r` variance audit |
-| 9 | Cross-Vendor Validation | [phase_09_cross_vendor.md](phases/phase_09_cross_vendor.md) | Spot-check 10% of cases; agreement metrics reported |
-| 10 | Reporting | [phase_10_reporting.md](phases/phase_10_reporting.md) | All artifacts + `/artifact-sync` + coherence audit + paper rewrite complete |
+| 9 | Reporting | [phase_09_reporting.md](phases/phase_09_reporting.md) | `REPORT.md` + `TECHNICAL_REPORT.md` written; `/artifact-sync` complete |
 
 ---
 

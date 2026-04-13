@@ -33,8 +33,6 @@ invalidates pre-registration.
 - Bootstrap protocol: paired, n=10,000, seed=42. No multiple comparison correction (pre-registration controls FWER; cite Nosek et al. 2018).
 - Case counts locked in: `n_regular`, `n_mixed`, `n_defense` (from Phase 2/3 outputs).
 
-Commit `HYPOTHESIS.md` **before dispatching review agents.**
-
 ### 4.2 Coherence Audit (mandatory named gate — resolves issue 5273d436)
 
 Verify alignment across: `HYPOTHESIS.md`, `pipeline/v7_scoring.py`, and this phase file.
@@ -64,39 +62,8 @@ Check each item:
 
 Document any gaps found. Fix before continuing. Record in `COHESION_AUDIT.md`.
 
-### 4.3 Dispatch `ml-critic` for design review
-
-Agent prompt:
-```
-Review HYPOTHESIS.md and the v7 evaluation design.
-
-Context: This is a pre-registered benchmark experiment testing whether multiround_2r
-(critic → defender-with-visibility → adjudicator, exactly 3x compute) outperforms
-ensemble_3x on convergent tasks (mixed cases, FVC_mixed) and vice versa on divergent
-detection (regular cases, IDR). Two directional predictions P1 and P2 must both hold.
-
-Your tasks:
-1. Evaluate P1 and P2 — are they falsifiable and the test specifications correct?
-2. Evaluate H1a equivalence CI — is ±0.015 FC appropriate given the pilot baseline mean?
-3. Identify any confounds, power issues, or design gaps not addressed by v6_lessons.md.
-4. Check for answer-key leakage vectors in the benchmark runner design.
-5. Generate PRE-1 through PRE-N pre-execution requirements.
-
-Read: experiments/self_debate_experiment_v7/HYPOTHESIS.md
-Reference: experiments/self_debate_experiment_v7/plan/references/hypotheses.md
-Reference: experiments/self_debate_experiment_v7/plan/references/v6_lessons.md
-```
-
-### 4.4 Dispatch `ml-defender`
-After critic output, dispatch `ml-defender` with critic output + `HYPOTHESIS.md`.
-Run up to 2 debate rounds. Stop when requirements are stable.
-
-### 4.5 Resolve PRE-N requirements
-Address each pre-execution requirement. Update `pipeline/phase5_benchmark.py` or
-`pipeline/v7_scoring.py` if needed. Commit resolutions.
-
-### 4.6 Final commit
-Commit resolved `HYPOTHESIS.md`, `COHESION_AUDIT.md`, and any scoring/dispatch fixes.
+### 4.3 Final commit
+Commit `HYPOTHESIS.md`, `COHESION_AUDIT.md`, and any scoring/dispatch fixes.
 This is the pre-registration anchor commit. Record commit hash.
 
 ---
@@ -104,15 +71,11 @@ This is the pre-registration anchor commit. Record commit hash.
 ## Verification
 - [ ] `HYPOTHESIS.md` committed with P1, P2, H1a–H5, equivalence bounds (H1a ±0.015 FC, H5 ±0.03), bootstrap protocol
 - [ ] Coherence audit complete: all 4 checks pass, documented in `COHESION_AUDIT.md`
-- [ ] All PRE-N requirements resolved and committed
 - [ ] No answer-key leakage vectors identified (or mitigated)
-- [ ] `CRITIQUE.md`, `DEFENSE.md` written
 
 ## Outputs
 - Committed `HYPOTHESIS.md`
 - `COHESION_AUDIT.md`
-- `CRITIQUE.md`
-- `DEFENSE.md`
 
 ## Gate
-`HYPOTHESIS.md` committed to git. All PRE-N resolved. Coherence audit passed and documented.
+`HYPOTHESIS.md` committed to git. Coherence audit passed and documented.
