@@ -682,6 +682,9 @@ def run_analysis():
     # Accumulate per-condition per-case score lists, then average after the loop
     regular_score_lists = defaultdict(lambda: defaultdict(list))
     mixed_score_lists = defaultdict(lambda: defaultdict(list))
+    # H5: collect per-case issue classification from Phase 6 rescored data
+    h5_precision_1of3: list[float] = []
+    h5_precision_3of3: list[float] = []
 
     raw_files = sorted(RAW_DIR.glob("*.json"))
     print(f"Loading {len(raw_files)} raw output files...")
@@ -710,6 +713,13 @@ def run_analysis():
         # IDR
         if correct_position in ("defense_wins", "empirical_test_agreed"):
             idr_val = None
+        elif condition == "ensemble_3x" and file_rescore.get("per_assessor_rescored"):
+            # Union IDR: found if ANY assessor found it
+            idr_val = compute_ensemble_union_idr(
+                output.get("assessor_results", []),
+                must_find_ids,
+                file_rescore["per_assessor_rescored"],
+            )
         elif file_rescore.get("idr_documented") is not None:
             idr_val = file_rescore["idr_documented"]
         else:
@@ -733,6 +743,15 @@ def run_analysis():
             regular_score_lists[condition][cid].append(score_dict)
         elif category == "mixed":
             mixed_score_lists[condition][cid].append(score_dict)
+
+        # H5: extract per-case issue classification for ensemble_3x (Phase 6 data)
+        if condition == "ensemble_3x" and category == "regular":
+            issue_map = file_rescore.get("per_case_issue_map", {})
+            tier_precisions = issue_map.get("tier_precisions", {})
+            if "1of3" in tier_precisions:
+                h5_precision_1of3.append(tier_precisions["1of3"])
+            if "3of3" in tier_precisions:
+                h5_precision_3of3.append(tier_precisions["3of3"])
 
     # Average accumulated runs into final per-case dicts
     def _avg_score_lists(score_lists, dims):
@@ -764,8 +783,12 @@ def run_analysis():
     results["H2_mix"] = test_h2(mixed_scores, bn, sd, "mixed")
     results["H3"] = test_h3(mixed_scores, bn, sd)
     results["H4"] = test_h4(regular_scores, bn, sd)
-    # H5 requires per_case_issue_map from Phase 6 step 6.4 — placeholder
-    results["H5"] = test_h5({}, bn, sd)
+    # H5: populated from Phase 6 per_case_issue_map tier_precisions
+    h5_data = {
+        "precision_1of3": h5_precision_1of3,
+        "precision_3of3": h5_precision_3of3,
+    }
+    results["H5"] = test_h5(h5_data, bn, sd)
 
     # Framework verdict
     p1_pass = results["P1"].get("verdict") == "PASS"
