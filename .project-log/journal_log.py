@@ -96,6 +96,20 @@ def build_entry(args):
     # Collect all known fields for this type
     all_fields = REQUIRED_FIELDS[entry_type] + OPTIONAL_FIELDS.get(entry_type, [])
 
+    # Reject fields passed that are not valid for this type
+    all_possible = set()
+    for fields in list(REQUIRED_FIELDS.values()) + list(OPTIONAL_FIELDS.values()):
+        all_possible.update(fields)
+    invalid = [
+        f for f in all_possible
+        if f not in all_fields and getattr(args, f, None) is not None
+    ]
+    if invalid:
+        sys.exit(
+            f"ERROR: Field(s) not valid for type '{entry_type}': {', '.join(sorted(invalid))}. "
+            f"Valid fields: {', '.join(sorted(all_fields))}"
+        )
+
     for field in all_fields:
         raw = getattr(args, field.replace("-", "_"), None)
         if raw is None:
