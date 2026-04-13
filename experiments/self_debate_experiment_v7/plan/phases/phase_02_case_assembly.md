@@ -13,57 +13,58 @@
 
 ### 2.1 Run synthetic generation pipelines (if needed per Phase 1 yield decision)
 
-**Regular cases:**
+All three strata are generated in a single orchestrator run. Adjust `--batch-size`, `--mixed`,
+and `--defense` counts to supplement however many RC cases Phase 1 provided.
+
 ```bash
 cd experiments/self_debate_experiment_v7 && \
-uv run pipeline/orchestrator.py --mode regular \
-  --target 160 --output synthetic_regular_raw.json
+uv run pipeline/orchestrator.py \
+  --batch-size 160 \
+  --start-case-id 700 \
+  --mixed 80 \
+  --defense 40
 ```
 
-**Mixed cases:**
-```bash
-cd experiments/self_debate_experiment_v7 && \
-uv run pipeline/orchestrator.py --mode mixed \
-  --target 80 --output synthetic_mixed_raw.json
-```
-
-**Defense cases (synthetic fallback only):**
-```bash
-cd experiments/self_debate_experiment_v7 && \
-uv run pipeline/orchestrator.py --mode defense \
-  --target 40 --output synthetic_defense_raw.json
-```
+This produces `cases_700-1019.json` (or similar range) in the experiment root.
+Use `--resume` to skip already-completed cases if the run is interrupted.
 
 ### 2.2 Normalize all sources to Schema B
+
+`normalize_cases.py` auto-discovers all `cases_*.json` batch files in the experiment root
+(orchestrator output) and reads `pipeline/run/rc_candidates/rc_cases_raw.json` for RC cases.
+
 ```bash
 cd experiments/self_debate_experiment_v7 && \
 uv run pipeline/normalize_cases.py \
-  --rc rc_cases_raw.json \
-  --synthetic-regular synthetic_regular_raw.json \
-  --synthetic-mixed synthetic_mixed_raw.json \
-  --synthetic-defense synthetic_defense_raw.json \
   --output benchmark_cases_v7_raw.json
 ```
 
 ### 2.3 Schema B validation
+
+Schema B uses a nested structure (`ground_truth.correct_position`, `scoring_targets.*`).
+The validation below matches normalize_cases.py output:
+
 ```bash
 cd experiments/self_debate_experiment_v7 && \
 uv run python -c "
 import json
 with open('benchmark_cases_v7_raw.json') as f:
     cases = json.load(f)
-required = ['case_id','hypothesis','domain','ml_task_type','category','difficulty',
-            'task_prompt','must_find','acceptable_resolutions','correct_position',
-            'is_real_paper_case']
+required_top = ['case_id','hypothesis','domain','ml_task_type','category','difficulty',
+                'task_prompt','is_real_paper_case']
 errors = []
 for c in cases:
-    for field in required:
+    for field in required_top:
         if field not in c:
             errors.append(f'{c.get(\"case_id\",\"?\")} missing {field}')
-    if c['correct_position'] not in ('critique_wins','defense_wins','empirical_test_agreed'):
-        errors.append(f'{c[\"case_id\"]} bad correct_position: {c[\"correct_position\"]}')
+    cp = c.get('ground_truth', {}).get('correct_position')
+    if cp not in ('critique_wins','defense_wins','empirical_test_agreed'):
+        errors.append(f'{c[\"case_id\"]} bad correct_position: {cp!r}')
     if c['category'] not in ('regular','mixed','defense'):
         errors.append(f'{c[\"case_id\"]} bad category: {c[\"category\"]}')
+    st = c.get('scoring_targets', {})
+    if not isinstance(st.get('acceptable_resolutions'), list):
+        errors.append(f'{c[\"case_id\"]} missing acceptable_resolutions list')
 print(f'{len(errors)} errors in {len(cases)} cases' if errors else f'All {len(cases)} valid')
 from collections import Counter
 cats = Counter(c['category'] for c in cases)
@@ -85,12 +86,12 @@ print(f'Defense cases: {len(defense)}, wrong correct_position: {len(wrong)}')
 ```
 
 ### 2.5 Generate sanitized case file (no ground truth)
-Strip `must_find`, `acceptable_resolutions`, `correct_position`, `planted_issues` from all
-cases before passing to Phase 5 benchmark runner:
+Strip ground-truth fields from all cases before passing to Phase 5 benchmark runner.
+`select_cases.py` also performs stratified selection (160 regular / 80 mixed / 40 defense):
 ```bash
 cd experiments/self_debate_experiment_v7 && \
 uv run pipeline/select_cases.py \
-  --input benchmark_cases_v7_raw.json \
+  --pool benchmark_cases_v7_raw.json \
   --output v7_cases_sanitized.json \
   --sanitize
 ```
