@@ -1011,7 +1011,7 @@ def assemble_batch(config: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Pipeline Orchestrator v7 — regular + mixed case generation")
+    p = argparse.ArgumentParser(description="Pipeline Orchestrator v7 — regular + mixed + defense case generation")
     p.add_argument("--batch-size", type=int, required=True,
                    help="Number of regular (critique/defense_wins) cases to generate")
     p.add_argument("--start-case-id", type=int, required=True,

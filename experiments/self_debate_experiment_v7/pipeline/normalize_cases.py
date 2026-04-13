@@ -55,6 +55,10 @@ EXPERIMENT_DIR = PIPELINE_DIR.parent
 RC_CANDIDATES_DIR = PIPELINE_DIR / "run" / "rc_candidates"
 
 VALID_CORRECT_POSITIONS = {"critique_wins", "defense_wins", "empirical_test_agreed"}
+# IDR type vocabulary is deliberately split: "mixed" is the IDR type label
+# (ideal_debate_resolution.type) for empirically contingent designs, while the
+# corresponding verdict token is "empirical_test_agreed". "critique_wins" and
+# "defense_wins" share the same token across both IDR type and verdict domains.
 VALID_IDR_TYPES = {"critique_wins", "defense_wins", "mixed"}
 VALID_ACCEPTABLE = {"critique_wins", "defense_wins", "empirical_test_agreed"}
 VALID_CATEGORIES = {"regular", "mixed", "defense"}

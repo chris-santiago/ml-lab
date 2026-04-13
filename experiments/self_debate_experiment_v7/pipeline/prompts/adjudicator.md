@@ -56,3 +56,12 @@ If no issues survive (all were convincingly rebutted):
   "verdict": "defense_wins"
 }
 ```
+
+---
+
+> **Runtime note (mixed cases):** When adjudicating a mixed-position case,
+> `phase5_benchmark.py` appends an additional instruction via
+> `MIXED_CASE_ADJUDICATOR_SUFFIX` before this prompt is sent. That suffix
+> clarifies that `empirical_test_agreed` is a valid and expected verdict for
+> designs with one genuinely contingent empirical choice. This suffix is NOT
+> part of this file — it is injected at dispatch time by `_build_adjudicator_input(is_mixed=True)`.
