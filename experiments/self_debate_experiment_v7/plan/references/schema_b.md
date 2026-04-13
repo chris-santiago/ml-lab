@@ -1,5 +1,7 @@
 # Unified Schema B Definition
 
+> **FROZEN — Source of Truth.** This is the canonical normalization contract for all v7 benchmark cases. Do not modify field names, types, or constraints. Any pipeline code that reads or writes cases must conform to this schema. Changes to case structure require a new schema version, not edits here.
+
 The normalization target consumed by `self_debate_poc.py`. All pipeline outputs must validate
 against this schema before case selection.
 

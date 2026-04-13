@@ -1,5 +1,7 @@
 # Lessons from v6 Constraining v7 Design
 
+> **FROZEN — Source of Truth.** This document records lessons extracted from v6 experiment failures and post-mortems. Do not edit or add entries. New lessons from v7 go into the journal as `lesson` entries, not here.
+
 Key findings and failure modes from v6 that directly constrain v7 decisions.
 
 ---

@@ -1,3 +1,5 @@
+> **FROZEN — Source of Truth.** This document records verbatim peer reviewer feedback on the v6 working paper. Do not edit, paraphrase, or update. All v7 design decisions that respond to this feedback cite it by filename and quote.
+
 **Primary concernsP**
 
 **Scale.** n=120 total, n=80 regular cases is small for a main-paper claim at ACL. The RC subgroup (n=25) being explicitly underpowered compounds this. Reviewers will flag it immediately.
