@@ -139,6 +139,17 @@ def load_pilot_results(pilot_path: Path) -> dict[str, dict]:
         # Flat format fallback: {case_id: {baseline_fc_mean, ...}}
         if isinstance(data, dict):
             return data
+        # List format (from --mode pilot): [{case_id, fc, ...}, ...]
+        if isinstance(data, list):
+            by_case: dict[str, list[float]] = {}
+            for r in data:
+                cid = r.get("case_id")
+                if cid and r.get("fc") is not None:
+                    by_case.setdefault(cid, []).append(r["fc"])
+            return {
+                cid: {"baseline_fc_mean": sum(fcs) / len(fcs)}
+                for cid, fcs in by_case.items()
+            }
     except (json.JSONDecodeError, OSError) as exc:
         console.print(f"[yellow]Warning: could not load pilot results — {exc}[/yellow]")
     return {}

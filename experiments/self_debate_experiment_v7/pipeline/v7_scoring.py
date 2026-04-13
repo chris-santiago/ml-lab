@@ -5,9 +5,15 @@
 """
 v7_scoring.py — Cross-Model Semantic Scoring + Analysis Engine
 
-Two modes:
+Three modes:
+  --mode pilot    Phase 3: Lightweight pilot scoring (FVC + DRQ only, no API calls)
   --mode score    Phase 6: Cross-vendor scoring via gpt-5.4-mini (OpenRouter)
   --mode analyze  Phase 7: Bootstrap hypothesis tests (P1, P2, H1a-H5)
+
+Phase 3 (pilot mode):
+  Reads raw baseline outputs and ground-truth cases, computes FVC and DRQ locally
+  (no cross-vendor API calls). FC = mean(DRQ, FVC) — conservative upper bound on
+  full 4-dimension FC. Outputs a list of per-output results for difficulty gating.
 
 Phase 6 (score mode):
   Produces v7_rescored_idr_idp.json with per-file score vectors.
@@ -24,6 +30,8 @@ Output schema for score mode (keyed by filename):
   {filename: {idr_documented, idr_novel, idp_raw, idp_adj, found_booleans}}
 
 Usage:
+  uv run pipeline/v7_scoring.py --mode pilot --input pilot_raw_outputs \\
+    --cases benchmark_cases_v7_raw.json --output pilot_results.json
   uv run pipeline/v7_scoring.py --mode score [--dry-run] [--concurrency 20]
   uv run pipeline/v7_scoring.py --mode analyze --raw v7_raw_outputs \\
     --scores v7_rescored_idr_idp.json --cases benchmark_cases_v7_raw.json \\
@@ -48,7 +56,8 @@ except ImportError:
     sys.exit(1)
 
 parser = argparse.ArgumentParser(description="v7 scoring + analysis engine")
-parser.add_argument("--mode", choices=["score", "analyze"], required=True)
+parser.add_argument("--mode", choices=["pilot", "score", "analyze"], default=None,
+                    help="Operating mode (inferred as 'pilot' when --input is provided)")
 # Score mode args
 parser.add_argument("--dry-run", action="store_true", help="Skip API calls, produce null scores")
 parser.add_argument("--concurrency", type=int, default=20)
@@ -57,6 +66,8 @@ parser.add_argument("--model", default="openai/gpt-5.4-mini",
 parser.add_argument("--cases", default="benchmark_cases_v7_raw.json")
 parser.add_argument("--score-output", default="v7_rescored_idr_idp.json")
 parser.add_argument("--resume", action="store_true", help="Skip files already in output")
+# Pilot mode args
+parser.add_argument("--input", help="Input directory of raw benchmark outputs (pilot mode)")
 # Analyze mode args
 parser.add_argument("--raw", default="v7_raw_outputs", help="Directory of raw benchmark outputs")
 parser.add_argument("--scores", default="v7_rescored_idr_idp.json", help="Rescored IDR/IDP file")
@@ -65,6 +76,13 @@ parser.add_argument("--hypothesis-file", default="HYPOTHESIS.md")
 parser.add_argument("--bootstrap-n", type=int, default=10000)
 parser.add_argument("--seed", type=int, default=42)
 args = parser.parse_args()
+
+# Infer mode from arguments when not explicitly provided
+if args.mode is None:
+    if args.input:
+        args.mode = "pilot"
+    else:
+        parser.error("--mode is required (or provide --input for pilot mode)")
 
 BASE_DIR = Path(__file__).parent.parent
 RAW_DIR = BASE_DIR / args.raw
@@ -774,11 +792,102 @@ def run_analysis():
 
 
 # ===========================================================================
+# Phase 3 — Pilot scoring (pilot mode)
+# ===========================================================================
+
+
+def run_pilot():
+    """Phase 3: Lightweight pilot scoring — FVC + DRQ only, no API calls.
+
+    Reads raw baseline outputs and ground-truth cases. Computes FVC and DRQ
+    locally. FC = mean(DRQ, FVC) — conservative upper bound on full FC since
+    IDR typically pulls it down. Outputs a list matching plan step 3.4 format.
+    """
+    input_dir = BASE_DIR / args.input if args.input else RAW_DIR
+    output_path = BASE_DIR / args.output
+
+    print("Pilot scoring — no API calls (FVC + DRQ only)")
+    print(f"Input:  {input_dir}")
+    print(f"Cases:  {CASES_FILE}")
+    print(f"Output: {output_path}")
+
+    if not input_dir.exists():
+        print(f"ERROR: Input directory not found: {input_dir}")
+        sys.exit(1)
+
+    cases_list = json.load(open(CASES_FILE))
+    cases_by_id = {c["case_id"]: c for c in cases_list}
+
+    raw_files = sorted(input_dir.glob("*.json"))
+    if not raw_files:
+        print(f"ERROR: No JSON files in {input_dir}")
+        sys.exit(1)
+
+    results = []
+    for f in raw_files:
+        output = json.load(open(f))
+        cid = output.get("case_id", "")
+        case = cases_by_id.get(cid)
+        if not case:
+            continue
+
+        category = case.get("category", "regular")
+        st = case["scoring_targets"]
+        idr_obj = case["ideal_debate_resolution"]
+        ideal_resolution = idr_obj["type"]
+        acceptable = st.get("acceptable_resolutions", [ideal_resolution])
+
+        verdict = output.get("verdict", "")
+
+        fvc = compute_fvc(verdict, acceptable, ideal_resolution)
+        drq = compute_drq(verdict, acceptable, ideal_resolution)
+        fc = round((fvc + drq) / 2, 4)
+
+        results.append({
+            "case_id": cid,
+            "fc": fc,
+            "fvc": fvc,
+            "drq": drq,
+            "category": category,
+        })
+
+    # Summary
+    fc_values = [r["fc"] for r in results]
+    mean_fc = sum(fc_values) / len(fc_values) if fc_values else 0
+
+    by_cat: dict[str, list[float]] = {}
+    for r in results:
+        by_cat.setdefault(r["category"], []).append(r["fc"])
+
+    print(f"\nScored {len(results)} outputs from {len(raw_files)} files")
+    print(f"Overall FC mean: {mean_fc:.4f}")
+    for cat in sorted(by_cat):
+        vals = by_cat[cat]
+        cat_mean = sum(vals) / len(vals)
+        print(f"  {cat}: n={len(vals)}, FC mean={cat_mean:.4f}")
+
+    # Difficulty gate check (plan step 3.4)
+    regular_fcs = [r["fc"] for r in results if r["category"] == "regular"]
+    if regular_fcs:
+        reg_mean = sum(regular_fcs) / len(regular_fcs)
+        if reg_mean >= 0.80:
+            print(f"\n⚠ CEILING WARNING: regular baseline FC mean = {reg_mean:.4f} ≥ 0.80")
+            print("  Cases may be too easy. Consider harder case generation.")
+        else:
+            print(f"\n✓ Difficulty gate: regular FC mean = {reg_mean:.4f} < 0.80")
+
+    json.dump(results, open(output_path, "w"), indent=2)
+    print(f"\nSaved {len(results)} results → {output_path}")
+
+
+# ===========================================================================
 # Main
 # ===========================================================================
 
 if __name__ == "__main__":
-    if args.mode == "score":
+    if args.mode == "pilot":
+        run_pilot()
+    elif args.mode == "score":
         asyncio.run(run_scoring())
     elif args.mode == "analyze":
         run_analysis()
