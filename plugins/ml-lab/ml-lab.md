@@ -40,8 +40,8 @@ Record the mode as `report_mode` and carry it through the investigation. Do not 
 **4. Review mode:**
 Ask: *"Review mode: ensemble (3 independent critics — recommended) or debate (critic-defender adversarial exchange)?"*
 
-- **Ensemble** (`ensemble`) — runs 3 independent `ml-critic` dispatches on the same PoC with no cross-visibility between them. Issues are pooled by union and tagged with assessor support counts (1/3, 2/3, 3/3). Formally outperforms the debate protocol on regular methodology reviews. **Default if the user does not specify.**
-- **Debate** (`debate`) — runs the full critic → defender → multiround debate chain. Produces structured point-by-point rebuttals and negotiated empirical tests. Use when the hypothesis involves empirical ambiguity that benefits from iterative adversarial exchange.
+- **Ensemble** (`ensemble`) — runs 3 independent `ml-critic` dispatches on the same PoC with no cross-visibility between them. Issues are pooled by union and tier-weighted by assessor support count (3/3 > 2/3 > 1/3); 1/3 minority findings require explicit user confirmation before entering experiment design. Formally outperforms the debate protocol on regular methodology reviews. **Default if the user does not specify.**
+- **Debate** (`debate`) — runs the full critic → defender → multiround debate chain. Produces structured point-by-point rebuttals and negotiated empirical tests. Use when the hypothesis involves empirical ambiguity that benefits from iterative adversarial exchange. Note: individual debate runs have high verdict variance; plan for ≥3 replicate runs and report the mean.
 
 Record the mode as `review_mode` and carry it through the investigation. Do not ask again.
 
@@ -266,10 +266,10 @@ After receiving all three critiques, **you** (the orchestrator) perform the aggr
 2. For each issue raised in any critique, identify its **root cause** — the underlying assumption or design choice being questioned.
 3. Cluster issues across the three critiques by root cause. Two issues from different assessors target the same root cause if addressing one would resolve the other. Use the same grouping principle ml-critic Mode 1 uses: organize by root cause, not severity.
 4. For each cluster, record which assessors (A, B, C) raised it. An assessor is credited if any of their numbered issues targets this root cause, even if the phrasing differs.
-5. Tag each cluster with its assessor support count and detection redundancy tier. These tiers indicate how many independent assessors flagged this root cause — they are not a precision signal. v6 data shows no significant precision difference across tiers (1/3: 0.946, 3/3: 0.929, diff CI [−0.028, +0.068]):
-   - `3/3` → `high redundancy` — all three assessors independently flagged this root cause
-   - `2/3` → `medium redundancy` — two of three assessors flagged this root cause
-   - `1/3` → `minority finding` — one assessor flagged this; equally precise on average, may be subtle or domain-specific
+5. Tag each cluster with its assessor support count and detection redundancy tier. These tiers carry real precision signal. v7 data (H5 FAIL, n=432) shows minority-flagged issues carry a −0.080 precision penalty vs consensus issues (CI [−0.108, −0.052]); v7 supersedes v6's parity finding (CI [−0.028, +0.068]). The gap is driven by composition: 3/3 issues are 55% planted_match (high precision by definition), while 1/3 issues are 66% valid_novel with 15% spurious noise — minority findings include more genuine edge-case concerns alongside real noise. Weight tiers accordingly:
+   - `3/3` → `high redundancy` — all three assessors independently flagged this root cause; treat as established concern
+   - `2/3` → `medium redundancy` — two of three assessors flagged this root cause; standard recommendation
+   - `1/3` → `minority finding` — one assessor flagged this; the 1/3 pool contains genuine novel findings but also ~15% spurious noise; require explicit user confirmation before this issue enters experiment design
 6. Synthesize the strongest formulation for each cluster — combine the clearest claim statement, the most specific failure mechanism, and the most actionable evidence criteria from across the assessors who raised it.
 
 **Write `ENSEMBLE_REVIEW.md`:**
@@ -312,6 +312,8 @@ After receiving all three critiques, **you** (the orchestrator) perform the aggr
 | High redundancy (3/3) | N | #1, #3, ... |
 | Medium redundancy (2/3) | N | #2, ... |
 | Minority finding (1/3) | N | #4, ... |
+
+> **Minority findings note:** 1/3-flagged issues include genuine novel concerns alongside ~15% spurious noise. Each must be explicitly confirmed by the user before entering experiment design.
 ```
 
 Log `write`/`write_ensemble_review` with `meta` containing `{"total_issues": N, "high_redundancy": N, "medium_redundancy": N, "minority_finding": N}`.
@@ -371,7 +373,7 @@ Extract the **empirical test list** from `DEBATE.md`: every point resolved as "e
 
 1. Read `ENSEMBLE_REVIEW.md`.
 2. Extract all issues ordered by detection tier (high redundancy → medium redundancy → minority finding).
-3. Map all issues to the pre-flight checklist as PENDING. Add a note to minority-finding items: `(minority finding — user decision required)`.
+3. Map all issues to the pre-flight checklist as PENDING. Add a note to minority-finding items: `(minority finding — user must explicitly confirm inclusion before this enters experiment design)`.
 4. For each issue that cannot be verified by inspection, propose an empirical test specification:
    - The experimental condition
    - What result confirms the concern
@@ -796,6 +798,16 @@ Corrections at Step 2 are especially high-value. A correction there prevents the
 2. State the surprise plainly. Mark it explicitly in `CONCLUSIONS.md`.
 3. Trace it back to which debate assumption was wrong.
 4. Consider whether the surprise changes the recommendation.
+
+---
+
+## Known Framework Limitations
+
+These are open problems as of v7. Do not treat them as design properties.
+
+**Defense case exoneration (open problem):** In a framework evaluation completed 2026-04-13, Claude Sonnet 4.6 was systematically critique-biased — zero `defense_wins` verdicts across 480 defense runs. The strongest adjacent outcome (`empirical_test_agreed`) was reached by multiround on 50% of defense cases. Full exoneration of sound methodology is currently unsolvable with this model. When evaluating a hypothesis that may be sound, multiround with replicate averaging is the best available tool; even then, treat `empirical_test_agreed` as the effective ceiling.
+
+**Multiround verdict variance:** In a framework evaluation completed 2026-04-13, individual multiround runs had a 60.7% verdict flip rate. Single-run multiround verdicts are not authoritative. If using debate mode, plan for ≥3 replicate runs and report the mean verdict, not any single run.
 
 ---
 

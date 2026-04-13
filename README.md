@@ -48,7 +48,7 @@ Once installed, Claude Code will make `ml-lab` available as a spawnable agent. I
 
 The workflow is designed for rigor over speed. Given a hypothesis, `ml-lab` first sharpens it into a falsifiable claim with agreed metrics, then builds a minimal runnable PoC. From there it routes to one of two review modes:
 
-**Ensemble mode (default):** `ml-critic` is dispatched 3 times independently — each reads only the PoC and hypothesis, with no visibility into the other critics' outputs. The orchestrator clusters the findings by root cause, tags each issue with an assessor support count (1/3, 2/3, or 3/3), and writes `ENSEMBLE_REVIEW.md` with confidence-tiered output. High-confidence issues drive the pre-flight checklist; all issues — including minority-flagged ones — surface for user review at Gate 1. Formally outperforms the debate protocol on regular methodology reviews (see [Part 2](#part-2-the-experiment-behind-ml-lab)).
+**Ensemble mode (default):** `ml-critic` is dispatched 3 times independently — each reads only the PoC and hypothesis, with no visibility into the other critics' outputs. The orchestrator clusters the findings by root cause, tags each issue with an assessor support count (1/3, 2/3, or 3/3), and writes `ENSEMBLE_REVIEW.md` with tier-weighted output. Issues are ordered by tier (3/3 > 2/3 > 1/3); 1/3 minority findings include genuine novel concerns alongside spurious noise and require explicit user confirmation before entering experiment design. Formally outperforms the debate protocol on regular methodology reviews (see [Part 2](#part-2-the-experiment-behind-ml-lab)).
 
 **Debate mode (opt-in):** `ml-critic` and `ml-defender` are dispatched as adversarial subagents with distinct mandates. The critic identifies every implicit claim the PoC makes but hasn't tested; the defender responds point-by-point — conceding, rebutting, or marking points as empirically open. `ml-lab` orchestrates a multi-round debate until each contested point resolves or both sides agree on an empirical test. Use when the hypothesis involves genuine empirical ambiguity that benefits from iterative adversarial exchange.
 
@@ -273,42 +273,47 @@ Full trace and spec validation notes are in [`seq_fraud_experiment/TEST2_FINDING
 
 ### The Protocol Decision
 
-**Current default: three independent `ml-critic` calls (`ensemble_3x`) with union-of-issues output.** The original critic-defender-adjudicator debate structure is now opt-in — reserved for empirically ambiguous cases where iterative exchange adds value. The switch is grounded in formal evidence from v6, a 120-case benchmark with a cross-vendor (GPT-4o) scorer.
+**Current default: three independent `ml-critic` calls (`ensemble_3x`) with tier-weighted union pooling.** The original critic-defender-adjudicator debate structure is now opt-in — reserved for empirically ambiguous cases where iterative exchange adds value. The recommendation is grounded in a formal evaluation across multiple benchmark experiments (paired bootstrap, n=10,000 resamples, seed=42, cross-vendor scorer).
 
 **Metrics used in Part 2:**
 
 | Abbreviation | Full Name | What It Measures |
 |---|---|---|
-| IDR | Issue Detection Rate | Recall against documented flaws — fraction of planted issues the evaluator surfaced |
+| IDR | Issue Detection Recall | Recall against documented flaws — fraction of planted issues the evaluator surfaced |
 | IDP | Issue Detection Precision | Precision among raised issues — fraction of flagged issues that are genuine flaws |
-| FC | Fair-Comparison Composite | Composite of IDR + IDP; excludes DC and DRQ, which structurally penalize single-pass baselines |
-| FVC | Final Verdict Correctness | Whether the correct verdict (flag / pass) was reached on a case |
-| ETD | Empirical Test Design | Quality of proposed empirical tests; scored for debate conditions only |
-| DC | Defense Calibration | Whether the correct verdict was reached *via a defense role*; 0.0 for single-pass by design |
-| DRQ | Decision Resolution Quality | Whether contested positions resolved through structured exchange; capped at 0.5 for single-pass |
-| PRR | Point Resolution Rate | Fraction of contested debate points resolved after a given round |
+| FC | Fair-Comparison Composite | Mean(IDR, IDP, DRQ, FVC) |
+| FVC | Final Verdict Correctness | Whether the correct verdict was reached on a case |
+| FVC_mixed | FVC on mixed cases | FVC restricted to empirically ambiguous cases where the correct verdict is `empirical_test_agreed` |
+| DRQ | Decision Resolution Quality | Whether contested positions resolved correctly; rule-based |
 
-Three-way ordering, all formally supported at matched compute (paired bootstrap, n=10,000 resamples, seed=42):
+**Detection (regular cases, n=160, matched 3× compute):**
 
-| Comparison | n | Δ | 95% CI | Verdict |
-|---|---|---|---|---|
-| ensemble_3x vs. baseline (IDR) | 60 critique cases | +0.1005 | [+0.0426, +0.1648] | **ensemble formally superior** |
-| ensemble_3x vs. isolated_debate (FC) | 80 regular cases | +0.0287 | [+0.0154, +0.0434] | **ensemble formally superior** |
-| baseline vs. isolated_debate (FC) | 80 regular cases | −0.0026 | [−0.0108, +0.0059] | **indistinguishable** |
+| Comparison | Δ (IDR) | 95% CI | Verdict |
+|---|---|---|---|
+| ensemble_3x vs. baseline | +0.168 | [+0.140, +inf) | **ensemble superior** |
+| ensemble_3x vs. multiround | +0.169 | [+0.139, +inf) | **ensemble superior** |
+| isolated_debate vs. baseline (FC) | −0.050 | [−0.065, −0.036] | **isolated debate worse** |
 
-The ranking is `ensemble_3x > {baseline ≈ isolated_debate}`. Isolated debate is strictly dominated: it matches a single-pass baseline at 3× compute and loses to ensemble at the same compute. Three independent critics approaching the same case from different angles find more issues than one critic arguing with a defender.
+**Ambiguity judgment (mixed cases, n=80, matched 3× compute):**
 
-**Union output is empirically safe on both recall and precision.** A follow-up precision analysis (180 GPT-4o calls) confirmed that issues raised by only 1/3 assessors carry no precision penalty:
+| Comparison | Δ (FVC_mixed) | 95% CI | Verdict |
+|---|---|---|---|
+| multiround vs. ensemble | +0.225 | [+0.192, +inf) | **multiround superior** |
+| multiround vs. isolated_debate | +0.125 | [+0.088, +inf) | **multiround superior** |
 
-| Tier | Precision | 95% CI |
-|---|---|---|
-| 1/3 minority | 0.946 | [0.926, 0.963] |
-| 2/3 majority | 0.936 | [0.903, 0.965] |
-| 3/3 unanimous | 0.929 | [0.881, 0.969] |
+The structural conclusion: **detection is a breadth problem** (more independent perspectives find more issues); **ambiguity judgment is a depth problem** (iterative exchange enables recognizing when methodology is empirically open). These require different compute strategies — ensemble by default, multiround opt-in when the hypothesis is genuinely ambiguous.
 
-Diff (1/3 − 3/3): +0.017, CI [−0.028, +0.068], p=0.258. Union output recovers 11 additional ground-truth issues (+9.5pp IDR) at no precision cost. See [`ENSEMBLE_ANALYSIS.md §7`](experiments/self_debate_experiment_v6/ENSEMBLE_ANALYSIS.md).
+**Tier precision varies.** Consensus findings carry higher precision than minority-flagged ones — the 1/3 pool includes genuine novel concerns alongside spurious noise:
 
-**RC-stratified subgroup (2026-04-12, journal `61ee949b`):** The 80 regular cases pool 25 real ReScience C papers with 55 synthetic planted-corruption cases. Slicing by source shows the ensemble IDR advantage is ~3× larger on real papers (ensemble_3x IDR=0.4545 vs baseline 0.2828, **+0.172**) than on synthetic cases (+0.059). The aggregate +0.1005 gap reported above was diluted by the easier synthetic subset where baseline IDR is already near ceiling (0.896). No debate protocol outperforms ensemble_3x in either subset. The recommendation is strongest on the hardest, most ecologically valid cases. See [`ENSEMBLE_ANALYSIS.md §8`](experiments/self_debate_experiment_v6/ENSEMBLE_ANALYSIS.md).
+| Tier | Precision | N issues |
+|------|-----------|----------|
+| 1/3 minority | 0.804 | 2,256 |
+| 2/3 majority | 0.860 | 722 |
+| 3/3 unanimous | 0.897 | 925 |
+
+Δ(1/3 − 3/3): −0.080, 95% CI [−0.108, −0.052]. The detection numbers above were measured with unweighted union pooling — tier weighting is a post-hoc implementation response to this finding and has not been separately evaluated. All minority-flagged issues require explicit user confirmation before entering experiment design. Union output still recovers more issues than any single assessor — the tier weighting controls for the precision cost, it does not eliminate 1/3 findings.
+
+**RC vs. synthetic subgroup:** The ensemble IDR advantage is larger on real ReScience C papers (+0.200) than on synthetic cases (+0.166). The recommendation is strongest on the hardest, most ecologically valid cases.
 
 ---
 
@@ -324,9 +329,9 @@ The standard approach is single-pass: give a model some work, ask it what it thi
 - The work is actually valid but *sounds* questionable — and the evaluator has no structural incentive to push back
 - The correct answer is "run this specific test first" rather than a binary verdict
 
-**What v6 revealed about independent redundancy:** at matched compute (3×), three independent critics with union-of-issues pooling outperform single-pass baseline and adversarial debate simultaneously. Ensemble IDR = 0.7717 vs. baseline 0.6712, CI = [+0.0426, +0.1648] — formally supported. The IDR advantage is ~3× larger on real ReScience C papers (+0.172) than on synthetic cases (+0.059).
+**What the evaluation revealed about independent redundancy:** at matched compute (3×), three independent critics with union pooling outperform single-pass baseline. Ensemble IDR = 0.803 vs. baseline 0.636, CI lower bound +0.140 — formally confirmed. The advantage is larger on real ReScience C papers (+0.200) than on synthetic cases (+0.166).
 
-**What v6 revealed about structure's limits:** the debate protocol does not reliably recognize valid work. On the 20 defense cases, every non-multiround condition scored 0/20 correct exonerations. Multiround reached 12/60 individual runs (20%), but with high within-case variance. Defense-case calibration is the sharpest open problem for v7.
+**What the evaluation revealed about structure's limits:** the debate protocol does not reliably recognize valid work. In a 2026-04-13 evaluation (n=480 defense runs), zero `defense_wins` verdicts were produced across all conditions. The strongest adjacent outcome (`empirical_test_agreed`) was reached by multiround on 50% of defense cases. Defense-case exoneration remains an open problem.
 
 The deeper lesson is about *what structure buys and what it doesn't*. More compute and more independent perspectives solve most of the detection problem. For cases where the question is whether methodology is empirically testable — not just flawed — iterative exchange still matters.
 
@@ -516,7 +521,7 @@ A healthcare triage scenario where the Defender correctly identified all critica
 
 In v6, 20 of 120 cases were defense cases — valid work where the correct verdict is `defense_wins`. Every condition except multiround scored FVC=0.0 on all 20: baseline, ensemble_3x, isolated_debate, and biased_debate each produced 0 correct exonerations. Multiround achieved 12/60 individual runs (20%) correct, but with high variance. No condition reliably recognizes valid work.
 
-This is a direct contradiction of a v2 finding (debate 5/5, ensemble 4/5 on 5 internal false-positive cases). That result did not replicate at v6 scale. See [`next_steps.md §6`](experiments/self_debate_experiment_v6/next_steps.md) — the failure mode is diagnosed as a critic prompt calibration problem; the v7 plan addresses it.
+This is a direct contradiction of a v2 finding (debate 5/5, ensemble 4/5 on 5 internal false-positive cases). That result did not replicate at v6 scale. A subsequent evaluation (2026-04-13) confirmed the problem persists: zero `defense_wins` verdicts across 480 defense runs. Defense case exoneration remains an open problem. See [`next_steps.md §6`](experiments/self_debate_experiment_v6/next_steps.md) for the original diagnosis.
 
 **Would results change significantly with a cheaper or different model?**
 
@@ -536,7 +541,7 @@ This was a known limitation in v2 (all roles including scorer used Claude). v6 p
 
 **Use debate mode when** the hypothesis involves genuine empirical ambiguity — where the right answer is "run this test first" rather than a binary verdict. Multiround iterative exchange achieves FVC_mixed = 0.3667 vs. baseline 0.0; ensemble is structurally incapable of producing `empirical_test_agreed` resolutions.
 
-**Honest caveats:** The ensemble advantage over debate is formally supported on regular cases (v6, n=80, CI excludes zero). On defense cases — valid work that should be exonerated — v6 found **0/20 correct verdicts** across all conditions except multiround (12/60 individual runs = 20%). No condition reliably recognizes valid work. This is the sharpest open problem going into v7: the protocol is well-calibrated for flaw detection, but systematically over-critiques valid work. A v2 internal benchmark (n=5 defense cases) showed debate 5/5, ensemble 4/5, but this did not replicate at v6 scale. See [`next_steps.md §6`](experiments/self_debate_experiment_v6/next_steps.md) for the v7 critic-prompt calibration plan.
+**Honest caveats:** The ensemble advantage over debate is formally supported on regular cases (v6, n=80, CI excludes zero). On defense cases — valid work that should be exonerated — no condition reliably recognizes valid work. A subsequent evaluation (2026-04-13, n=480 defense runs) found zero `defense_wins` verdicts across all conditions; the strongest adjacent outcome (`empirical_test_agreed`) was reached by multiround on 50% of defense runs. The protocol is well-calibrated for flaw detection but systematically over-critiques valid work. This is an open problem with no current solution.
 
 </details>
 
