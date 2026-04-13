@@ -26,7 +26,7 @@ Our contributions are:
 
 2. **Pilot-to-confirmation progression.** Study 1's post-hoc framework (inconclusive at n = 40 mixed cases, unmatched compute for multiround) becomes Study 2's pre-registered prediction (significant at n = 80, compute-matched at 3×). Two Study 1 conclusions are revised: precision parity is overturned (minority-flagged issues carry a −0.080 penalty at larger scale) and debate-baseline equivalence is overturned (debate is actively worse: −0.050 FC).
 
-3. **Information-passing as binding mechanism.** Study 2 isolates defender visibility into the critique as the causal variable for convergent judgment (H3: Δ = +0.125 FVC_mixed, CI [+0.088, +∞)). The mechanism is not adversarial structure per se — it is the defender's ability to engage with specific claims.
+3. **Information-passing as binding variable.** Study 2 identifies defender visibility into the critique as the binding variable for convergent judgment (H3: Δ = +0.125 FVC_mixed, CI [+0.088, +∞)). The two conditions co-vary defender task and information availability, so H3 isolates the variable, not the full causal mechanism — but the contrast shows that adversarial structure alone is insufficient without information-passing.
 
 ---
 
@@ -52,7 +52,7 @@ Wang et al. (2023) introduce self-consistency: sample diverse reasoning paths, t
 
 ### Evaluation Bias
 
-Zheng et al. (2023) establish the LLM-as-judge paradigm with MT-Bench, documenting position bias, verbosity bias, and self-enhancement bias. Panickssery et al. (2024) sharpen this to self-preference bias specifically — LLM evaluators recognize and favor their own generations. Prior work in our experimental series measured a cross-vendor IDR delta of −0.7737 when comparing same-model against cross-vendor scoring on identical outputs, confirming the closed-loop confound is severe in methodology review. Both studies use cross-vendor scorers: GPT-4o (Study 1) and gpt-5.4-mini (Study 2).
+Zheng et al. (2023) establish the LLM-as-judge paradigm with MT-Bench, documenting position bias, verbosity bias, and self-enhancement bias. Panickssery et al. (2024) sharpen this to self-preference bias specifically — LLM evaluators recognize and favor their own generations. A preliminary cross-vendor validation (n = 80, Appendix B.2) measured an IDR delta of −0.7737 when the same critique outputs were scored by the generation model versus a cross-family model, confirming the closed-loop confound is severe in methodology review. Both studies use cross-vendor scorers: GPT-4o (Study 1) and gpt-5.4-mini (Study 2).
 
 ### Sycophancy and Conformity in Debate
 
@@ -117,7 +117,7 @@ Study 2 evaluates four conditions at matched compute:
 | **ensemble_3x** | 3 independent critics, union pooling | 3× |
 | **multiround_2r** | Critic + informed Defender + Adjudicator | 3× |
 
-All conditions use Claude Sonnet 4.6 as the generation model. Each case is evaluated 3 times per condition (3,360 total outputs). The critical structural difference between isolated_debate and multiround_2r is whether the defender sees the critique: in isolated_debate, the defender argues methodology in the abstract; in multiround_2r, the defender responds to the specific critique.
+All conditions use Claude Sonnet 4.6 as the generation model. Each case is evaluated 3 times per condition (3,360 total outputs). The critical structural difference between isolated_debate and multiround_2r is whether the defender sees the critique: in isolated_debate, the defender argues methodology in the abstract; in multiround_2r, the defender responds to the specific critique. **Compute matching.** We match conditions at the API-call level (3 calls each), following the convention used in prior work (Smit et al., 2024; Zhang et al., 2025). This does not equalize token cost: the adjudicator in debate conditions processes both critic and defender outputs, consuming a larger context window than any single ensemble call. The token-cost asymmetry favors debate conditions; our findings that ensemble wins on detection (P1) are therefore conservative with respect to total compute.
 
 **Scoring.** All semantic scoring uses gpt-5.4-mini via OpenRouter (cross-vendor):
 
@@ -127,7 +127,7 @@ All conditions use Claude Sonnet 4.6 as the generation model. Each case is evalu
 - **FC (Fair Comparison):** mean(IDR, IDP, DRQ, FVC). Note: FC double-weights the verdict dimension on regular cases since DRQ = FVC.
 - **FVC_mixed:** FVC on mixed stratum only.
 
-**Pre-registration.** Eight hypotheses were registered via version-controlled commit (hash `6fadcc6`) before data collection. The commit hash is tamper-evident; the full hypothesis specification is available in the supplementary materials.
+**Pre-registration.** Eight hypotheses were registered via version-controlled commit before data collection. The pre-registration commit (SHA `6fadcc6`) is tamper-evident and independently verifiable; the full hypothesis specification, including equivalence bounds and test types, is available in the supplementary materials.
 
 | ID | Prediction | Type |
 |---|---|---|
@@ -143,7 +143,7 @@ All conditions use Claude Sonnet 4.6 as the generation model. Each case is evalu
 
 ### 3.4 Statistical Methods
 
-All hypothesis tests use paired bootstrap (n = 10,000, seed = 42, α = 0.05). Case-level differences are resampled with replacement. One-sided tests for directional predictions (P1, P2, H3, H4); two-sided for non-directional (H1a, H2, H5). Stability verified at seed = 99 (7/8 tests within ±0.001 CI drift; H2_mix upper bound drifted 0.002 — verdict unaffected). No multiple comparison correction is applied. Pre-registration eliminates post-hoc test selection but does not formally control FWER across 8 simultaneous tests. We note that all six PASS results have margins far exceeding what multiple testing could explain: the smallest one-sided CI lower bound among PASS verdicts is +0.088 (H3), and Bonferroni correction at α/8 = 0.006 would not change any verdict.
+All hypothesis tests use paired bootstrap (n = 10,000, seed = 42, α = 0.05). Case-level differences are resampled with replacement. One-sided tests for directional predictions (P1, P2, H3, H4); two-sided for non-directional (H1a, H2, H5). Stability verified at seed = 99 (7/8 tests within ±0.001 CI drift; H2_mix upper bound drifted 0.002 — verdict unaffected). Pre-registration eliminates post-hoc test selection but does not formally control FWER across 8 simultaneous tests. We apply Bonferroni correction at α/8 = 0.006 for all reported tests. All six PASS verdicts survive correction: the smallest one-sided CI lower bound among PASS results is +0.088 (H3), far exceeding the adjusted threshold. Both FAIL verdicts (H1a, H5) likewise remain significant under correction.
 
 ---
 
@@ -198,7 +198,7 @@ Ensemble_3x achieves the highest IDR (0.803), IDP (0.963), and FC (0.938). Multi
 
 **Score: 6/8.** Both primary predictions pass. H3 and H4 pass as secondary confirmations. H1a and H5 fail — both informatively (§4.4).
 
-**H3 (Information-Passing): PASS.** The +0.125 FVC_mixed delta between multiround and isolated debate isolates information-passing as the binding mechanism. The two conditions are structurally identical except whether the defender sees the critique. Without visibility into the opposing argument, the defender cannot mount effective rebuttals on genuinely ambiguous cases.
+**H3 (Information-Passing): PASS.** The +0.125 FVC_mixed delta between multiround and isolated debate identifies information-passing as the binding variable. The two conditions differ primarily in whether the defender sees the critique, though the defender task and interaction structure also co-vary. The contrast establishes that adversarial structure without information-passing (isolated debate) is insufficient for convergent judgment — without visibility into the opposing argument, the defender cannot mount effective rebuttals on genuinely ambiguous cases.
 
 **H4 (Replication): PASS.** Prospectively replicates Study 1's strongest post-hoc finding. The Study 2 effect (+0.168) exceeds the Study 1 effect (+0.100) with a higher CI floor (+0.140 vs. +0.043).
 
@@ -229,9 +229,9 @@ The primary driver is a **tier composition effect**. At Study 2's scale (n = 432
 | ensemble_3x | 0/120 (0%) | 0/120 (0%) | 0.000 |
 | multiround_2r | 0/120 (0%) | 60/120 (50.0%) | 0.250 |
 
-Zero full exoneration across all conditions. The strongest concession is `empirical_test_agreed` (adjacent, scored 0.5), achieved on 50% of multiround defense runs. This is consistent with sycophancy-driven disagreement collapse (Sharma et al., 2024; Yao et al., 2025): the defender partially concedes to the critique rather than fully rebutting it, and the adjudicator sides with the more assertive argument. Even with iterative exchange, the strongest concession is ambiguity — never full exoneration.
+Zero full exoneration across all conditions. The strongest concession is `empirical_test_agreed` (adjacent, scored 0.5), achieved on 50% of multiround defense runs. This is consistent with sycophancy-driven disagreement collapse (Sharma et al., 2024; Yao et al., 2025): the defender partially concedes to the critique rather than fully rebutting it, and the adjudicator sides with the more assertive argument. Even with iterative exchange, the strongest concession is ambiguity — never full exoneration. An alternative explanation is that the defense cases themselves — generated by LLMs — may not appear methodologically sound to LLM reviewer agents, independent of sycophancy. No human validation of defense-case difficulty was conducted; distinguishing benchmark miscalibration from model-level critique bias requires human expert evaluation of the defense cases, which we leave to future work.
 
-Study 1 observed 20% exoneration on multiround defense cases. Multiple variables changed simultaneously between studies — generation model version, compute budget (~5× → 3×), prompt design, and benchmark composition — so the decline cannot be attributed to a single factor. The consistent finding across studies is that defense-case exoneration remains an unsolved problem.
+Study 1 observed 20% exoneration on multiround defense cases. Multiple variables changed simultaneously between studies — generation model version, compute budget (~5× → 3×), prompt design, and benchmark composition — so the decline cannot be attributed to a single factor. This unresolved confound limits conclusions from the defense-case stratum; the 0% exoneration rate should be treated as a descriptive finding, not a stable cross-study estimate. The consistent finding across studies is that defense-case exoneration remains an unsolved problem.
 
 ---
 
@@ -275,7 +275,7 @@ The ensemble IDR advantage is stable and strengthens with pre-registration. The 
 
 If adversarial structure suppresses recall on divergent detection tasks, we predict the pattern would extend to any domain where the goal is comprehensive enumeration: code review (find all bugs), safety auditing (find all violations), legal document review (find all compliance issues). Conversely, tasks requiring a final judgment under genuine uncertainty should benefit from iterative exchange. The framework predicts: ensemble IDR advantage over debate would replicate on other divergent tasks, and multiround FVC advantage would replicate on other convergent tasks.
 
-The limits of the convergent/divergent binary deserve acknowledgment. Many real evaluation tasks require both detection and judgment simultaneously — a thorough code review requires enumerating all bugs (divergent) *and* judging which are critical (convergent). For such mixed-mode tasks, a protocol that separates stages — detect with ensemble, adjudicate with multiround — is a natural candidate for future work. H3's isolation of information-passing as the binding mechanism provides a specific prediction: the defender must see the specific critique, not merely argue in the abstract.
+The limits of the convergent/divergent binary deserve acknowledgment. Many real evaluation tasks require both detection and judgment simultaneously — a thorough code review requires enumerating all bugs (divergent) *and* judging which are critical (convergent). For such mixed-mode tasks, a protocol that separates stages — detect with ensemble, adjudicate with multiround — is a natural candidate for future work. H3's identification of information-passing as the binding variable provides a specific prediction: the defender must see the specific critique, not merely argue in the abstract.
 
 ---
 
@@ -289,9 +289,11 @@ The limits of the convergent/divergent binary deserve acknowledgment. Many real 
 
 4. **Within-case variance and deployment cost.** Multiround (60.7% verdict flip rate) and isolated debate (44.3%) exceed the 30% stability threshold. Individual runs are unreliable; 3-run averaging is mandatory for stable estimates. This raises multiround's effective deployment cost to ~9× baseline (3 API calls × 3 replicates), compared to 3× for ensemble, which is single-run reliable (0.7% flip rate).
 
-5. **Defense-case exoneration.** Zero full exoneration across all Study 2 conditions limits conclusions about the framework's defense-case applicability. Current models exhibit sycophancy (Sharma et al., 2024) that compounds through adversarial protocols, preventing full exoneration.
+5. **Compute matching granularity.** "3× compute" matches API calls, not tokens. Debate conditions include an adjudicator call that processes both prior outputs, making debate's per-case token cost higher than ensemble's. This asymmetry favors debate; the ensemble IDR advantage (P1) is conservative with respect to total compute, while the multiround FVC_mixed advantage (P2) may be partially explained by the additional token budget.
 
-6. **Cross-vendor scorer dependency.** IDR and IDP depend on the scorer model's extraction accuracy (~90% exact agreement on a 10% stratified spot-check). Scorer noise does not threaten primary verdicts given the wide margins (P1 CI floor +0.139, P2 CI floor +0.192), but scorer fidelity remains an external dependency.
+6. **Defense-case exoneration.** Zero full exoneration across all Study 2 conditions limits conclusions about the framework's defense-case applicability. Current models exhibit sycophancy (Sharma et al., 2024) that compounds through adversarial protocols, preventing full exoneration. No human validation of defense-case difficulty was conducted (§4.5).
+
+7. **Cross-vendor scorer dependency.** IDR and IDP depend on the scorer model's extraction accuracy (~90% exact agreement on a 10% stratified spot-check). Scorer noise does not threaten primary verdicts given the wide margins (P1 CI floor +0.139, P2 CI floor +0.192), but scorer fidelity remains an external dependency.
 
 ---
 
@@ -421,7 +423,7 @@ The synthetic regular pipeline uses a 9-type flaw taxonomy: data leakage, evalua
 
 ### B.2 Cross-Vendor Scoring Motivation
 
-Same-model scoring introduces a closed-loop confound: in methodology review, critic and scorer share systematic biases about what constitutes a valid concern. A prior experiment measured a cross-vendor IDR delta of −0.7737, substantially larger than self-preference effects reported in the general literature (Panickssery et al., 2024). Study 1 uses GPT-4o; Study 2 uses gpt-5.4-mini. Both are cross-vendor relative to the Claude generation model.
+Same-model scoring introduces a closed-loop confound: in methodology review, critic and scorer share systematic biases about what constitutes a valid concern. In a preliminary cross-vendor validation (n = 80 critique cases, single condition), identical critique outputs were scored by the generation model (Claude) and a cross-family model (GPT-4o-mini via OpenRouter). The IDR delta was −0.7737 — the cross-family scorer found substantially fewer issues in the same text. This effect is much larger than the self-preference bias reported in the general literature (Panickssery et al., 2024), consistent with methodology review amplifying evaluator-dependent biases beyond what general-purpose benchmarks reveal. This finding motivated cross-vendor scoring for both subsequent studies: Study 1 uses GPT-4o; Study 2 uses gpt-5.4-mini. Both are cross-vendor relative to the Claude generation model.
 
 ### B.3 RC Extraction — Contamination Prevention
 

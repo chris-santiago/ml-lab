@@ -70,6 +70,10 @@ When `.project-log/journal.jsonl` exists, propose logging at natural pauses — 
 
 **Rules:** One proposal per event. Don't re-propose if declined. Chain issue→resolution→lesson at completion, not as three interruptions.
 
+## Git Branch Safety
+
+**Never switch branches without explicit user approval.** Always confirm the target branch and reason before running `git checkout` or `git switch`. This repo has multiple long-lived experiment branches with large output trees — an accidental switch can create confusing diffs or lose working state.
+
 ## Agent Sync
 Plugin cache is kept in sync automatically via a PostToolUse hook (`.claude/hooks/sync-plugin-cache.sh`). Any edit to `plugins/ml-lab/` or `plugins/ml-journal/` is rsynced to the cache immediately — no manual reinstall needed.
 
