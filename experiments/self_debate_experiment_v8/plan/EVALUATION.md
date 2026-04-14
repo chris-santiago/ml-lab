@@ -143,28 +143,118 @@ Kappa corrects for chance agreement, making VS comparable across case distributi
 
 ---
 
-## Finding-Level Scoring: Multiple Instance Learning
+## Finding-Level Scoring: Separate Critic and Defender Losses
 
-Case labels are known; finding labels are not. This is Multiple Instance Learning (MIL):
-
-- Each case is a **bag** containing N findings
-- Bag label is known: SOUND (no genuine flaw) or FLAWED (≥1 genuine flaw)
-- Instance label (is this specific finding a real flaw?) is unknown
-
-**MIL-compatible loss (from SCORING.md Brier-like finding scores):**
+The critic and defender each get a Brier loss against per-finding ground truth `y ∈ {0, 1}`.
 
 ```python
-def finding_score(severity: int, stratum: str) -> float:
-    p = severity / 10.0
-    if stratum == "regular":
-        return 1 - (1 - p) ** 2      # reward confident correct findings
-    elif stratum == "defense":
-        return -(p ** 2)              # penalize confident false alarms
-    else:
-        return 0.0                    # mixed: not scored at finding level
+def brier(p: float, y: int) -> float:
+    """Bounded proper scoring rule. y ∈ {0, 1}."""
+    return 1 - (1 - p) ** 2 if y == 1 else -(p ** 2)
 ```
 
-Average across all FATAL/MATERIAL findings per case, then combine with verdict score per SCORING.md.
+---
+
+### Primary Path: Finding-Level Ground Truth via `must_find`
+
+v8 benchmark cases are designed — each regular case records the intended flaw in metadata:
+
+```json
+{
+  "must_find": "signal leakage between train and evaluation sets",
+  "flaw_category": "signal_leakage"
+}
+```
+
+Match each critic finding against `must_find` using the structured flaw category tag. This gives per-finding `y` directly — no bag-level approximation needed.
+
+```python
+def get_finding_y(finding: dict, case_meta: dict, stratum: str) -> int:
+    """Assign per-finding ground truth using must_find category match."""
+    if stratum == "defense":
+        return 0   # all findings are false alarms on sound cases
+    if stratum == "regular":
+        # exact category match against must_find
+        return 1 if finding["flaw_category"] == case_meta["flaw_category"] else 0
+    return -1      # mixed: not scored at finding level
+
+def critic_brier(severity: int, y: int) -> float:
+    return brier(severity / 10.0, y)
+
+def defender_brier(adjusted_severity: int, y: int) -> float:
+    return brier(adjusted_severity / 10.0, y)
+
+def aggregate_finding_scores(findings: list[dict], case_meta: dict,
+                              stratum: str) -> tuple[float, float]:
+    """Returns (critic_score, defender_score) for the case."""
+    cb_scores, db_scores = [], []
+    for f in findings:
+        y = get_finding_y(f, case_meta, stratum)
+        if y == -1:
+            continue
+        cb_scores.append(critic_brier(f["original_severity"], y))
+        db_scores.append(defender_brier(f["adjusted_severity"], y))
+    if not cb_scores:
+        return 0.0, 0.0
+    return mean(cb_scores), mean(db_scores)  # mean pooling: y is known per finding
+```
+
+**What this enables over bag-level scoring:**
+- Critic is penalized for high-severity spurious findings on regular cases (`y=0` on non-matching findings)
+- Critic is rewarded for finding the right flaw at high confidence (`y=1` on matching finding)
+- Defender is penalized for dismissing the real flaw (`adjusted_severity → 0` on `y=1` finding)
+- Defender is rewarded for dismissing spurious findings (`adjusted_severity → 0` on `y=0` finding)
+
+Use this path when `flaw_category` is populated in case metadata (all v8 benchmark cases).
+
+---
+
+### Fallback Path: MIL Pooling (No Finding-Level Ground Truth)
+
+For cases without `must_find` metadata — unstructured case libraries, third-party cases, or cases where the flaw category was not recorded at generation time — fall back to bag-level supervision.
+
+```python
+def aggregate_finding_scores_mil(findings: list[dict],
+                                 stratum: str) -> tuple[float, float]:
+    """MIL fallback: bag-level supervision only."""
+    if stratum == "defense":
+        # all findings are false alarms (y=0), mean pooling
+        cb = mean([critic_brier(f["original_severity"], y=0) for f in findings])
+        db = mean([defender_brier(f["adjusted_severity"], y=0) for f in findings])
+        return cb, db
+
+    if stratum == "regular":
+        # bag label = 1 (has flaw), but instance labels unknown
+        # critic: max pooling — reward finding ≥1 high-severity flaw
+        # defender: mean pooling — penalize over-reduction of any finding
+        cb = max([critic_brier(f["original_severity"], y=1) for f in findings],
+                 default=0.0)
+        db = mean([defender_brier(f["adjusted_severity"], y=1) for f in findings])
+        return cb, db
+
+    return 0.0, 0.0
+```
+
+**Why max pooling for critic here:** without instance labels, scoring all findings against `y=1` would reward the critic for every finding including spurious ones. Max pooling rewards finding at least one high-severity flaw — the minimum correct behavior under bag supervision — without crediting false alarms alongside real ones.
+
+**Why mean pooling for defender:** the defender should not over-reduce any finding. Under bag-level supervision, we can't tell which finding is real, so penalize over-reduction on all of them.
+
+**Flag MIL-scored cases in results** — they have wider Brier variance than finding-level-scored cases and should be reported separately if mixed in the benchmark.
+
+---
+
+### Combined Case Score
+
+```python
+def case_score(verdict: str, findings: list[dict], case_meta: dict,
+               stratum: str, w_v=0.50, w_c=0.25, w_d=0.25) -> float:
+    vs = VERDICT_SCORES[stratum][verdict]
+    if case_meta.get("flaw_category"):
+        cb, db = aggregate_finding_scores(findings, case_meta, stratum)
+    else:
+        cb, db = aggregate_finding_scores_mil(findings, stratum)
+    return w_v * vs + w_c * cb + w_d * db
+```
 
 **Finding calibration** via sklearn:
 ```python
@@ -271,15 +361,25 @@ def evaluate(results: list[dict]) -> dict:
         output_dict=True,
     )
 
+    # finding-level scores per stratum
+    critic_scores_defense   = [case_score(...) for r in results if r["stratum"] == "defense"]
+    defender_scores_defense = [case_score(...) for r in results if r["stratum"] == "defense"]
+    critic_scores_regular   = [case_score(...) for r in results if r["stratum"] == "regular"]
+    defender_scores_regular = [case_score(...) for r in results if r["stratum"] == "regular"]
+
     return {
-        "mcc":        matthews_corrcoef(y_true, y_pred),
-        "log_loss":   log_loss(y_true, y_prob),
-        "DER":        report["SOUND"]["precision"],
-        "IDR":        report["FLAWED"]["recall"],
-        "ARR":        report["AMBIG"]["recall"],
-        "FHR":        _false_hedge_rate(y_true, y_pred),
-        "confusion":  confusion_matrix(y_true, y_pred, labels=[0,1,2]).tolist(),
-        "report":     report,
+        "mcc":                     matthews_corrcoef(y_true, y_pred),
+        "log_loss":                log_loss(y_true, y_prob),
+        "DER":                     report["SOUND"]["precision"],
+        "IDR":                     report["FLAWED"]["recall"],
+        "ARR":                     report["AMBIG"]["recall"],
+        "FHR":                     _false_hedge_rate(y_true, y_pred),
+        "critic_brier_defense":    np.mean(critic_scores_defense),
+        "defender_brier_defense":  np.mean(defender_scores_defense),
+        "critic_brier_regular":    np.mean(critic_scores_regular),
+        "defender_brier_regular":  np.mean(defender_scores_regular),
+        "confusion":               confusion_matrix(y_true, y_pred, labels=[0,1,2]).tolist(),
+        "report":                  report,
     }
 
 def _false_hedge_rate(y_true, y_pred):

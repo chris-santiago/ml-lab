@@ -27,74 +27,142 @@ v7 used FVC (Flawed Verdict Coefficient): `defense_wins`=1.0, `empirical_test_ag
 
 Hedging now costs −0.25, making it worse than random guessing on clear cases. The system has a reason to be confident.
 
-## Finding-Level Scoring (Brier-Like)
+## Finding-Level Scoring — Separate Critic and Defender Losses
 
-The verdict-level function scores the *outcome* of the debate — did the system reach the right verdict? It cannot distinguish between a critic that raised a score-9 finding on sound methodology vs. a score-2 concern. Both produce `critique_wins`; both score −0.5. The wrong-but-confident case goes unpunished beyond the verdict penalty.
+The verdict-level function scores the debate *outcome*. It cannot attribute failure: a critic that raised severity-9 findings and a critic that raised severity-2 findings both produce `critique_wins` and both score −0.5. And a defender that correctly dismissed findings vs. one that capitulated are invisible at the verdict level — both flow into the same case score.
 
-The finding-level layer fixes this by treating severity as a probability estimate and applying a proper scoring rule.
+The finding-level layer gives each agent its own Brier loss, computed against the same ground truth.
 
 ### Interpretation
 
-`severity/10` = P(genuine flaw exists at this magnitude). Ground truth is known from the case label.
+Both the critic and defender make probability estimates about the same ground truth:
 
-**Brier-like finding score:**
+- **Critic:** `original_severity / 10` = P(genuine flaw at this magnitude)
+- **Defender:** `adjusted_severity / 10` = P(genuine flaw remains after defense analysis)
+- **Ground truth:** 0 (defense case — no genuine flaw) or 1 (regular case — has flaw)
+
+### Critic Brier Score
 
 ```
-finding_score(severity, stratum) =
+critic_brier(F_i, stratum) =
 
-  regular case:   +[1 − (1 − severity/10)²]
-  defense case:   −(severity/10)²
-  mixed case:     not scored at finding level (verdict-neutral stratum)
+  regular case:   +[1 − (1 − original_severity/10)²]    # rewards confident correct findings
+  defense case:   −(original_severity/10)²               # penalizes confident false alarms
+  mixed case:     not scored
 ```
 
-**Score table (illustrative):**
+### Defender Brier Score
 
-| Severity | Regular case (reward) | Defense case (penalty) |
-|---|---|---|
-| 10 | +1.00 | −1.00 |
-| 9 | +0.99 | −0.81 |
-| 7 | +0.91 | −0.49 |
-| 5 | +0.75 | −0.25 |
-| 3 | +0.51 | −0.09 |
-| 1 | +0.19 | −0.01 |
-| 0 (NIT) | 0.00 | 0.00 |
+```
+defender_brier(F_i, stratum) =
 
-NIT findings cost nothing in either direction. A score-9 wrong finding on a defense case costs 9× a score-3 wrong finding.
+  regular case:   +[1 − (1 − adjusted_severity/10)²]    # rewards not over-reducing real flaws
+  defense case:   −(adjusted_severity/10)²               # penalizes failing to dismiss
+  mixed case:     not scored
+```
+
+**The key difference from the old design:** `defender_brier` uses `adjusted_severity` — the severity after the defender's rebuttal. A defender that correctly rebuts a severity-8 false alarm down to adjusted severity 1 earns near-zero loss. A defender that concedes gets the same penalty as the critic who overclaimed.
+
+### Score Table (Defense Case)
+
+| Original severity | Critic score | After rebuttal (adj sev) | Defender score |
+|---|---|---|---|
+| 8 | −0.64 | 1 (good rebuttal) | −0.01 |
+| 8 | −0.64 | 8 (conceded) | −0.64 |
+| 4 | −0.16 | 0 (REBUT-IMMATERIAL) | 0.00 |
+| 4 | −0.16 | 4 (conceded) | −0.16 |
+| 2 (MINOR) | −0.04 | 1 (brief REBUT-IMMATERIAL) | −0.01 |
+| 2 (MINOR) | −0.04 | 2 (conceded) | −0.04 |
+
+NIT findings (score 0) are suppressed before forwarding — no Brier loss in either direction.
+
+### Aggregation: Finding-Level Ground Truth (Primary Path)
+
+v8 benchmark cases are **designed** — each regular case was built to test a specific flaw, recorded in the case metadata:
+
+```json
+{
+  "must_find": "signal leakage between train and evaluation sets",
+  "correct_position": "critique_wins",
+  "flaw_category": "signal_leakage"
+}
+```
+
+This gives **finding-level ground truth**, not just bag-level. Each critic finding can be matched against `must_find`:
+
+- **Matches `must_find`:** `y = 1` — the real flaw
+- **Does not match:** `y = 0` — spurious (false alarm on a regular case)
+
+With per-finding `y`, standard **mean pooling** applies across all findings for both critic and defender:
+
+```
+critic_case_score   = mean(critic_brier(F_i, y_i)   for all findings)
+defender_case_score = mean(defender_brier(F_i, y_i) for all findings)
+```
+
+This is strictly more informative than bag-level MIL: the critic is penalized for high-severity spurious findings on regular cases, rewarded for finding the right flaw at high severity. The defender is rewarded for dismissing spurious findings and penalized for dismissing the real one.
+
+**Matching method:** use structured flaw category tags (from the 16-category taxonomy in CASES.md) for deterministic exact-match. Avoid semantic matching via LLM — it adds another model to the scoring chain and makes the scorer non-deterministic.
+
+**Defense cases** are unchanged — all findings have `y = 0` (no genuine flaw), mean pooling.
+
+---
+
+### Aggregation: MIL Fallback (When Finding-Level Ground Truth Unavailable)
+
+For cases without `must_find` metadata, or if the matching step is unreliable, fall back to bag-level supervision using MIL pooling:
+
+**Defense cases — mean pooling:** all findings are false alarms; mean Brier score across findings.
+
+**Regular cases — max pooling for critic, mean pooling for defender:**
+- *Critic max pooling:* `critic_case_score = max(critic_brier(F_i))` — rewards the critic for finding at least one high-severity flaw, without penalizing for additional findings whose per-instance ground truth is unknown. Derived from the MIL bag assumption: a bag is positive if at least one instance is positive.
+- *Defender mean pooling:* the defender should not over-reduce any finding on a regular case. Mean pooling penalizes false rebuttals regardless of which finding is targeted.
+
+**When to use this path:** unstructured or free-text benchmark cases, third-party case libraries, or cases where `must_find` was not recorded at generation time. Flag these cases in results — MIL-scored cases have wider Brier variance than finding-level-scored cases and should be reported separately if mixed.
 
 ### Combined Scoring Function
 
 ```
-case_score = w_v × verdict_score  +  w_f × mean(finding_scores)
+case_score = w_v × verdict_score
+           + w_c × agg(critic_brier per finding)
+           + w_d × agg(defender_brier per finding)
 ```
 
-Where:
-- `verdict_score` — penalty-aware function from the table above
-- `finding_scores` — Brier-like score per finding, averaged across all FATAL/MATERIAL findings in the critique
-- Starting weights: `w_v = 0.60`, `w_f = 0.40`
+Starting weights: `w_v = 0.50`, `w_c = 0.25`, `w_d = 0.25`
 
-Weight rationale: verdict is the primary signal (the system must reach the right answer), but finding calibration is substantive — a critic that correctly exonerates by raising only score-2 concerns should score higher than one that accidentally exonerates after raising score-8 concerns the adjudicator dismisses.
+**Weight rationale:** verdict accuracy is still the primary signal, but each agent now has equal finding-level accountability. Weights are starting points — recalibrate after Phase 0.5 once the relative variance of each component is known.
 
-**Combined score range:**
-- Perfect calibration (sound case, no FATAL/MATERIAL findings, defense_wins): +1.00 verdict + 0.00 finding = +1.00
-- Worst calibration (sound case, score-9 findings, critique_wins): −0.50 verdict − 0.81 finding = −1.31 × 0.40 weight → lower floor than verdict-only
-- Always-hedge coward (sound case, score-5 findings, empirical_test_agreed): −0.25 verdict − 0.25 finding
+**Intervention-to-loss mapping:**
+
+| Intervention | Primary loss target | Expected direction |
+|---|---|---|
+| A — critic severity threshold | `critic_brier` on defense cases | ↑ (less overclaiming) |
+| B — defender exoneration path | `defender_brier` on defense cases | ↑ (less conceding) |
+| C — adjudicator cost model | `verdict_score` | ↑ (fewer false hedges) |
+
+If Intervention A runs and `critic_brier` improves but `defender_brier` stays flat, the critic is calibrating but the defender still capitulates — a precise diagnosis. Previously both signals were entangled in a single finding score.
+
+**Combined score range (defense case):**
+- Best: critic severity low, defender rebuts well, verdict `defense_wins` → near +1.00
+- Worst: critic severity 9, defender concedes, verdict `critique_wins` → −0.50 − 0.81×0.25 − 0.81×0.25 ≈ −0.91
+- Hedge with low-severity findings: verdict `empirical_test_agreed`, severities 3/2 → −0.25 − small penalties ≈ −0.28
 
 ### Severity Clamp
 
-Score 10 is reserved: a finding at severity 10 means the flaw has been *empirically observed* to cause wrong results — not inferred or hypothesized. This constraint belongs in the critic prompt, not just the scoring spec. Without it, severity-10 assignments on subtle theoretical concerns would face a log-loss-adjacent cliff that distorts calibration pressure.
+Score 10 is reserved for flaws empirically observed to cause wrong results — not inferred or hypothesized. This keeps the squared penalty from creating an extreme cliff at the top of the scale.
 
 **Prompt language (add to Intervention A):**
 > "Severity 10 is reserved for flaws you can trace to an observed wrong result in the PoC output. Inferred or plausible flaws max out at severity 9."
 
 ### Interaction with Stability Weighting
 
-Finding-level scores are computed per run (per model draw), then averaged before applying VS weighting:
+All three components (verdict, critic Brier, defender Brier) are computed per run, averaged across runs, then multiplied by VS:
 
 ```
 weighted_case_score = mean(case_score across runs) × VS
 ```
 
-This means unstable finding scores (high variance across model draws) get discounted the same way unstable verdicts do. A case where one model draws severity 8 and another draws severity 2 for the same finding will have high finding-score variance — that variance is absorbed by VS.
+High variance in adjusted severity across model draws (one defender model concedes, another rebuts) is absorbed by VS. A defender that consistently rebuts across all 3 model draws gets full stability credit.
 
 ---
 

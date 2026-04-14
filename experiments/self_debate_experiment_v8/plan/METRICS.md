@@ -51,9 +51,13 @@ Formula: `CMDD = DER(cross-provider pairs) − DER(same-provider pairs)`
 Rationale: same-provider pairs may share sycophancy patterns. CMDD quantifies how much cross-model pairing breaks the defender's capitulation reflex.
 
 **CER — Critique Escalation Rate**
-Definition: proportion of critique points that survive the FATAL/MATERIAL filter (Intervention A).
-Formula: `CER = count(FATAL + MATERIAL findings) / count(all findings)`
-Expected behavior: CER drops on defense cases (critic self-prunes noise), stays high on regular cases (real flaws still escalate). If CER is high on defense cases after Intervention A, the filter is not working.
+Definition: proportion of critique points that advance past the NIT filter (Intervention A) — i.e., findings classified FATAL, MATERIAL, or MINOR.
+Formula: `CER = count(FATAL + MATERIAL + MINOR findings) / count(all findings)`
+Expected behavior: CER on defense cases reflects how many concerns the critic raises that require any rebuttal. A well-calibrated critic on a sound case should have low average severity — CER alone is less informative than the severity distribution. Track CER alongside mean finding severity on defense cases: high CER + low mean severity = critic is thorough but calibrated; high CER + high mean severity = critic is overclaiming.
+
+**NIT suppression rate** (the sharper leading indicator for Intervention A):
+Formula: `NIT_rate = count(NIT findings suppressed) / count(all findings)`
+Expected: NIT_rate > 0 on defense cases after Intervention A (critic is correctly recognizing and suppressing purely stylistic concerns). NIT_rate ≈ 0 means the gate is not activating.
 
 **DCR — Defender Concession Rate**
 Definition: point-level (not verdict-level). Proportion of critique points where the defender's rebuttal type is `CONCEDE`.
@@ -97,13 +101,15 @@ Each critique point carries three fields:
 - Score 1–3 → MINOR
 - Score 0 → NIT
 
-Only FATAL and MATERIAL findings advance to the DEFENSE.md and the adjudication step. MINOR and NIT findings are logged but do not require rebuttal.
+FATAL, MATERIAL, and MINOR findings advance to DEFENSE.md and the adjudication step. NIT findings are logged in CRITIQUE.md but suppressed before forwarding — they require no rebuttal and carry no adjudication weight.
+
+**Rationale:** MINOR findings advance because the defender needs them to build a complete exoneration. An explicit REBUT-IMMATERIAL on a MINOR finding is stronger evidence of sound methodology than silence. The adjudicator's pre-flight filter (Intervention C) ensures MINOR concessions do not escalate to PENDING checklist items — severity gating on *consequences* happens at the adjudicator, not at the critic output.
 
 ---
 
 ### Layer 2 — Rebuttal (Defender Output)
 
-Each rebuttal maps one-to-one to an advancing finding (FATAL or MATERIAL). Fields:
+Each rebuttal maps one-to-one to an advancing finding (FATAL, MATERIAL, or MINOR). Fields:
 - `finding_id`: matches the source finding
 - `rebuttal_type`: one of seven labels (see table)
 - `rebuttal_severity_adjustment`: integer offset applied to the original severity score
@@ -116,13 +122,15 @@ Each rebuttal maps one-to-one to an advancing finding (FATAL or MATERIAL). Field
 | `REBUT-EVIDENCE` | Critique makes an empirical claim not supported by the PoC output | −5 to −7 |
 | `REBUT-IMMATERIAL` | Finding is real but below significance for the experiment's conclusions | −6 to −8 |
 | `DEFER` | Both parties agree to an empirical test — question stays open | 0 (unresolved) |
-| `EXONERATE` | ALL advancing findings are MINOR or NIT; no FATAL or MATERIAL findings survived the significance filter | Resets effective severity to 0 on all findings |
+| `EXONERATE` | After rebuttal, ALL advancing findings have adjusted severity ≤ 3 — no FATAL or MATERIAL finding survives. MINOR findings rebutted via REBUT-IMMATERIAL or REBUT-SCOPE qualify automatically. | Resets effective severity to 0 on all findings |
 
 **Severity floor:** adjusted score cannot go below 0.
 
 **EXONERATE conditions (strict):**
-- Requires that every advancing finding either has `REBUT-IMMATERIAL` with post-adjustment score ≤ 2, or the original critic assigned score ≤ 3.
-- If even one finding remains above score 3 after adjustment, EXONERATE is not available. Use `DEFER` or `CONCEDE`.
+- Every advancing finding must have adjusted severity ≤ 3 after rebuttal.
+- MINOR findings (original score 1–3) satisfy this automatically — no rebuttal adjustment needed, though an explicit REBUT-IMMATERIAL is preferred for a complete exoneration record.
+- FATAL and MATERIAL findings must be actively rebutted (REBUT-DESIGN, REBUT-SCOPE, REBUT-EVIDENCE, or REBUT-IMMATERIAL) with sufficient adjustment to bring adjusted severity ≤ 3.
+- If even one finding remains above adjusted score 3, EXONERATE is not available. Use `DEFER` or `CONCEDE` on that finding.
 
 ---
 

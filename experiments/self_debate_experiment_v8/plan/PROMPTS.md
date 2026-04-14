@@ -81,11 +81,11 @@
 > - **MINOR** — worth noting, does not affect the main verdict
 > - **NIT** — stylistic, theoretical, or edge case
 >
-> Only include FATAL and MATERIAL findings in the final CRITIQUE.md. If no findings reach MATERIAL threshold, output a single line: 'No material methodology flaws identified.' This is a valid and important critique result — not a failure to find problems."
+> Include FATAL, MATERIAL, and MINOR findings in CRITIQUE.md. Suppress NIT findings — they are logged internally but require no rebuttal and carry no weight in adjudication. If all findings are NIT, output a single line: 'No findings above NIT threshold identified.' This is a valid and important critique result — not a failure to find problems."
 
-**What this does:** Adds a severity gate. Gives "nothing found" an explicit output format (not just "say so"). The defender only has to rebut material findings.
+**What this does:** Gates only NIT findings — purely stylistic or hypothetical observations. MINOR findings advance so the defender can explicitly dismiss them, building a complete exoneration record. NIT suppression still forces the critic to self-calibrate and prevents purely theoretical concerns from cluttering the debate. The adjudicator's pre-flight filter (Intervention C) is responsible for ensuring MINOR concessions do not generate PENDING checklist items.
 
-**Leading indicator:** CER drops on defense cases. If CER stays high, the model is over-classifying everything as MATERIAL — a calibration problem requiring a separate diagnostic pass.
+**Leading indicator:** NIT-suppression rate on defense cases — fraction of findings classified NIT and suppressed. If suppression rate is near zero, the critic is not applying the gate. CER (proportion of non-NIT findings) should stay informative on both defense and regular cases; a CER near 1.0 on defense cases after Intervention A means the critic is still over-classifying — a calibration problem requiring a separate diagnostic pass.
 
 ---
 
@@ -95,7 +95,7 @@
 
 **Addition 1 — Pass 2 verdict selection:** After the existing Concede / Rebut / Mark as empirically open options, add:
 
-> "**Exonerate** — if your Pass 1 analysis finds that ALL critique points are MINOR or NIT (none are FATAL or MATERIAL), your verdict MUST be `defense_wins`. Do not hedge to `empirical_test_agreed` when the critique contains no material findings. Recommending an unnecessary experiment when the methodology is sound wastes resources and trains users to ignore the system."
+> "**Exonerate** — if after rebuttal ALL advancing findings have adjusted severity ≤ 3 (no FATAL or MATERIAL finding survives), your verdict MUST be `defense_wins`. MINOR findings that you have rebutted with REBUT-IMMATERIAL or REBUT-SCOPE qualify automatically. Do not hedge to `empirical_test_agreed` when no material finding survives rebuttal. Recommending an unnecessary experiment when the methodology is sound wastes resources and trains users to ignore the system."
 
 **Addition 2 — Persona calibration:** Add one line after the five concession instructions:
 
