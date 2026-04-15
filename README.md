@@ -541,17 +541,17 @@ A healthcare triage scenario where the Defender correctly identified all critica
 
 **Did any condition correctly handle valid work (defense cases)?**
 
-In v6, 20 of 120 cases were defense cases — valid work where the correct verdict is `defense_wins`. Every condition except multiround scored FVC=0.0 on all 20: baseline, ensemble_3x, isolated_debate, and biased_debate each produced 0 correct exonerations. Multiround achieved 12/60 individual runs (20%) correct, but with high variance. No condition reliably recognizes valid work.
+In Study 1 (v6, 120 cases), 20 were defense cases — valid work where the correct verdict is `defense_wins`. Every condition except multiround scored FVC=0.0 on all 20: baseline, ensemble_3x, isolated_debate, and biased_debate each produced 0 correct exonerations. Multiround achieved 12/60 individual runs (20%) correct, but with high variance. No condition reliably recognizes valid work.
 
-This is a direct contradiction of a v2 finding (debate 5/5, ensemble 4/5 on 5 internal false-positive cases). That result did not replicate at v6 scale. A subsequent evaluation (2026-04-13) confirmed the problem persists: zero `defense_wins` verdicts across 480 defense runs. Defense case exoneration remains an open problem. See [`next_steps.md §6`](experiments/self_debate_experiment_v6/next_steps.md) for the original diagnosis.
+This is a direct contradiction of a v2 finding (debate 5/5, ensemble 4/5 on 5 internal false-positive cases). That result did not replicate at Study 1 scale. Study 2 (v7, 280 cases) confirmed the problem persists: 40 defense cases × 4 conditions × 3 runs = 480 defense runs, zero `defense_wins` verdicts across all conditions. The best adjacent outcome (`empirical_test_agreed`) was reached by multiround_2r on 50% of defense runs; ensemble_3x produced zero adjacent outcomes. Defense case exoneration remains an open problem. See [`next_steps.md §6`](experiments/self_debate_experiment_v6/next_steps.md) for the original Study 1 diagnosis and [`experiments/self_debate_experiment_v7/CONCLUSIONS.md`](experiments/self_debate_experiment_v7/CONCLUSIONS.md) for Study 2 results.
 
 **Would results change significantly with a cheaper or different model?**
 
-v6 addressed the most critical model concern: detection metrics (IDR, IDP, ETD) are scored by GPT-4o via OpenRouter, not by the same Claude model that generated the outputs. This cross-vendor scoring eliminated the closed-loop confound that inflated v5 results (cross-vendor IDR delta = −0.7737 in v5). FVC and DRQ use rule-based internal scoring (no LLM involved). Running the Critic and Defender agents on a significantly weaker model would likely affect reasoning quality on harder cases — results should be treated as specific to the capability tier used for agent dispatches.
+Both studies addressed the most critical model concern: detection metrics (IDR, IDP, ETD) are scored by a cross-vendor LLM (GPT-4o via OpenRouter), not by the same Claude model that generated the outputs. This cross-vendor scoring eliminated the closed-loop confound that inflated v5 results (cross-vendor IDR delta = −0.7737 in v5). FVC and DRQ use rule-based internal scoring (no LLM involved). Running the Critic and Defender agents on a significantly weaker model would likely affect reasoning quality on harder cases — results should be treated as specific to the capability tier used for agent dispatches.
 
 **Could using the same model family across all roles bias the results?**
 
-This was a known limitation in v2 (all roles including scorer used Claude). v6 partially addresses it: detection metrics (IDR, IDP, ETD) are scored by GPT-4o, breaking the closed loop. The agent roles (Critic, Defender, Adjudicator) still use Claude, so systematic patterns in how Claude processes prompts could affect reasoning behavior in ways that wouldn't generalize. FVC and DRQ use rule-based scoring (no LLM). Cross-model agent validation (running the same protocol with a different model family for agent dispatches) remains future work. The [technical report](experiments/self_debate_experiment_v2/TECHNICAL_REPORT.md) discusses the original v2 limitation.
+This was a known limitation in v2 (all roles including scorer used Claude). Both studies (v6 and v7) partially address it: detection metrics (IDR, IDP, ETD) are scored by GPT-4o, breaking the closed loop. The agent roles (Critic, Defender, Adjudicator) still use Claude, so systematic patterns in how Claude processes prompts could affect reasoning behavior in ways that wouldn't generalize. FVC and DRQ use rule-based scoring (no LLM). Cross-model agent validation (running the same protocol with a different model family for agent dispatches) remains future work. The [technical report](experiments/self_debate_experiment_v2/TECHNICAL_REPORT.md) discusses the original v2 limitation.
 
 ---
 
@@ -576,9 +576,11 @@ This was a known limitation in v2 (all roles including scorer used Claude). v6 p
 
 | Location | Contents |
 |----------|----------|
-| [`WORKING_PAPER.md`](WORKING_PAPER.md) | **Working paper** — v6 findings formatted for publication (~5,250 words, EMNLP/NAACL/NeurIPS workshop target) |
+| [`WORKING_PAPER.md`](WORKING_PAPER.md) | **Working paper** — two-study paper (Study 1: v6 pilot, Study 2: v7 confirmatory), EMNLP/NAACL/NeurIPS workshop target |
 | [`RELATED_WORK.md`](RELATED_WORK.md) | **Literature positioning** — 25-paper verified survey, publishable findings assessment (§7) |
-| [`experiments/self_debate_experiment_v6/FINAL_SYNTHESIS.md`](experiments/self_debate_experiment_v6/FINAL_SYNTHESIS.md) | **Authoritative v6 summary** — all hypothesis verdicts (paired bootstrap), peer review corrections, production recommendation |
+| [`experiments/self_debate_experiment_v7/CONCLUSIONS.md`](experiments/self_debate_experiment_v7/CONCLUSIONS.md) | **Authoritative Study 2 summary** — all hypothesis verdicts (pre-registered, paired bootstrap, n=280 cases) |
+| [`experiments/self_debate_experiment_v7/TECHNICAL_REPORT.md`](experiments/self_debate_experiment_v7/TECHNICAL_REPORT.md) | Study 2 full technical report — 280-case benchmark, 8 hypotheses, cross-vendor scorer |
+| [`experiments/self_debate_experiment_v6/FINAL_SYNTHESIS.md`](experiments/self_debate_experiment_v6/FINAL_SYNTHESIS.md) | **Authoritative Study 1 (v6) summary** — all hypothesis verdicts (paired bootstrap), peer review corrections, production recommendation |
 | [`experiments/self_debate_experiment_v6/RESEARCH_REPORT.md`](experiments/self_debate_experiment_v6/RESEARCH_REPORT.md) | v1–v6 research arc synthesis — 290+ journal entries, 400+ commits |
 | [`experiments/self_debate_experiment_v6/ENSEMBLE_ANALYSIS.md`](experiments/self_debate_experiment_v6/ENSEMBLE_ANALYSIS.md) | Ensemble design, H2 results, minority-flagged precision follow-up (§7) |
 | [`experiments/self_debate_experiment_v6/CONCLUSIONS.md`](experiments/self_debate_experiment_v6/CONCLUSIONS.md) | v6 per-hypothesis conclusions (Q1–Q4) |
