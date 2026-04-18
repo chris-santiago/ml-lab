@@ -211,6 +211,18 @@ LABELS = {
         "label_rationale": "Applying influence-style example-importance methods and feature saliency in a fully unsupervised regime without class labels is unusual and critics may claim it's ill-defined, though the paper's framework explicitly defines the explanation target as the learned representation.",
     },
     # --- GATE 1 AUDITED ADDITIONS ---
+    "eval_scenario_068": {
+        "flaw_category": None,
+        "canary_difficulty": "hard",
+        "label_rationale": (
+            "Primary metric 'AUPRC at fixed FPR' was a category error conflating the PR curve "
+            "with the ROC operating point. Design intent was sound: fix the operating point at "
+            "FPR=10% (clinical alert budget) and measure precision there. Rewritten to "
+            "Precision@FPR=10% with explicit ROC-threshold framing. Critics will target single "
+            "operating point vs. full AUPRC; defender argues clinical operating constraint "
+            "justifies it. Promoted from UNCERTAIN after Gate 1 rewrite."
+        ),
+    },
     "eval_scenario_897": {
         "flaw_category": None,
         "canary_difficulty": "hard",
