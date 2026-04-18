@@ -1,8 +1,18 @@
 import json
 import random
+from pathlib import Path
+from typing import Generator
 
 
-def fetch(path):
+def load(path: str | Path) -> list[str]:
+    """Load model IDs from models.json → flat list of model_id strings."""
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return [item["model_id"] for item in data["models"]]
+
+
+def fetch(path: str | Path) -> dict:
+    """Load models.json → dict keyed by index (legacy; prefer load())."""
     with open(path, "r") as fp:
         models = json.load(fp)["models"]
         return {
@@ -11,13 +21,35 @@ def fetch(path):
         }
 
 
-def generate_models(models: dict, n: int = 3):
-    idx = random.sample(range(len(models)), N)
-    yield [models[i]["model_id"] for i in idx]
+def model_generator(pool: list[str], n: int = 3) -> Generator[list[str], None, None]:
+    """Infinite generator: each draw is an independent random sample of n from pool.
+
+    Each call to next() is a fresh random.sample — draws are independent, every
+    model in the pool has equal probability on every draw.
+
+    Args:
+        pool: List of model_id strings. Must have len >= n.
+        n:    Number of distinct models per draw (default 3).
+    """
+    if len(pool) < n:
+        raise ValueError(f"Pool has {len(pool)} models but n={n} requested")
+    while True:
+        yield random.sample(pool, n)
+
+
+def generate_models(models: dict | list, n: int = 3) -> Generator[list[str], None, None]:
+    """One-shot draw (legacy). Prefer model_generator() for continuous sampling."""
+    if isinstance(models, dict):
+        pool = [v["model_id"] for v in models.values()]
+    else:
+        pool = list(models)
+    yield random.sample(pool, n)
 
 
 if __name__ == "__main__":
-    PATH = "/Users/chrissantiago/Dropbox/GitHub/ml-lab/experiments/self_debate_experiment_v8/models.json"
-    N = 3
-    models = fetch(PATH)
-    print(next(generate_models(models, N)))
+    _path = Path(__file__).parent.parent / "models.json"
+    _pool = load(_path)
+    print(f"Pool: {len(_pool)} models")
+    _gen = model_generator(_pool)
+    for _i in range(3):
+        print(f"Draw {_i}: {next(_gen)}")
