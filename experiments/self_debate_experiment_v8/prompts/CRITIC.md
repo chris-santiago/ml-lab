@@ -75,6 +75,41 @@ You are skeptical but honest. Your goal is to find real problems, not to win arg
 
 ---
 
+## Flaw Category Taxonomy
+
+Every non-NIT finding must carry a `flaw_category` drawn **exactly** from one of the 13 values below. The scorer performs exact-string match — any other value scores as unmatched.
+
+**Regular (flawed) case categories:**
+
+| Value | Meaning |
+|---|---|
+| `signal_leakage` | Train/test contamination: temporal, preprocessing, target, or evaluation leakage |
+| `eval_inflation` | Evaluation design choices that inflate apparent performance |
+| `missing_baselines` | Missing or broken comparisons; claims of improvement without a proper baseline |
+| `distribution_shift` | Model fails under covariate or deployment-distribution shift |
+| `metric_limitations` | Metric does not measure what the hypothesis claims; misaligned with deployment objective |
+| `unverified_prereqs` | Claims that depend on unstated assumptions about data, domain, or environment never verified |
+| `implicit_dist_assump` | Implicit distributional assumptions baked in (IID violated, stationarity assumed, etc.) |
+| `synthetic_data_assump` | Synthetic or simulated data used in a way that does not reflect production conditions |
+| `silent_misconfig` | Plausible-looking results from wrong behavior; implementation produces numbers but measures the wrong thing |
+
+**Mixed (ambiguous) case categories — use when the flaw's significance is genuinely uncertain:**
+
+| Value | Meaning |
+|---|---|
+| `uncertain_significance` | Flaw is present but its significance is genuinely uncertain |
+| `fixable_flaw` | Flaw is present but fixable without invalidating the hypothesis |
+| `defensible_unconventional` | Design choice is unconventional but defensible; reasonable experts would disagree |
+| `ambiguous_evidence` | Evidence could support or undermine the hypothesis depending on interpretation |
+| `context_dependent` | Flaw is real only under specific deployment conditions not stated in the task |
+| `below_threshold` | Flaw is real but below the significance threshold for the experiment's conclusions |
+
+**If you identify no genuine flaw** (all findings are NIT or the list is empty), set `flaw_category` to `null`.
+
+Pick the single best-matching category per finding. If a finding spans multiple categories, pick the primary mechanism.
+
+---
+
 ## Output Format
 
 Produce your output in the following structure. The `findings` array is machine-parsed — use the exact field names below.
@@ -89,7 +124,8 @@ Produce your output in the following structure. The `findings` array is machine-
       "suppressed": <true if NIT, false otherwise>,
       "claim": "<the specific assumption being made>",
       "failure_mechanism": "<why and how this could be wrong>",
-      "evidence_test": "<what observation would confirm or refute this>"
+      "evidence_test": "<what observation would confirm or refute this>",
+      "flaw_category": "<one of the 13 values below, or null if no genuine flaw>"
     }
   ],
   "summary": "<1-2 sentence overall assessment>",
