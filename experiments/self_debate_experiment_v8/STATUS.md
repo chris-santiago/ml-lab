@@ -86,10 +86,46 @@ Also fixed: canary_full.json was out of sync with canary_cases.json (7 additions
       IDR ≥ 0.75 gate is better enforced by the first canary run on 12 real regular cases.
       _IDR floor still applies — checked on first canary iteration, not pre-run._
 
-- [ ] **Phase 1 — Transcript reading complete** [→ PROTOCOL.md §Phase 1]
-      Read all v7 defense-case transcripts. Classify failure mode distribution across the 6 types.
-      Determines intervention priority (A vs B vs C first).
-      _Pure human-work phase. Cannot be automated._
+- [x] **Phase 1 — Transcript reading complete** [→ PROTOCOL.md §Phase 1, phase1_audit.json]
+      Read all 40 v7 defense-case transcripts (multiround_2r condition, 120 runs total).
+      Audit trail: `phase1_audit.json` — one entry per case with failure_mode, key_evidence,
+      intervention_target, case_valid, consensus, needs_human_review.
+
+      **Methodology:** Cases classified in three batches. First 5 classified interactively with user
+      to calibrate discriminating rules; subagent ran batches 2 and 3 autonomously, reporting back
+      for review. Classification applied three sequential rules: (1) case_valid check — read
+      task_prompt for genuine fatal flaws before assigning a failure mode; (2) hypothesis-first check
+      — identify whether critic attacked stated hypothesis or a reframed version; (3) design-has-the-
+      answer check — scan task_prompt sections for explicit design controls addressing each critique.
+      rc_rescience cases required an additional replication-scope check: critiques targeting original
+      paper theory vs. critiques targeting the replication methodology itself.
+
+      **Distribution (40 cases):**
+
+      | Mode | Label | Count | % | Original target |
+      |---|---|---|---|---|
+      | 6 | Noise accumulation | 23 | 57.5% | A |
+      | 3 | Weak rebuttal | 9 | 22.5% | B |
+      | 2 | Partial concession | 4 | 10.0% | B |
+      | 1 | Full concession | 2 | 5.0% | B |
+      | 5 | Unfalsifiable critique | 2 | 5.0% | A |
+      | 4 | Correct rebuttal, overridden | 0 | 0.0% | C |
+
+      **Additional findings:**
+      - `case_valid=false`: 3 cases (eval_scenario_789, eval_scenario_794,
+        rc_rescience_2021_eaton2022reproduction_journal) — genuine design errors in these cases;
+        critics were correct; these should be excluded or rewritten in the benchmark.
+      - Mode 4 weak signals in 3 cases (harrison run2, luisa2022thompson Issue 1, mast2022 Run 0):
+        defender made correct rebuttal, verdict still non-defense. No clean Mode 4 cases.
+      - rc_rescience dominant failure: defenders never deployed replication-scope framing;
+        conceded original-paper theory critiques as if defending the original authors.
+
+      **Intervention priority decision (updated):** Mode 6 dominant pattern (57.5%) was initially
+      mapped to Intervention A. On review: the critic's job is to surface all possible issues —
+      filtering is the defender's and adjudicator's responsibility. Mode 6 is therefore re-read as
+      primarily a B+C problem: defender needs confidence to dismiss individually-weak critiques;
+      adjudicator needs severity aggregation (one significant flaw) rather than count aggregation
+      (n partial concessions). See intervention discussion in journal. [→ decision TBD]
 
 - [x] **Gate 1 — Ground truth audit complete** [→ CASES.md §Gate 1]
       All 3 deferred candidates audited and resolved: eval_scenario_897 (rewrite, promoted),
