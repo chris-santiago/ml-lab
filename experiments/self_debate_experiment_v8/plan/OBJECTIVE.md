@@ -38,7 +38,7 @@ Iterate on ml-lab's agent prompts — critic, defender, and orchestrator adjudic
 | DER (defense exoneration rate) | 0.00 | > 0.30 | System can exonerate at least 30% of sound cases |
 | IDR (issue detection rate) | 0.803 (ensemble) / 0.634 (multiround) | >= 0.75 (multiround) | Detection must not degrade |
 | FAR (false alarm rate) | 1.00 | < 0.50 | Fewer than half of sound cases get false critique_wins |
-| FHR (false hedge rate) | — | Define pre-run | Fewer `empirical_test_agreed` on stratum-clear cases |
+| FHR (false hedge rate) | — | ≤ canary-run-1 + 0.05 | Non-regression: first canary run sets baseline; subsequent iterations must not exceed it by more than 0.05 |
 
 DER is the primary metric. FVC_mixed (retired) gave 0.5 credit for hedges — the system already hedges. The actual problem is confident exoneration: `defense_wins` verdicts on sound methodology.
 

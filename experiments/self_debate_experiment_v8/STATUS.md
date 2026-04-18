@@ -108,12 +108,14 @@ These were v7-labeled defense cases. Do not include until manually audited.
       Keep in pool. Reasoning trace parsing handled by `strip_think_tags()` in run_pipeline.py.
       Cost accounted for in MODELS.md estimate. CER inflation risk monitored via MES.
 
-- [ ] **Model seed file generated** [→ MODELS.md §Seed Control, PROTOCOL.md §Phase 2]
-      Generate fixed model assignments for 42 canary cases × 3 runs = 126 evaluations.
-      Format per MODELS.md §Seed assignment format. Hold constant across all canary iterations.
+- [x] **Model seed file generated** [→ MODELS.md §Seed Control, PROTOCOL.md §Phase 2]
+      canary_seeds.json: 42 cases × 3 runs = 126 assignments. random.seed(42), independent
+      draws per run from 12-model pool. Hold constant across all canary iterations.
 
-- [ ] **FHR baseline defined** [→ OBJECTIVE.md §Success Criteria]
-      FHR target listed as "Define pre-run" — must set target before first canary run.
+- [x] **FHR baseline defined** [→ OBJECTIVE.md §Success Criteria]
+      No pre-run absolute target meaningful without data. Resolved: FHR floor is
+      ≤ canary-run-1 + 0.05 (non-regression). First canary run sets the baseline.
+      OBJECTIVE.md updated.
 
 ---
 
