@@ -210,6 +210,20 @@ LABELS = {
         "canary_difficulty": "medium",
         "label_rationale": "Applying influence-style example-importance methods and feature saliency in a fully unsupervised regime without class labels is unusual and critics may claim it's ill-defined, though the paper's framework explicitly defines the explanation target as the learned representation.",
     },
+    # --- GATE 1 AUDITED ADDITIONS ---
+    "eval_scenario_897": {
+        "flaw_category": None,
+        "canary_difficulty": "hard",
+        "label_rationale": (
+            "Temporal split is the primary partitioning mechanism with explicit no-cross-boundary "
+            "guarantee; within-training upsampling for rare confirmed incidents is the anticipated "
+            "critic target; defender rebuts that test partition is untouched and upsampling is a "
+            "standard class-imbalance technique within training only. Promoted from UNCERTAIN after "
+            "Gate 1 rewrite: task_prompt tightened to eliminate cross-period leakage ambiguity "
+            "(original wording 'randomly assigned to 70/15/15 proportions' was ambiguous about "
+            "whether assignment crossed temporal boundaries)."
+        ),
+    },
 }
 
 def main():

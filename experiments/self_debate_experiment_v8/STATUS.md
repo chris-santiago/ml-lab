@@ -53,17 +53,17 @@ validated. Canary iteration will determine which changes hold.
 | `canary_difficulty` labeling | ✅ Done | Defense: easy/medium/hard to exonerate; regular: easy/medium/hard flaw detection; mixed: low/medium/high ambiguity |
 | Diversity reshuffle | ✅ Done | Swapped 3 homogeneous `context_dependent` synthetic mixed for 3 RC paper cases; added 2 regular for coverage; added 2 confirmed-hard defense cases |
 | Gate 2 coverage check | ⚠️ Partial | 7 of 9 regular v8 categories covered in canary. **Gaps: `synthetic_data_assump` (zero v7 cases exist — full gap), `implicit_dist_assump` (unassigned in labeling pass)** |
-| Defense difficulty balance | ⚠️ Partial | Current: 10 easy / 7 medium / 3 hard. Target: ~7/9/4. Three harder candidates deferred pending Gate 1 audit (see below) |
+| Defense difficulty balance | ⚠️ Partial | Current: 10 easy / 7 medium / 4 hard. Target: ~7/9/4. Two candidates still pending Gate 1 audit. |
 
-**Gate 1 deferred — 3 defense candidates with possible real flaws:**
+**Gate 1 audit log:**
 
-| Case | Concern |
-|---|---|
-| `eval_scenario_897` | Temporal split + random incident assignment may be a genuine contradiction |
-| `eval_scenario_068` | "AUPRC at fixed FPR" may be an invalid metric definition (real flaw, not just hard) |
-| `hyp_204_case` | Feature-asymmetric model comparison may be genuinely confounded |
+| Case | Verdict | Notes |
+|---|---|---|
+| `eval_scenario_897` | ✅ CONFIRMED SOUND (promoted) | UNCERTAIN → fixed: task_prompt rewritten to eliminate cross-period leakage ambiguity. Added as hard defense case. [→ decision ff5f4f51] |
+| `eval_scenario_068` | ⬜ Pending | "AUPRC at fixed FPR" may be an invalid metric definition |
+| `hyp_204_case` | ⬜ Pending | Feature-asymmetric model comparison may be genuinely confounded |
 
-These were v7-labeled defense cases. Do not include until manually audited.
+Also fixed: canary_full.json was out of sync with canary_cases.json (7 additions missing, 5 stale present). Both now at 43 cases. [→ discovery ff3a889d]
 
 ---
 
