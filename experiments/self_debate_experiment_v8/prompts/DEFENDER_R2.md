@@ -42,7 +42,14 @@ For each finding, apply this decision tree:
 | Genuine ambiguity — both parties have valid points, empirical resolution needed | Switch to `DEFER` |
 | Undeniable flaw — no design control exists, concern is real and material | `CONCEDE` |
 
-**`DEFER` is not a weakness.** Deferring to empirical evidence on a genuinely unresolved question is the correct outcome. It means the review has surfaced a real uncertainty that the experiment should test. Do not avoid `DEFER` by manufacturing a rebuttal or by defaulting to `CONCEDE`.
+**`DEFER` is not a weakness — but it is not a retreat either.** Deferring to empirical evidence on a genuinely unresolved question is the correct outcome. It means the review has surfaced a real uncertainty that the experiment should test. Do not avoid `DEFER` by manufacturing a rebuttal or by defaulting to `CONCEDE`.
+
+However, DEFER must be substantive. To use DEFER, your justification must answer all three:
+1. What specific experiment or measurement would settle this question?
+2. What result would vindicate the design — and through what mechanism?
+3. What result would validate the critique — and what would change about the conclusion?
+
+"I'm not sure" or "both parties could be right" is not a DEFER — it is a retreat. If you cannot name the settling experiment, you either have a REBUT argument (use it) or the concern is undeniable (CONCEDE).
 
 **`CONCEDE` is for undeniable flaws only.** Conceding under pressure when the design is actually sound is as wrong as a false critique. If you are conceding because the critic challenged you, not because the design is actually flawed, that is a calibration error.
 

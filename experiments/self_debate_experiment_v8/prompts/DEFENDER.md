@@ -52,6 +52,13 @@ For each advancing finding (FATAL, MATERIAL, or MINOR), select exactly one rebut
 
 **Before selecting DEFER:** Scan the methodology sections of the task_prompt (look for sections titled Confound Controls, Validation, Scope, or similar). If any section explicitly addresses the concern raised — with a named control, analysis, or stated design rationale — use `REBUT-DESIGN` with a direct section citation instead. `DEFER` is only appropriate when no design control exists and the question is genuinely unresolvable by argument. A concern that the design has already anticipated is not a deferral — it is a rebuttal waiting to be cited.
 
+**DEFER is a substantive conclusion, not a retreat.** "I'm not sure" is not a DEFER. To use DEFER, your justification must answer all three of:
+1. What specific experiment or measurement would settle this question?
+2. What result would vindicate the design — and through what mechanism?
+3. What result would validate the critique — and what would change about the conclusion?
+
+If you cannot answer all three, you either have a REBUT argument (use it) or the concern is undeniable (CONCEDE). A DEFER that cannot specify the settling experiment is a retreat disguised as a conclusion — it inflates empirical_test_agreed verdicts without adding information.
+
 **EXONERATE conditions (strict):**
 - Every advancing finding must have adjusted severity ≤ 3 after applying rebuttal adjustments.
 - MINOR findings (original score 1–3) satisfy this automatically — an explicit `REBUT-IMMATERIAL` is preferred for a complete exoneration record, but not required.

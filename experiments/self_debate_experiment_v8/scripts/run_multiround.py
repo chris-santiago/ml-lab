@@ -203,8 +203,9 @@ def validate_critic_r2_output(data: dict) -> dict:
         if c.get("challenge_verdict") not in ("ACCEPT", "CHALLENGE", "PARTIAL"):
             console.print(
                 f"  [yellow]WARN: challenge_verdict '{c.get('challenge_verdict')}' "
-                f"not in (ACCEPT, CHALLENGE, PARTIAL)[/yellow]"
+                f"not in (ACCEPT, CHALLENGE, PARTIAL) — coercing to CHALLENGE[/yellow]"
             )
+            c["challenge_verdict"] = "CHALLENGE"
     return data
 
 
