@@ -399,8 +399,11 @@ def build_defender_r2_user_msg(
         f"## Critic R2 Challenges (citation review)\n\n"
         f"```json\n{challenges_json}\n```\n\n"
         f"The critic has reviewed your citations. For each CHALLENGE or PARTIAL verdict, "
-        f"you must either defend your citation with a stronger argument, provide a better "
-        f"verbatim quote, or concede if no direct design control exists. "
+        f"choose the path that matches the design's actual state:\n"
+        f"- REBUT-DESIGN/REBUT-SCOPE: the design has a specific control that eliminates the mechanism — explain it clearly\n"
+        f"- DEFER: the design has a partial control or relevant tradeoff but cannot eliminate the concern — name the settling experiment\n"
+        f"- CONCEDE: the design has no control addressing this concern at all — do not DEFER when the flaw is simply undeniable\n"
+        f"DEFER and CONCEDE are not interchangeable. DEFER requires a partial design answer; CONCEDE is for absent controls.\n"
         f"Produce your final structured rebuttal JSON as specified."
     )
 
