@@ -12,18 +12,18 @@ flowchart TD
 
     S2 --> RMODE{"review_mode?"}
 
-    RMODE -- "ensemble (default)" --> ENS_S3["Step 3 — 3× ml-critic<br/>CRITIQUE_1.md · CRITIQUE_2.md · CRITIQUE_3.md"]
+    RMODE -- "ensemble (opt-in)" --> ENS_S3["Step 3 — 3× ml-critic<br/>CRITIQUE_1.md · CRITIQUE_2.md · CRITIQUE_3.md"]
     ENS_S3 --> ENS_AGG["Step 3A — Aggregate Findings<br/>Cluster by root cause · Tag confidence tiers<br/>ENSEMBLE_REVIEW.md"]
     ENS_AGG --> PREFLIGHT_E["Extract issues by tier · Propose empirical tests<br/>Build pre-flight checklist"]
     style ENS_AGG fill:#e8f4e8,stroke:#2e7d32
 
-    RMODE -- "debate" --> S3["Step 3 — ml-critic<br/>CRITIQUE.md"]
-    S3 --> S4["Step 4 — ml-defender<br/>DEFENSE.md · log verdict"]
-    S4 --> DROUND["Debate Round N<br/>Critic ↔ Defender"]
-    DROUND --> DRES{"All points<br/>resolved?"}
-    DRES -- "No · rounds left" --> DROUND
-    DRES -- "Yes or max 4 reached" --> PREFLIGHT_D
-    PREFLIGHT_D["Parse DEFENSE.md Pass 2 verdict table<br/>Extract concessions + pre-execution requirements<br/>Build pre-flight checklist"]
+    RMODE -- "debate (default)" --> SA1["Stage A.1 — ml-critic R1<br/>CRITIQUE.md"]
+    SA1 --> SA2["Stage A.2 — ml-defender R1<br/>DEFENSE.md"]
+    SA2 --> SB["Stage B — Challenge Loop<br/>ml-critic-r2 → ml-defender R2 → derive_verdict()<br/>min 2 · max 4 rounds"]
+    SB --> BCONV{"Converged?"}
+    BCONV -- "No · rounds remain" --> SB
+    BCONV -- "Yes or cap reached" --> PREFLIGHT_D
+    PREFLIGHT_D["Parse final Stage B verdict<br/>Extract concessions + pre-execution requirements<br/>Build pre-flight checklist"]
     style PREFLIGHT_D fill:#e8f4e8,stroke:#2e7d32
 
     PREFLIGHT_E --> G1
@@ -45,7 +45,7 @@ flowchart TD
 
     G2[/"✋ Gate 2 — Re-Opening Plan<br/>User approval required"/]
     G2 -- "B ensemble:<br/>re-run 3× critic Mode 3" --> ENS_S3
-    G2 -- "B debate:<br/>return to adversarial review" --> S3
+    G2 -- "B debate:<br/>re-enter Stage A" --> SA1
     G2 -- "C: revise<br/>hypothesis + PoC" --> S1
 
     RPT_MODE{"report_mode?"}

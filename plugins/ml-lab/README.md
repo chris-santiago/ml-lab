@@ -7,14 +7,15 @@ This directory contains reference copies of the Claude Code agents and skills th
 | File | Role | Spawned by |
 |------|------|------------|
 | `ml-lab.md` | Orchestrator — runs the full 12-step investigation | User / calling agent |
-| `ml-critic.md` | Adversarial critic — finds flaws the PoC hasn't tested | `ml-lab` (Step 3: 3× in ensemble mode, 1× in debate; Step 5: debate only) |
-| `ml-defender.md` | Design defender — argues for the implementation, concedes valid points | `ml-lab` (Steps 4, 5 — **debate mode only**) |
+| `ml-critic.md` | Adversarial critic — finds flaws the PoC hasn't tested (Stage A.1) | `ml-lab` (Step 3: 1× in debate Stage A; 3× in ensemble mode) |
+| `ml-critic-r2.md` | R2 challenger — issues ACCEPT/CHALLENGE/PARTIAL verdicts on defender rebuttals (Stage B.1) | `ml-lab` (Step 3: debate Stage B only) |
+| `ml-defender.md` | Design defender — 7-type structured rebuttal taxonomy; concedes, rebuts, or defers (Stage A.2 and B.2) | `ml-lab` (Step 3 — **debate mode only**) |
 | `research-reviewer.md` | Deep peer reviewer — Opus-class structured review of REPORT.md | `ml-lab` (Step 10, Round 1) |
 | `research-reviewer-lite.md` | Verification reviewer — Haiku-class follow-up review | `ml-lab` (Step 10, Rounds 2–3) |
 | `readme-rewriter.md` | Outside-reader README rewriter — diagnoses and rewrites for external audiences | `ml-lab` (Step 13) |
 | `intent-monitor.md` | Pre-registration drift monitor — evaluates git changes in an experiment directory against binding constraints in a source-of-truth document; emits a clean-pass line or structured conflict report | `intent-watch` skill (user-invoked) |
 
-All agents except `ml-lab` are subagents dispatched via the Agent tool. In **ensemble mode** (the default), `ml-defender` is not dispatched — the review phase runs 3 independent `ml-critic` dispatches with union pooling. In **debate mode**, the full critic → defender → rounds chain runs as before.
+All agents except `ml-lab` are subagents dispatched via the Agent tool. In **debate mode** (the default), `ml-critic` (Stage A.1) and `ml-defender` (Stage A.2) run once, followed by a convergence loop of `ml-critic-r2` (Stage B.1) and `ml-defender` (Stage B.2) up to max_rounds=4. In **ensemble mode** (opt-in), `ml-defender` and `ml-critic-r2` are not dispatched — three independent `ml-critic` dispatches with union pooling.
 
 For installation instructions, invocation guide, workflow diagram, and agent interaction overview, see the [root README](../README.md#install).
 

@@ -1,6 +1,6 @@
 # ml-lab
 
-`ml-lab` is a Claude Code agent that runs structured ML hypothesis investigations using an ensemble of independent critics (default) or an adversarial critic-defender debate (opt-in). It enforces rigor at every step — pre-specified metrics, confidence-tiered review findings, agreed experiments only — and produces a self-contained report with a production re-evaluation. The methodology has been empirically validated; see [Part 2](#part-2-the-experiment-behind-ml-lab) for results.
+`ml-lab` is a Claude Code agent that runs structured ML hypothesis investigations using an adversarial critic-defender debate protocol (default) or an ensemble of independent critics for high-recall sweeps (opt-in). It enforces rigor at every step — pre-specified metrics, confidence-tiered review findings, agreed experiments only — and produces a self-contained report with a production re-evaluation. The methodology has been empirically validated; see [Part 2](#part-2-the-experiment-behind-ml-lab) for results.
 
 **Jump to:** [Part 1 — Using ml-lab](#part-1-using-ml-lab) · [Part 2 — The Experiment](#part-2-the-experiment-behind-ml-lab) · [FAQ](#faq) · [Artifact Index](#artifact-index) · [ml-journal](#ml-journal--session-audit-trail)
 
@@ -17,13 +17,14 @@
 /plugin install ml-lab@ml-lab
 ```
 
-This installs all seven agent files to `~/.claude/agents/` automatically.
+This installs all eight agent files to `~/.claude/agents/` automatically.
 
 **Manual install:**
 
 ```bash
 cp plugins/ml-lab/ml-lab.md ~/.claude/agents/
 cp plugins/ml-lab/ml-critic.md ~/.claude/agents/
+cp plugins/ml-lab/ml-critic-r2.md ~/.claude/agents/
 cp plugins/ml-lab/ml-defender.md ~/.claude/agents/
 cp plugins/ml-lab/research-reviewer.md ~/.claude/agents/
 cp plugins/ml-lab/research-reviewer-lite.md ~/.claude/agents/
@@ -48,9 +49,9 @@ Once installed, Claude Code will make `ml-lab` available as a spawnable agent. I
 
 The workflow is designed for rigor over speed. Given a hypothesis, `ml-lab` first sharpens it into a falsifiable claim with agreed metrics, then builds a minimal runnable PoC. From there it routes to one of two review modes:
 
-**Ensemble mode (default):** `ml-critic` is dispatched 3 times independently — each reads only the PoC and hypothesis, with no visibility into the other critics' outputs. The orchestrator clusters the findings by root cause, tags each issue with an assessor support count (1/3, 2/3, or 3/3), and writes `ENSEMBLE_REVIEW.md` with tier-weighted output. Issues are ordered by tier (3/3 > 2/3 > 1/3); 1/3 minority findings include genuine novel concerns alongside spurious noise and require explicit user confirmation before entering experiment design. Formally outperforms the debate protocol on regular methodology reviews (see [Part 2](#part-2-the-experiment-behind-ml-lab)).
+**Debate mode (default):** `ml-critic` and `ml-defender` are dispatched as adversarial subagents with distinct mandates. Stage A runs once: `ml-critic` (R1) identifies every implicit claim the PoC makes but hasn't tested; `ml-defender` (R1) responds point-by-point using a 7-type structured rebuttal taxonomy (CONCEDE, REBUT-DESIGN, REBUT-SCOPE, REBUT-EVIDENCE, REBUT-IMMATERIAL, DEFER, EXONERATE). Stage B runs a convergence loop (min 2, max 4 rounds): `ml-critic-r2` challenges each rebuttal, `ml-defender` responds, and `derive_verdict()` deterministically computes a per-finding and case-level verdict. The loop stops when verdicts stabilize or the round cap is reached. Recommended for all cases following v8 calibration fixes — see [Part 2](#part-2-the-experiment-behind-ml-lab).
 
-**Debate mode (opt-in):** `ml-critic` and `ml-defender` are dispatched as adversarial subagents with distinct mandates. The critic identifies every implicit claim the PoC makes but hasn't tested; the defender responds point-by-point — conceding, rebutting, or marking points as empirically open. `ml-lab` orchestrates a multi-round debate until each contested point resolves or both sides agree on an empirical test. Use when the hypothesis involves genuine empirical ambiguity that benefits from iterative adversarial exchange.
+**Ensemble mode (opt-in):** `ml-critic` is dispatched 3 times independently — each reads only the PoC and hypothesis, with no visibility into the other critics' outputs. The orchestrator clusters the findings by root cause, tags each issue with an assessor support count (1/3, 2/3, or 3/3), and writes `ENSEMBLE_REVIEW.md` with tier-weighted output. Issues are ordered by tier (3/3 > 2/3 > 1/3); 1/3 minority findings include genuine novel concerns alongside spurious noise and require explicit user confirmation before entering experiment design. Use when you want a high-recall finding sweep and will triage precision manually — no structured verdict, no convergence loop.
 
 In both modes, only the agreed (or orchestrator-proposed) empirical tests go into the experiment. If findings are surprising enough to falsify a review assumption, the whole review cycle reopens with results in hand. The investigation closes with a self-contained report and a production re-evaluation that checks whether the experimental recommendation survives operational constraints.
 
@@ -75,18 +76,18 @@ flowchart TD
 
     S2 --> RMODE{"review_mode?"}
 
-    RMODE -- "ensemble (default)" --> ENS_S3["Step 3 — 3× ml-critic<br/>CRITIQUE_1.md · CRITIQUE_2.md · CRITIQUE_3.md"]
+    RMODE -- "ensemble (opt-in)" --> ENS_S3["Step 3 — 3× ml-critic<br/>CRITIQUE_1.md · CRITIQUE_2.md · CRITIQUE_3.md"]
     ENS_S3 --> ENS_AGG["Step 3A — Aggregate Findings<br/>Cluster by root cause · Tag confidence tiers<br/>ENSEMBLE_REVIEW.md"]
     ENS_AGG --> PREFLIGHT_E["Extract issues by tier · Propose empirical tests<br/>Build pre-flight checklist"]
     style ENS_AGG fill:#e8f4e8,stroke:#2e7d32
 
-    RMODE -- "debate" --> S3["Step 3 — ml-critic<br/>CRITIQUE.md"]
-    S3 --> S4["Step 4 — ml-defender<br/>DEFENSE.md · log verdict"]
-    S4 --> DROUND["Debate Round N<br/>Critic ↔ Defender"]
-    DROUND --> DRES{"All points<br/>resolved?"}
-    DRES -- "No · rounds left" --> DROUND
-    DRES -- "Yes or max 4 reached" --> PREFLIGHT_D
-    PREFLIGHT_D["Parse DEFENSE.md Pass 2 verdict table<br/>Extract concessions + pre-execution requirements<br/>Build pre-flight checklist"]
+    RMODE -- "debate (default)" --> SA1["Stage A.1 — ml-critic R1<br/>CRITIQUE.md"]
+    SA1 --> SA2["Stage A.2 — ml-defender R1<br/>DEFENSE.md"]
+    SA2 --> SB["Stage B — Challenge Loop<br/>ml-critic-r2 → ml-defender R2 → derive_verdict()<br/>min 2 · max 4 rounds"]
+    SB --> BCONV{"Converged?"}
+    BCONV -- "No · rounds remain" --> SB
+    BCONV -- "Yes or cap reached" --> PREFLIGHT_D
+    PREFLIGHT_D["Parse final Stage B verdict<br/>Extract concessions + pre-execution requirements<br/>Build pre-flight checklist"]
     style PREFLIGHT_D fill:#e8f4e8,stroke:#2e7d32
 
     PREFLIGHT_E --> G1
@@ -108,7 +109,7 @@ flowchart TD
 
     G2[/"✋ Gate 2 — Re-Opening Plan<br/>User approval required"/]
     G2 -- "B ensemble:<br/>re-run 3× critic Mode 3" --> ENS_S3
-    G2 -- "B debate:<br/>return to adversarial review" --> S3
+    G2 -- "B debate:<br/>re-enter Stage A" --> SA1
     G2 -- "C: revise<br/>hypothesis + PoC" --> S1
 
     RPT_MODE{"report_mode?"}
@@ -152,14 +153,15 @@ flowchart TD
 | File | Role | Spawned by |
 |------|------|------------|
 | `ml-lab.md` | Orchestrator — runs the full 12-step investigation | User / calling agent |
-| `ml-critic.md` | Adversarial critic — finds flaws the PoC hasn't tested | `ml-lab` (Step 3: 3× in ensemble mode, 1× in debate; Step 5: debate only) |
-| `ml-defender.md` | Design defender — argues for the implementation, concedes valid points | `ml-lab` (Steps 4, 5 — **debate mode only**) |
+| `ml-critic.md` | Adversarial critic — finds flaws the PoC hasn't tested (Stage A.1) | `ml-lab` (Step 3: 1× in debate Stage A; 3× in ensemble mode) |
+| `ml-critic-r2.md` | R2 challenger — issues ACCEPT/CHALLENGE/PARTIAL verdicts on defender rebuttals (Stage B.1) | `ml-lab` (Step 3: debate Stage B only) |
+| `ml-defender.md` | Design defender — 7-type structured rebuttal taxonomy; concedes, rebuts, or defers (Stage A.2 and B.2) | `ml-lab` (Step 3 — **debate mode only**) |
 | `report-writer.md` | Technical report writer — Opus-class; Mode 1: full investigation report (REPORT.md); Mode 2: publication-ready results-mode synthesis (TECHNICAL_REPORT.md) | `ml-lab` (Steps 8, 11) |
 | `research-reviewer.md` | Deep peer reviewer — Opus-class structured review of REPORT.md | `ml-lab` (Step 10, Round 1) |
 | `research-reviewer-lite.md` | Verification reviewer — Haiku-class follow-up review | `ml-lab` (Step 10, Rounds 2–3) |
 | `readme-rewriter.md` | Outside-reader README rewriter — diagnoses and rewrites for external audiences | `ml-lab` (Step 13) |
 
-All agents except `ml-lab` are subagents dispatched via the Agent tool. In **ensemble mode** (the default), `ml-defender` is not dispatched — the review phase runs 3 independent `ml-critic` dispatches with union pooling. In **debate mode**, the full critic → defender → rounds chain runs as before.
+All agents except `ml-lab` are subagents dispatched via the Agent tool. In **debate mode** (the default), `ml-critic` (Stage A.1) and `ml-defender` (Stage A.2) run once, followed by a convergence loop of `ml-critic-r2` (Stage B.1) and `ml-defender` (Stage B.2) up to max_rounds=4. In **ensemble mode** (opt-in), `ml-defender` and `ml-critic-r2` are not dispatched — three independent `ml-critic` dispatches with union pooling.
 
 ```
 User hypothesis
@@ -168,12 +170,15 @@ User hypothesis
       |
       +——— Steps 1-2:   builds PoC, reviews intent
       |
-      +——— Step 3:      review_mode == ensemble? (default)
-      |       Yes ——→   dispatches [ml-critic] ×3 independently → CRITIQUE_1/2/3.md
+      +——— Step 3:      review_mode == debate? (default)
+      |       Yes ——→   Stage A: dispatches [ml-critic] R1         → CRITIQUE.md
+      |                          dispatches [ml-defender] R1        → DEFENSE.md
+      |                 Stage B: [ml-critic-r2] challenges rebuttals (B.1)
+      |                          [ml-defender] R2 responds (B.2)
+      |                          derive_verdict() computes verdict (B.3)
+      |                          loops until convergence (min 2, max 4 rounds)
+      |       No  ——→   dispatches [ml-critic] ×3 independently → CRITIQUE_1/2/3.md
       |                 aggregates by root cause, tags confidence tiers → ENSEMBLE_REVIEW.md
-      |       No  ——→   dispatches [ml-critic]            → CRITIQUE.md
-      +——— Step 4:      (debate only) dispatches [ml-defender]  → DEFENSE.md
-      +——— Step 5:      (debate only) alternates dispatches until points resolve → DEBATE.md
       |
       +——— Steps 6-7:   designs and runs experiment, synthesizes conclusions
       |
@@ -273,7 +278,7 @@ Full trace and spec validation notes are in [`seq_fraud_experiment/TEST2_FINDING
 
 ### The Protocol Decision
 
-**Current default: three independent `ml-critic` calls (`ensemble_3x`) with tier-weighted union pooling.** The original critic-defender-adjudicator debate structure is now opt-in — reserved for empirically ambiguous cases where iterative exchange adds value. The recommendation is grounded in a two-study formal evaluation (paired bootstrap, n=10,000 resamples, seed=42, cross-vendor scorer): a pilot study (Study 1: 120 cases, 6 conditions, GPT-4o scorer) that established the pattern post-hoc, and a pre-registered confirmatory study (Study 2: 280 cases, 4 conditions, gpt-5.4-mini scorer; pre-registration SHA `6fadcc6`) that prospectively confirmed both primary predictions at matched compute.
+**The debate protocol works for structured ML hypothesis evaluation.** The recommendation is grounded in formal evidence from two studies plus post-port validation confirming the v8 calibration fixes perform as designed. The current default is adversarial debate (`multiround`) with v8 calibration, a structured 7-type rebuttal taxonomy, and deterministic `derive_verdict()` verdict computation. The ensemble approach (`ensemble_3x`, three independent critics with union pooling) is opt-in — a high-recall sweep without structured verdict derivation. The two-study formal evaluation (paired bootstrap, n=10,000 resamples, seed=42, cross-vendor scorer): a pilot study (Study 1: 120 cases, 6 conditions, GPT-4o scorer) that established the pattern post-hoc, and a pre-registered confirmatory study (Study 2: 280 cases, 4 conditions, gpt-5.4-mini scorer; pre-registration SHA `6fadcc6`) that prospectively confirmed both primary predictions at matched compute.
 
 **Metrics used in Part 2:**
 
@@ -303,6 +308,16 @@ Full trace and spec validation notes are in [`seq_fraud_experiment/TEST2_FINDING
 
 The structural conclusion: **detection is a breadth problem** (more independent perspectives find more issues); **ambiguity judgment is a depth problem** (iterative exchange enables recognizing when methodology is empirically open). These require different compute strategies — ensemble by default, multiround opt-in when the hypothesis is genuinely ambiguous.
 
+**v8 calibration (2026) — validation, fixes, and why debate is now the recommended default.**
+
+*This works.* Multiround debate achieves FVC_mixed = 0.731 on ambiguous cases (Δ +0.225 vs. ensemble, CI [+0.192, +∞)). Canary validation of the v8 protocol on scenario 852 confirmed the Stage A+B convergence loop, calibration gates, and `derive_verdict()` all behaved as designed: the loop converged correctly at round 3, F7 and F9 were correctly DEFERd rather than CONCEDEd after gate 2 applied, and the final `critique_wins` verdict on F3 matched ground truth.
+
+*How we know.* Before the v8 calibration fixes were applied, Phase 3 validation (5 benchmark cases) showed 2/5 false-positive `critique_wins` verdicts on cases where ground truth was `defense_wins` or `empirical_test_agreed`. Root cause: defenders CONCEDEd symmetric findings that could not reverse the relative conclusion, using "symmetric but doesn't excuse" as a manual gate override. After the gate 2 hard block was added, that root cause was eliminated. `derive_verdict.py` is separately validated by 32 unit tests encoding the v8 verdict rules — all pass; verdict logic is deterministic and not subject to LLM variance.
+
+*What we changed.* Four targeted protocol fixes: (1) **pre-FATAL gate** — FATAL severity (≥ 7) requires both no design coverage AND realistic conclusion reversal; a finding with any relevant control is MATERIAL (≤ 6) at most; (2) **pre-CONCEDE gate 2 hard block** — if a flaw affects both conditions symmetrically, CONCEDE is unavailable regardless of gate 3; use DEFER with a settling experiment; (3) **7-type rebuttal taxonomy** with scope and evidence constraints — REBUT-DESIGN requires a named control that *eliminates* the failure mechanism, not merely mitigates it; FATAL findings require specific methodology text, not inferred design intent; (4) **4-question DEFER test** with a conclusion-survival check (question 4: if the flaw would invalidate the primary metric or affect conditions asymmetrically, DEFER is unavailable — switch to CONCEDE).
+
+*Why debate over ensemble.* Ensemble has higher raw issue detection recall (Δ IDR +0.169 on regular cases, CI [+0.139, +∞)) — more independent perspectives surface more issues. But ensemble produces no structured verdict and no convergence loop: it is a finding list, not a decision. Debate produces a per-finding rebuttal with severity adjustment, a deterministic case-level verdict, and a convergence check that stops when findings stabilize. With v8 calibration resolving the over-concession and over-aggression failure modes, debate is reliable enough to be the default for all cases. Ensemble remains the right tool when you want breadth and will triage precision manually. See `experiments/self_debate_experiment_v8/` and `ML_LAB_PORT_PLAN.md` for the full calibration experiment and port specification.
+
 **Tier precision varies.** Consensus findings carry higher precision than minority-flagged ones — the 1/3 pool includes genuine novel concerns alongside spurious noise:
 
 | Tier | Precision | N issues |
@@ -331,7 +346,7 @@ The standard approach is single-pass: give a model some work, ask it what it thi
 
 **What the evaluation revealed about independent redundancy:** at matched compute (3×), three independent critics with union pooling outperform single-pass baseline. Ensemble IDR = 0.803 vs. baseline 0.636, CI lower bound +0.140 — formally confirmed. The advantage is larger on real ReScience C papers (+0.200) than on synthetic cases (+0.166).
 
-**What the evaluation revealed about structure's limits:** the debate protocol does not reliably recognize valid work. In Study 2 (n=480 defense runs across all conditions), zero `defense_wins` verdicts were produced. The strongest adjacent outcome (`empirical_test_agreed`) was reached by multiround on 50% of defense runs. Study 1 observed 20% exoneration on multiround defense cases; multiple design variables changed simultaneously between studies (model version, compute budget, prompt design, benchmark composition), so the decline cannot be attributed to any single factor. Defense-case exoneration remains an unsolved problem — the 0% rate should be treated as a descriptive finding, not a stable cross-study estimate.
+**What the evaluation revealed about structure's limits:** the debate protocol does not reliably recognize valid work. In Study 2 (n=480 defense runs across all conditions), zero `defense_wins` verdicts were produced. The strongest adjacent outcome (`empirical_test_agreed`) was reached by multiround on 50% of defense runs. Study 1 observed 20% exoneration on multiround defense cases; multiple design variables changed simultaneously between studies (model version, compute budget, prompt design, benchmark composition), so the decline cannot be attributed to any single factor. v8 calibration addresses the mechanical cause (symmetric-flaw CONCEDEs, critic over-aggression on partially-addressed findings), but validation on clean defense cases under the new protocol is still pending. The 0% rate should be treated as a pre-v8 descriptive finding, not a stable estimate of the calibrated protocol.
 
 The deeper lesson is about *what structure buys and what it doesn't*. More compute and more independent perspectives solve most of the detection problem. For cases where the question is whether methodology is empirically testable — not just flawed — iterative exchange still matters.
 
@@ -355,6 +370,16 @@ No formal test goes in isolated_debate's favor across either study. It is strict
 **Conditional FM gate** — adaptive stopping designed to skip round 2 when debate converges early:
 - Gate-fire rate = 94.7% (341/360 cases required round 2). Mean PRR after round 1 = 0.418 (across all 360 CFM files). The gate is functionally equivalent to full multiround and provides no compute savings.
 
+**v8 calibration (2026)** — four protocol-level failure modes addressed after Study 2:
+
+- **Unstructured rebuttal:** Before v8, defenders responded in prose — no constraint on how broadly a rebuttal could argue. A well-phrased but empty REBUT-DESIGN could block a FATAL finding without a methodology citation. v8 fix: 7-type taxonomy (CONCEDE, REBUT-DESIGN, REBUT-SCOPE, REBUT-EVIDENCE, REBUT-IMMATERIAL, DEFER, EXONERATE) with explicit constraints — REBUT-DESIGN requires a named control that *eliminates* (not merely mitigates) the failure mechanism; REBUT-DESIGN on FATAL findings (sev ≥ 7) requires specific methodology text, not inferred design intent.
+
+- **DEFER overuse:** Defenders used DEFER as a safe default — signaling empirical openness without engaging genuine flaws. This suppressed `critique_wins` verdicts even when findings were undeniable. v8 fix: four required questions including a conclusion-survival check (question 4): *can the experiment's primary conclusion remain valid even if the critique is correct?* If the flaw would invalidate the primary metric or affect conditions asymmetrically, DEFER is unavailable — switch to CONCEDE.
+
+- **Symmetric flaw concessions:** Defenders CONCEDEd findings that affected both experimental conditions equally (symmetric flaws). A symmetric flaw cannot reverse the relative conclusion — it is a DEFER situation, not a CONCEDE. The concession was driven by "symmetric but doesn't excuse," treating flaw existence as sufficient to CONCEDE regardless of conclusion impact. v8 fix: pre-CONCEDE gate 2 is a hard block — if the flaw is symmetric, CONCEDE is unavailable regardless of gate 3. "Symmetric but doesn't excuse" is not a valid override.
+
+- **Critic severity over-aggression:** Critics assigned FATAL severity (sev ≥ 7) to findings the existing methodology partially addressed, driving false-positive `critique_wins` verdicts on cases where ground truth was `defense_wins` or `empirical_test_agreed`. v8 fix: pre-FATAL gate requiring both no design coverage AND realistic conclusion reversal — a finding with any relevant design control is MATERIAL (sev ≤ 6) at most.
+
 ---
 
 ### Where Debate Still Matters
@@ -374,7 +399,9 @@ Multiround achieves `empirical_test_agreed` on 46.3% of mixed runs; ensemble on 
 
 *Study 1 used stricter FVC_mixed scoring (no adjacency credit), producing multiround = 0.367, baseline ≈ 0.00 — not directly comparable to Study 2 values.*
 
-**Deployment caveat:** multiround has the highest within-case variance of all conditions (verdict flip rate 60.7%, vs. ensemble 0.7%). Individual runs are unreliable — 3-run averaging is mandatory for stable estimates. This raises multiround's effective deployment cost to ~9× baseline (3 API calls × 3 replicates), compared to 3× for ensemble, which is single-run reliable.
+**With v8 calibration, debate is now the recommended default for all cases** — not just mixed cases. The FVC_mixed advantage (+0.225) was established before calibration fixes were applied; with the pre-FATAL gate, pre-CONCEDE symmetric-flaw block, structured rebuttal types, and convergence loop, debate now produces more reliable verdicts across all case types. Ensemble remains the right tool when you want comprehensive finding breadth without precision filtering — high-recall sweep, manual triage, no verdict derivation.
+
+**Deployment update (v8):** The Stage B convergence loop (min_rounds=2, max_rounds=4) provides within-run stabilization — if verdicts don't move between rounds, the debate stops early. The B.1 early-exit shortcut skips the defense response entirely when all R2 challenges ACCEPT at or after min_rounds. Within-case variance concern from Study 2 is partially mitigated by the convergence check; 3-run averaging remains recommended for high-stakes decisions.
 
 ---
 
@@ -477,9 +504,9 @@ See [`experiments/self_debate_experiment_v2/README.md`](experiments/self_debate_
 
 Yes. ml-lab is a Claude Code agent — it requires Claude Code to be installed. The plugin copies agent definition files to `~/.claude/agents/`; Claude Code then makes them available as spawnable agents.
 
-**Are all seven agent files required, or can I use a subset?**
+**Are all eight agent files required, or can I use a subset?**
 
-`ml-lab.md` and `ml-critic.md` are required for the core workflow. `ml-defender.md` is only needed if you plan to use debate review mode — it is not dispatched in ensemble mode (the default). `research-reviewer.md` and `research-reviewer-lite.md` are only needed if you want the Step 10 peer review loop. `readme-rewriter.md` is only needed for the optional Step 13 README rewrite. `report-writer.md` is only needed for report generation (Steps 8, 11). The plugin installs all seven by default.
+`ml-lab.md` and `ml-critic.md` are required for the core workflow. `ml-critic-r2.md` and `ml-defender.md` are only needed if you plan to use debate mode (the default) — they are not dispatched in ensemble mode. `research-reviewer.md` and `research-reviewer-lite.md` are only needed if you want the Step 10 peer review loop. `readme-rewriter.md` is only needed for the optional Step 13 README rewrite. `report-writer.md` is only needed for report generation (Steps 8, 11). The plugin installs all eight by default.
 
 **Is manual installation equivalent to the plugin?**
 
@@ -543,7 +570,7 @@ A healthcare triage scenario where the Defender correctly identified all critica
 
 In v6, 20 of 120 cases were defense cases — valid work where the correct verdict is `defense_wins`. Every condition except multiround scored FVC=0.0 on all 20: baseline, ensemble_3x, isolated_debate, and biased_debate each produced 0 correct exonerations. Multiround achieved 12/60 individual runs (20%) correct, but with high variance. No condition reliably recognizes valid work.
 
-This is a direct contradiction of a v2 finding (debate 5/5, ensemble 4/5 on 5 internal false-positive cases). That result did not replicate at v6 scale. A subsequent evaluation (2026-04-13) confirmed the problem persists: zero `defense_wins` verdicts across 480 defense runs. Defense case exoneration remains an open problem. See [`next_steps.md §6`](experiments/self_debate_experiment_v6/next_steps.md) for the original diagnosis.
+This is a direct contradiction of a v2 finding (debate 5/5, ensemble 4/5 on 5 internal false-positive cases). That result did not replicate at v6 scale. A subsequent evaluation (2026-04-13) confirmed the problem persists pre-v8: zero `defense_wins` verdicts across 480 defense runs. v8 calibration addresses the mechanical root causes (symmetric-flaw CONCEDEs via pre-CONCEDE gate 2; critic FATAL over-aggression via pre-FATAL gate), but validation on clean defense cases under the new calibrated protocol is still pending. See [`next_steps.md §6`](experiments/self_debate_experiment_v6/next_steps.md) for the original diagnosis.
 
 **Would results change significantly with a cheaper or different model?**
 
@@ -557,13 +584,13 @@ This was a known limitation in v2 (all roles including scorer used Claude). v6 p
 
 ### Should I Use ml-lab or Just Run an Ensemble?
 
-**ml-lab's default review mode is ensemble** — when you invoke ml-lab, it runs 3 independent `ml-critic` dispatches with union pooling. The debate chain is opt-in. See [Part 2](#part-2-the-experiment-behind-ml-lab) for the formal evidence behind this decision.
+**ml-lab's default review mode is debate** — when you invoke ml-lab, it runs the Stage A+B structured protocol with `derive_verdict()` verdict derivation. The ensemble chain is opt-in. See [Part 2](#part-2-the-experiment-behind-ml-lab) for the formal evidence behind this decision.
 
-**Use ensemble mode (default) when** you need a verdict on whether something is methodologically broken. Three independent critics at 3× compute formally outperform both single-pass baseline and the original debate protocol on issue detection recall and precision.
+**Use debate mode (default) when** you want a structured verdict on methodology — especially for cases involving genuine empirical ambiguity. In Study 2 (pre-registered, n=80 mixed cases), multiround achieves FVC_mixed = 0.731 vs. ensemble 0.506 (Δ = +0.225, CI [+0.192, +∞)). Ensemble produces `empirical_test_agreed` on only 1.3% of mixed runs; multiround on 46.3%. v8 calibration fixes address the two main failure modes from Study 2 — making debate the reliable default for all cases.
 
-**Use debate mode when** the hypothesis involves genuine empirical ambiguity — where the right answer is "run this test first" rather than a binary verdict. In Study 2 (pre-registered, n=80 mixed cases), multiround achieves FVC_mixed = 0.731 vs. ensemble 0.506 (Δ = +0.225, CI [+0.192, +∞)). Ensemble produces `empirical_test_agreed` on only 1.3% of mixed runs; multiround on 46.3%.
+**Use ensemble mode (opt-in) when** you want a high-recall finding sweep and will triage precision manually. Three independent critics at 3× compute outperform debate on issue detection recall (Δ IDR +0.169, CI [+0.139, +∞)) — but produce no structured verdict and no convergence loop.
 
-**Honest caveats:** The ensemble advantage over debate is formally pre-registered and confirmed in Study 2 (n=160 regular cases, CI floor +0.139). On defense cases — valid work that should be exonerated — no condition reliably recognizes valid work. Study 2 (n=480 defense runs) found zero `defense_wins` verdicts; the strongest adjacent outcome (`empirical_test_agreed`) was reached by multiround on 50% of defense runs. Study 1 found 20% exoneration (multiround); multiple design changes between studies prevent attributing the decline to any single factor. The protocol is well-calibrated for flaw detection but systematically over-critiques valid work. This is an open problem with no current solution.
+**Honest caveats:** The ensemble IDR advantage over debate on regular cases is formally pre-registered and confirmed in Study 2 (n=160 regular cases, CI floor +0.139) — debate produces more structured verdicts, ensemble surfaces more raw issues. On defense cases — valid work that should be exonerated — no condition reliably recognized valid work in Study 2 (n=480 defense runs, zero `defense_wins`); the strongest adjacent outcome (`empirical_test_agreed`) was reached by multiround on 50% of defense runs. v8 calibration addresses the mechanical root causes of false `critique_wins` (symmetric-flaw CONCEDEs and critic FATAL over-aggression), but this is a pre-v8 result — validation on clean defense cases under the calibrated protocol is still pending.
 
 </details>
 
