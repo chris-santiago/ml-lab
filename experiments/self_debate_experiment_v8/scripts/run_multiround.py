@@ -253,6 +253,10 @@ def derive_verdict(defender_output: dict) -> dict:
         elif rtype == "DEFER" and adj_sev <= 3:
             pv = "defense_wins"
             rule = f"constitutional: DEFER + adj_sev={adj_sev} ≤ 3 → defense_wins"
+        elif rtype == "DEFER" and orig_sev >= 7 and adj_sev >= 6:
+            pv = "critique_wins"
+            rule = (f"constitutional: DEFER + orig_sev={orig_sev} ≥ 7 + adj_sev={adj_sev} ≥ 6 "
+                    f"→ critique_wins (FATAL finding unresolved by DEFER)")
 
         point_verdicts.append({
             "finding_id": fid,
@@ -401,9 +405,11 @@ def build_defender_r2_user_msg(
         f"The critic has reviewed your citations. For each CHALLENGE or PARTIAL verdict, "
         f"choose the path that matches the design's actual state:\n"
         f"- REBUT-DESIGN/REBUT-SCOPE: the design has a specific control that eliminates the mechanism — explain it clearly\n"
-        f"- DEFER: the design has a partial control or relevant tradeoff but cannot eliminate the concern — name the settling experiment\n"
-        f"- CONCEDE: the design has no control addressing this concern at all — do not DEFER when the flaw is simply undeniable\n"
-        f"DEFER and CONCEDE are not interchangeable. DEFER requires a partial design answer; CONCEDE is for absent controls.\n"
+        f"- DEFER: the design has a partial control but cannot eliminate the concern — name the settling experiment AND confirm "
+        f"(question 4) that the primary conclusion survives if the critique is correct. "
+        f"If the flaw would invalidate the primary metric or affect conditions asymmetrically, CONCEDE is required instead.\n"
+        f"- CONCEDE: the design has no control addressing this concern, OR the flaw would invalidate the primary conclusion\n"
+        f"DEFER and CONCEDE are not interchangeable. DEFER requires both a partial design answer AND that the primary conclusion survives the flaw.\n"
         f"Produce your final structured rebuttal JSON as specified."
     )
 

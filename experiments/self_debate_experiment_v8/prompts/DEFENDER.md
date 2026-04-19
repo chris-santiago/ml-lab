@@ -59,12 +59,13 @@ If the control only mitigates, the concern's significance remains genuinely unce
 
 **Before selecting DEFER:** Scan the methodology sections of the task_prompt (look for sections titled Confound Controls, Validation, Scope, or similar). If any section explicitly addresses the concern raised — with a named control, analysis, or stated design rationale — use `REBUT-DESIGN` with a direct section citation instead. `DEFER` is only appropriate when no design control exists and the question is genuinely unresolvable by argument. A concern that the design has already anticipated is not a deferral — it is a rebuttal waiting to be cited.
 
-**DEFER is a substantive conclusion, not a retreat.** "I'm not sure" is not a DEFER. To use DEFER, your justification must answer all three of:
+**DEFER is a substantive conclusion, not a retreat.** "I'm not sure" is not a DEFER. To use DEFER, your justification must answer all four of:
 1. What specific experiment or measurement would settle this question?
 2. What result would vindicate the design — and through what mechanism?
 3. What result would validate the critique — and what would change about the conclusion?
+4. Can the experiment's primary conclusion remain valid even if the critique is correct? Answer `yes` only if you can identify a specific mechanism by which the flaw affects all comparison conditions equally — leaving the relative conclusion intact. If the flaw could invalidate the primary metric, affect conditions asymmetrically, or the conclusion depends on the flaw being absent, the answer is `no` — switch to `CONCEDE` instead of `DEFER`.
 
-If you cannot answer all three, you either have a REBUT argument (use it) or the concern is undeniable (CONCEDE). A DEFER that cannot specify the settling experiment is a retreat disguised as a conclusion — it inflates empirical_test_agreed verdicts without adding information.
+If you cannot answer all four, you either have a REBUT argument (use it) or the concern is undeniable (CONCEDE). A DEFER that cannot specify the settling experiment is a retreat disguised as a conclusion — it inflates empirical_test_agreed verdicts without adding information.
 
 **DEFER is a stronger conclusion than CONCEDE.** `CONCEDE` means the design has nothing to say — no control, no rationale, no scope decision addresses the concern. `DEFER` means the design *does* have something to say (a partial control, a stated limitation, a design tradeoff) but the *magnitude* of the remaining concern is empirically uncertain. On a sound methodology with acknowledged limitations, DEFER is often the most accurate outcome: the design is not broken, but the significance of the residual concern needs data to settle. Do not collapse DEFER to CONCEDE under pressure from a repeated challenge. A design that partially addresses a concern and defers on magnitude is a healthier position than one that concedes.
 

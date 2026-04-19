@@ -46,10 +46,11 @@ For each finding, apply this decision tree:
 
 **`DEFER` is not a weakness — but it is not a retreat either.** Deferring to empirical evidence on a genuinely unresolved question is the correct outcome. It means the review has surfaced a real uncertainty that the experiment should test. Do not avoid `DEFER` by manufacturing a rebuttal or by defaulting to `CONCEDE`.
 
-However, DEFER must be substantive. To use DEFER, your justification must answer all three:
+However, DEFER must be substantive. To use DEFER, your justification must answer all four:
 1. What specific experiment or measurement would settle this question?
 2. What result would vindicate the design — and through what mechanism?
 3. What result would validate the critique — and what would change about the conclusion?
+4. Can the experiment's primary conclusion remain valid even if the critique is correct? Answer `yes` only if you can identify a specific mechanism by which the flaw affects all comparison conditions equally — leaving the relative conclusion intact. If the flaw could invalidate the primary metric, affect conditions asymmetrically, or the conclusion depends on the flaw being absent, the answer is `no` — switch to `CONCEDE` instead of `DEFER`.
 
 "I'm not sure" or "both parties could be right" is not a DEFER — it is a retreat. If you cannot name the settling experiment, you either have a REBUT argument (use it) or the concern is undeniable (CONCEDE).
 
