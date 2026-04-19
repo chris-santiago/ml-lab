@@ -322,49 +322,68 @@ Log `write`/`write_ensemble_review` with `meta` containing `{"total_issues": N, 
 
 ### If `review_mode == debate`
 
-The structured multi-round debate protocol runs four stages. **Carry `original_severity` from Stage 1 through all subsequent stages** — it is required for `derive_verdict()`.
+The structured multi-round debate protocol runs in two phases:
+- **Stage A** (runs once): ml-critic R1 → ml-defender R1
+- **Stage B** (repeatable, up to `max_rounds`): ml-critic-r2 → ml-defender R2 → derive_verdict() → convergence check
 
-#### Stage 1 — Adversarial Critique (ml-critic R1)
+Defaults: `min_rounds = 2`, `max_rounds = 4`.
+
+**Carry `original_severity` from Stage A through all Stage B rounds** — it is required for `derive_verdict()`.
+
+#### Stage A.1 — Adversarial Critique (ml-critic R1)
 
 Dispatch the `ml-critic` subagent via the Agent tool in **initial critique mode** (Mode 1). Instruct it to read `HYPOTHESIS.md`, `[domain]_poc.py`, and `README.md`.
 
 Receive structured JSON output: `findings` array (`finding_id`, `severity`, `severity_label`, `suppressed`, `claim`, `failure_mechanism`, `evidence_test`, `flaw_category`); top-level `summary` and `no_material_findings`.
 
-**Short-circuit:** If `no_material_findings: true`, skip Stages 2–4. The case verdict is `defense_wins`. Log and proceed to Gate 1.
+**Short-circuit:** If `no_material_findings: true`, skip Stage A.2 and all Stage B rounds. The case verdict is `defense_wins`. Log and proceed to Gate 1.
 
-Filter findings: remove all entries where `suppressed: true` (NIT findings). Pass only non-suppressed findings (FATAL, MATERIAL, MINOR) to Stage 2.
+Filter findings: remove all entries where `suppressed: true` (NIT findings). Pass only non-suppressed findings (FATAL, MATERIAL, MINOR) to Stage A.2.
 
 Log `subagent`/`receive_critic_r1` with `meta` containing `{"no_material_findings": <bool>, "fatal_count": N, "material_count": N, "minor_count": N, "nit_suppressed": N}`.
 
-#### Stage 2 — Initial Defense (ml-defender R1)
+#### Stage A.2 — Initial Defense (ml-defender R1)
 
-Dispatch the `ml-defender` subagent in **initial defense mode** (Mode 1). Pass `HYPOTHESIS.md`, `[domain]_poc.py`, `README.md`, and the non-suppressed findings JSON from Stage 1.
+Dispatch the `ml-defender` subagent in **initial defense mode** (Mode 1). Pass `HYPOTHESIS.md`, `[domain]_poc.py`, `README.md`, and the non-suppressed findings JSON from Stage A.1.
 
 Receive structured JSON output: `pass_1_analysis`, `rebuttals` array (`finding_id`, `original_severity`, `rebuttal_type`, `severity_adjustment`, `adjusted_severity`, `justification`), `overall_verdict`, `verdict_rationale`.
 
 Log `subagent`/`receive_defender_r1` with `meta` containing `{"overall_verdict": "<verdict>", "concede_count": N, "defer_count": N, "rebut_count": N}`.
 
-#### Stage 3 — R2 Challenge (ml-critic-r2)
+#### Stage B — Challenge-Response Loop (repeatable, up to `max_rounds`)
 
-Dispatch the `ml-critic-r2` subagent via the Agent tool. Pass the original non-suppressed findings from Stage 1 and the defender R1 rebuttals from Stage 2.
+Initialize loop state: `round = 0`, `prev_verdict = null`, `prev_finding_states = {}`.
+
+Repeat the following until a stopping condition is met:
+
+1. Increment `round`.
+2. Determine `is_final_round`: set to `true` if `round == max_rounds`, otherwise `false`.
+
+##### Stage B.1 — R2 Challenge (ml-critic-r2)
+
+Dispatch the `ml-critic-r2` subagent via the Agent tool. Pass the original non-suppressed findings from Stage A.1 and the **current defender rebuttal state** (Stage A.2 rebuttals on round 1; the previous Stage B.2 rebuttals on subsequent rounds).
 
 Receive structured JSON output: `challenges` array (`finding_id`, `challenge_verdict` ACCEPT/CHALLENGE/PARTIAL, `updated_severity`, `reasoning`).
 
 **Validation:** `challenge_verdict` must not be `DEFER` — that is a defender action. If any challenge arrives with `challenge_verdict: DEFER`, coerce it to `CHALLENGE` and note in the log.
 
-Log `subagent`/`receive_critic_r2` with `meta` containing `{"accept_count": N, "challenge_count": N, "partial_count": N}`.
+Log `subagent`/`receive_critic_r2` with `meta` containing `{"round": N, "accept_count": N, "challenge_count": N, "partial_count": N}`.
 
-#### Stage 4 — Final Defense (ml-defender R2)
+##### Stage B.2 — R2 Defense (ml-defender R2)
 
-Dispatch the `ml-defender` subagent in **structured R2 response mode** (Mode 2). Pass original findings from Stage 1, R1 rebuttals from Stage 2, and R2 challenges from Stage 3. Explicitly state in the dispatch: *"This is a structured R2 response (Mode 2), not an open-ended debate round."*
+Dispatch the `ml-defender` subagent in **structured R2 response mode** (Mode 2). Pass original findings from Stage A.1, the current defender rebuttal state, and R2 challenges from Stage B.1. Explicitly state in the dispatch: *"This is a structured R2 response (Mode 2), not an open-ended debate round."*
+
+**Round framing:** Include `is_final_round` in the dispatch:
+- `is_final_round = false` → "Produce your current position — the debate may continue if points remain unresolved."
+- `is_final_round = true` → current language: "produce your **final** rebuttal."
 
 Receive structured JSON output: `pass_2_analysis`, `rebuttals` array (`finding_id`, `original_severity`, `rebuttal_type`, `severity_adjustment`, `adjusted_severity`, `justification`, `r2_challenge_response`), `overall_verdict`, `verdict_rationale`.
 
-Log `subagent`/`receive_defender_r2` with `meta` containing `{"overall_verdict": "<verdict>", "concede_count": N, "defer_count": N, "maintained_count": N, "strengthened_count": N}`.
+Log `subagent`/`receive_defender_r2` with `meta` containing `{"round": N, "is_final_round": <bool>, "overall_verdict": "<verdict>", "concede_count": N, "defer_count": N, "maintained_count": N, "strengthened_count": N}`.
 
-#### Stage 5 — derive_verdict()
+##### Stage B.3 — derive_verdict()
 
-Apply `derive_verdict()` deterministically to the Stage 4 output. Per-finding rules:
+Apply `derive_verdict()` deterministically to the Stage B.2 output. Per-finding rules:
 
 | Condition | Point verdict |
 |---|---|
@@ -381,7 +400,24 @@ Case-level aggregation: `critique_wins` beats `empirical_test_agreed` beats `def
 
 > **DO NOT implement the FATAL DEFER backstop** (`DEFER + orig_sev ≥ 7 + adj_sev ≥ 6 → critique_wins`). It was reverted after catastrophically over-blocking ETA and defense_wins cases in benchmark testing. The correct mechanism is question 4 in the defender prompts.
 
-Log `decision`/`derive_verdict` with `meta` containing `{"case_verdict": "<verdict>", "critique_wins_points": N, "eta_points": N, "defense_wins_points": N}`.
+Log `decision`/`derive_verdict` with `meta` containing `{"round": N, "case_verdict": "<verdict>", "critique_wins_points": N, "eta_points": N, "defense_wins_points": N}`.
+
+##### Convergence Check
+
+After Stage B.3, evaluate stopping conditions before dispatching the next round:
+
+| Stopping condition | Action |
+|---|---|
+| `round >= min_rounds` AND `case_verdict == prev_verdict` AND no finding changed `rebuttal_type` or `adj_sev` vs. `prev_finding_states` | **Stop — converged** |
+| All findings have `adj_sev ≤ 3` or produced `defense_wins` / `critique_wins` | **Stop — fully resolved** *(no `min_rounds` guard — when every finding is already at a terminal state, additional rounds yield no new information and waste API calls)* |
+| No finding changed `rebuttal_type` or `adj_sev` since previous round (and `round >= min_rounds`) | **Stop — no movement** |
+| `round == max_rounds` | **Stop — cap reached; force-resolve** |
+
+**Force-resolution at cap:** If `max_rounds` reached with residual DEFERs, `derive_verdict()` already applies to the final state as-is — residual DEFERs yield `empirical_test_agreed` per the standard rules. No special handling required; log the final verdict and stop.
+
+Update loop state: `prev_verdict = case_verdict`, `prev_finding_states = {finding_id: (rebuttal_type, adj_sev) for each finding}`.
+
+Log `decision`/`debate_convergence` with `meta` containing `{"rounds_completed": N, "stop_reason": "<converged|fully_resolved|no_movement|max_rounds>", "case_verdict": "<verdict>"}`.
 
 ---
 
@@ -407,8 +443,8 @@ Log `decision`/`derive_verdict` with `meta` containing `{"case_verdict": "<verdi
 **If `review_mode == debate`:**
 
 1. From `derive_verdict()` output: extract every finding with point_verdict `critique_wins` — each is a known gap that must be addressed or documented before the experiment runs.
-2. From Stage 4 rebuttals: extract every finding with `rebuttal_type: CONCEDE` — these are conceded flaws that must be addressed in experiment design.
-3. From Stage 4 rebuttals: extract every finding with `rebuttal_type: DEFER` — these are open empirical questions; each must have a proposed test with pre-specified verdicts in the experiment plan.
+2. From the final Stage B round rebuttals: extract every finding with `rebuttal_type: CONCEDE` — these are conceded flaws that must be addressed in experiment design.
+3. From the final Stage B round rebuttals: extract every finding with `rebuttal_type: DEFER` — these are open empirical questions; each must have a proposed test with pre-specified verdicts in the experiment plan.
 4. Compile all extracted items into a pre-flight checklist: `| # | Source | Finding ID | Point Verdict | Item | Verification Method | Status (PENDING/CLOSED) |`
 
 This checklist is dynamically constructed from the actual review output — it must not be pre-written before the review runs.
@@ -431,7 +467,7 @@ Present this plan to the user. **Do not begin Step 6 until:**
 3. Run `/intent-watch <experiment_dir> HYPOTHESIS.md` — it must return a clean pass. If any HIGH or CRITICAL conflict is reported, resolve it before proceeding. This is the pre-registration boundary: HYPOTHESIS.md is now locked, and any drift discovered here means the planning phase produced an inconsistency that must be corrected, not carried forward.
 
 **Artifacts (ensemble mode):** `CRITIQUE_1.md`, `CRITIQUE_2.md`, `CRITIQUE_3.md`, `ENSEMBLE_REVIEW.md`
-**Artifacts (debate mode):** Structured JSON from each stage (Stages 1–4); `derive_verdict()` case verdict and point verdicts; pre-flight checklist
+**Artifacts (debate mode):** Structured JSON from Stage A and each Stage B round; `derive_verdict()` output per round; convergence log (`rounds_completed`, `stop_reason`); pre-flight checklist
 
 ---
 
@@ -551,9 +587,9 @@ Triggers:
 
 **If `review_mode == debate`:**
 3. Dispatch `ml-critic` in **evidence-informed re-critique mode** (Mode 3) with the original artifacts plus `CONCLUSIONS.md` and experiment figures. This produces a new critique informed by the experimental evidence.
-4. Run the structured 4-stage debate protocol (Stages 1–5 above) on the new critique — the same protocol as the first cycle, with fresh structured JSON outputs for this cycle.
-5. Apply `derive_verdict()` to the new Stage 4 output. Log the new case verdict.
-6. Extract the new empirical test list (DEFER findings from Stage 4 + any new CONCEDE findings). The trivial baseline must still be included.
+4. Run the full debate protocol (Stage A + Stage B loop above) on the new critique — the same protocol as the first cycle, with fresh structured JSON outputs for this cycle.
+5. Apply `derive_verdict()` to the final Stage B round output. Log the new case verdict.
+6. Extract the new empirical test list (DEFER findings from the final Stage B round + any new CONCEDE findings). The trivial baseline must still be included.
 7. Present the debate summary and new test list to the user before re-entering Steps 6–7.
 
 **If Outcome C (return to hypothesis):**
@@ -775,10 +811,11 @@ At the end of the investigation, these files must exist:
 | `README.md` | 2 | Intent, quickstart, limitations | both |
 | `CRITIQUE_1.md`, `CRITIQUE_2.md`, `CRITIQUE_3.md` | 3 | Independent assessor critiques | ensemble |
 | `ENSEMBLE_REVIEW.md` | 3A | Aggregated issues with detection redundancy tiers | ensemble |
-| Stage 1 JSON (ml-critic R1) | 3 | Structured findings with severity, flaw_category, suppressed flags | debate |
-| Stage 2 JSON (ml-defender R1) | 4 | Structured rebuttals with 7-type taxonomy and severity adjustments | debate |
-| Stage 3 JSON (ml-critic-r2) | 4 | Per-finding ACCEPT/CHALLENGE/PARTIAL challenge verdicts | debate |
-| Stage 4 JSON (ml-defender R2) | 4 | Final rebuttals with r2_challenge_response; derive_verdict() case verdict | debate |
+| Stage A.1 JSON (ml-critic R1) | 3 | Structured findings with severity, flaw_category, suppressed flags | debate |
+| Stage A.2 JSON (ml-defender R1) | 3 | Structured rebuttals with 7-type taxonomy and severity adjustments | debate |
+| Stage B.1 JSON (ml-critic-r2, per round) | 4 | Per-finding ACCEPT/CHALLENGE/PARTIAL challenge verdicts | debate |
+| Stage B.2 JSON (ml-defender R2, per round) | 4 | Rebuttals with r2_challenge_response and is_final_round framing | debate |
+| Stage B.3 derive_verdict() (per round) | 4 | Case verdict and point verdicts; convergence log | debate |
 | `[domain]_experiment{N}.py` | 6 | All empirical tests | both |
 | `CONCLUSIONS.md` | 7 | Per-finding verdicts with figures | both |
 | `*.png` (figures) | 7, 8 | Canonical visualizations | both |
@@ -805,7 +842,7 @@ Corrections at Step 2 are especially high-value. A correction there prevents the
 - PoC design correction → restart from Step 2 (intent review) onward
 - Critique correction [ensemble] → re-dispatch the affected critic(s), re-run Step 3A aggregation
 - Ensemble review correction (aggregation error) → re-run Step 3A only (re-read CRITIQUE_1/2/3.md, re-cluster)
-- Critique correction [debate] → restart from Step 4 (defense) onward
+- Critique correction [debate] → restart from current Stage B round onward
 - Experiment design correction → restart current experiment iteration
 - Report correction → re-run Step 8 only
 - Peer review finding (text) → re-run Step 8 and resume Step 10
@@ -826,11 +863,15 @@ Corrections at Step 2 are especially high-value. A correction there prevents the
 
 ## Known Framework Limitations
 
-These are open problems as of v7. Do not treat them as design properties.
+These are open problems as of v8. Do not treat them as design properties.
 
 **Defense case exoneration (open problem):** In a framework evaluation completed 2026-04-13, Claude Sonnet 4.6 was systematically critique-biased — zero `defense_wins` verdicts across 480 defense runs. The strongest adjacent outcome (`empirical_test_agreed`) was reached by multiround on 50% of defense cases. Full exoneration of sound methodology is currently unsolvable with this model. When evaluating a hypothesis that may be sound, multiround with replicate averaging is the best available tool; even then, treat `empirical_test_agreed` as the effective ceiling.
 
 **Multiround verdict variance:** In a framework evaluation completed 2026-04-13, individual multiround runs had a 60.7% verdict flip rate. Single-run multiround verdicts are not authoritative. If using debate mode, plan for ≥3 replicate runs and report the mean verdict, not any single run.
+
+**Convergence loop mitigation (v8):** The Stage B loop (`min_rounds=2`, `max_rounds=4`) provides within-run stabilization — if findings don't move between rounds, the debate stops early with a stable verdict. This reduces but does not eliminate cross-run variance; replicate runs remain recommended for high-stakes decisions.
+
+**Critic over-aggression on clean designs (v8 Phase 3):** In Phase 3 pipeline validation (5 benchmark cases), the critic drove false-positive `critique_wins` on 2/5 cases where ground truth was `defense_wins` or `empirical_test_agreed`. Root cause: the defender CONCEDEd findings it should have rebutted (case 858: CONCEDE at sev=7 on best-of-3 seed selection; case 185: CONCEDE at sev=9 on undefined query structure). The convergence loop provides additional rounds for correction, but the underlying issue is defender concession calibration — the defender is too willing to CONCEDE on arguable findings rather than using DEFER or REBUT-SCOPE. This is an open calibration concern, not a pipeline bug.
 
 ---
 
