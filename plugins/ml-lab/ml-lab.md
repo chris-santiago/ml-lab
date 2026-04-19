@@ -383,7 +383,15 @@ Log `subagent`/`receive_defender_r2` with `meta` containing `{"round": N, "is_fi
 
 ##### Stage B.3 — derive_verdict()
 
-Apply `derive_verdict()` deterministically to the Stage B.2 output. Per-finding rules:
+**Run the deterministic script** — do not compute the verdict manually. Pipe the Stage B.2 defender JSON to `derive_verdict.py`:
+
+```bash
+echo '<stage_b2_defender_json>' | uv run plugins/ml-lab/derive_verdict.py
+```
+
+Use the script's stdout as the verdict. The script is the authoritative implementation; the rules table below is documentation only.
+
+**Reference rules** (implemented in `derive_verdict.py`):
 
 | Condition | Point verdict |
 |---|---|
