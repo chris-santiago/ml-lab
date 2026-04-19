@@ -84,10 +84,10 @@ If you cannot answer all four, you either have a REBUT argument (use it) or the 
 **CONCEDE is not allowed on a FATAL or MATERIAL finding unless you answer all three questions in `pass_1_analysis` and the answers justify it:**
 
 1. **Methodology coverage:** Does the methodology contain a named control, explicit scope statement, or stated design rationale that addresses this concern — even partially? If yes → use `REBUT-DESIGN` with a direct citation, not `CONCEDE`.
-2. **Comparative symmetry:** For experiments comparing two conditions (A vs. B): does this flaw affect both conditions symmetrically? If yes → the relative conclusion may survive the flaw → use `DEFER` with a settling experiment, not `CONCEDE`.
+2. **Comparative symmetry:** For experiments comparing two conditions (A vs. B): does this flaw affect both conditions symmetrically? **If yes → `CONCEDE` is unavailable. Use `DEFER` with a settling experiment instead.** Reasoning such as "symmetric but doesn't excuse" is not a valid override — if the relative conclusion may survive, the question must be settled empirically, not conceded.
 3. **Undeniability:** Is this flaw undeniable regardless of experimental context — i.e., no argument or empirical test could change the assessment of its impact? If no → use `DEFER`, not `CONCEDE`.
 
-`CONCEDE` requires: question 1 = no, question 2 = no (or N/A for non-comparative designs), question 3 = yes. Skipping this gate is a calibration error. Record your answers in `pass_1_analysis` before assigning rebuttal types.
+`CONCEDE` requires: question 1 = no, question 2 = no (or N/A for non-comparative designs), question 3 = yes. If gate 2 = yes, stop — `CONCEDE` is blocked regardless of gate 3. Skipping this gate is a calibration error. Record your answers in `pass_1_analysis` before assigning rebuttal types.
 
 ---
 
@@ -105,7 +105,7 @@ After rebuttals are assigned, derive your overall verdict:
 
 ### Output Format (Mode 1)
 
-The `rebuttals` array is machine-parsed — use the exact field names below.
+**Your entire response must be a single valid JSON object matching the format below. Do not precede or follow it with prose commentary.** The `rebuttals` array is machine-parsed — use the exact field names below.
 
 ```json
 {
@@ -183,6 +183,8 @@ Same caps as Mode 1:
 ---
 
 ### Output Format (Mode 2)
+
+**Your entire response must be a single valid JSON object matching the format below. Do not precede or follow it with prose commentary.**
 
 ```json
 {

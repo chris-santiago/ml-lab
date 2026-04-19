@@ -413,6 +413,10 @@ Case-level aggregation: `critique_wins` beats `empirical_test_agreed` beats `def
 
 Log `decision`/`derive_verdict` with `meta` containing `{"round": N, "case_verdict": "<verdict>", "critique_wins_points": N, "eta_points": N, "defense_wins_points": N}`.
 
+##### B.1 Early-Exit Check
+
+**Before dispatching Stage B.2:** If all B.1 challenge verdicts are `ACCEPT` and `round >= min_rounds`, skip B.2 entirely. Run `derive_verdict.py` on the current B.2 state (unchanged from the previous round), log `debate_convergence` with `stop_reason: converged`, and stop. Rationale: if the critic accepted every rebuttal, the defender will trivially MAINTAIN all positions — running B.2 and B.3 adds no information.
+
 ##### Convergence Check
 
 After Stage B.3, evaluate stopping conditions before dispatching the next round:

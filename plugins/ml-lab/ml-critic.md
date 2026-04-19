@@ -126,7 +126,7 @@ FATAL (7+) requires both: no design coverage AND realistic conclusion reversal. 
 
 ## Output Format (Mode 1)
 
-The `findings` array is machine-parsed — use the exact field names below.
+**Your entire response must be a single valid JSON object matching the format below. Do not precede or follow it with prose commentary.** The `findings` array is machine-parsed — use the exact field names below.
 
 ```json
 {
