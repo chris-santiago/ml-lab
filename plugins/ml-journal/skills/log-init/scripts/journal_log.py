@@ -31,7 +31,7 @@ REQUIRED_FIELDS = {
     "memo":        ["description"],
     "summary":     ["description"],
     "checkpoint":  ["in_progress"],
-    "git":         ["commit_hash", "message", "branch"],
+    "git":         ["message", "branch"],
 }
 
 OPTIONAL_FIELDS = {
@@ -46,7 +46,7 @@ OPTIONAL_FIELDS = {
     "memo":        ["tags", "context", "detail", "linked_issue_id", "linked_id"],
     "summary":     ["key_decisions", "open_threads"],
     "checkpoint":  ["pending_decisions", "recently_completed", "key_context", "git_state", "open_threads"],
-    "git":         ["files_changed", "diff_summary"],
+    "git":         ["commit_hash", "files_changed", "diff_summary"],
 }
 
 VALID_SEVERITIES = {"low", "minor", "moderate", "high", "critical"}
