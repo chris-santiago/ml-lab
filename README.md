@@ -1,6 +1,6 @@
 # ml-lab
 
-`ml-lab` is a Claude Code agent that runs structured ML hypothesis investigations using an adversarial critic-defender debate protocol (default) or an ensemble of independent critics for high-recall sweeps (opt-in). It enforces rigor at every step — pre-specified metrics, confidence-tiered review findings, agreed experiments only — and produces a self-contained report with a production re-evaluation. The methodology has been empirically validated; see [Part 2](#part-2-the-experiment-behind-ml-lab) for results.
+`ml-lab` is a Claude Code agent that runs structured ML hypothesis investigations using an adversarial critic-defender debate protocol (default) or an ensemble of independent critics for high-recall sweeps (opt-in). It enforces rigor at every step — pre-specified metrics, confidence-tiered review findings, agreed experiments only — and produces a self-contained report with a production re-evaluation. The methodology has been empirically evaluated across two studies with pre-registered hypotheses — detection and ambiguity judgment performance validated; defense-case performance under v8 calibration still pending. See [Part 2](#part-2-the-experiment-behind-ml-lab) for results.
 
 **Jump to:** [Part 1 — Using ml-lab](#part-1-using-ml-lab) · [Part 2 — The Experiment](#part-2-the-experiment-behind-ml-lab) · [FAQ](#faq) · [Artifact Index](#artifact-index) · [ml-journal](#ml-journal--session-audit-trail)
 
@@ -49,7 +49,7 @@ Once installed, Claude Code will make `ml-lab` available as a spawnable agent. I
 
 The workflow is designed for rigor over speed. Given a hypothesis, `ml-lab` first sharpens it into a falsifiable claim with agreed metrics, then builds a minimal runnable PoC. From there it routes to one of two review modes:
 
-**Debate mode (default):** `ml-critic` and `ml-defender` are dispatched as adversarial subagents with distinct mandates. Stage A runs once: `ml-critic` (R1) identifies every implicit claim the PoC makes but hasn't tested; `ml-defender` (R1) responds point-by-point using a 7-type structured rebuttal taxonomy (CONCEDE, REBUT-DESIGN, REBUT-SCOPE, REBUT-EVIDENCE, REBUT-IMMATERIAL, DEFER, EXONERATE). Stage B runs a convergence loop (min 2, max 4 rounds): `ml-critic-r2` challenges each rebuttal, `ml-defender` responds, and `derive_verdict()` deterministically computes a per-finding and case-level verdict. The loop stops when verdicts stabilize or the round cap is reached. Recommended for all cases following v8 calibration fixes — see [Part 2](#part-2-the-experiment-behind-ml-lab).
+**Debate mode (default):** `ml-critic` and `ml-defender` are dispatched as adversarial subagents with distinct mandates. Stage A runs once: `ml-critic` (R1) identifies every implicit claim the PoC makes but hasn't tested; `ml-defender` (R1) responds point-by-point using a 7-type structured rebuttal taxonomy (CONCEDE, REBUT-DESIGN, REBUT-SCOPE, REBUT-EVIDENCE, REBUT-IMMATERIAL, DEFER, EXONERATE). Stage B runs a convergence loop (min 2, max 4 rounds): `ml-critic-r2` challenges each rebuttal, `ml-defender` responds, and `derive_verdict()` — a pure Python function (no LLM) that maps final-round severity, rebuttal type, and acceptance to a case-level verdict in `{critique_wins, defense_wins, empirical_test_agreed}` — deterministically computes a per-finding and case-level verdict. The loop stops when verdicts stabilize or the round cap is reached. Recommended for all cases following v8 calibration fixes — see [Part 2](#part-2-the-experiment-behind-ml-lab).
 
 **Ensemble mode (opt-in):** `ml-critic` is dispatched 3 times independently — each reads only the PoC and hypothesis, with no visibility into the other critics' outputs. The orchestrator clusters the findings by root cause, tags each issue with an assessor support count (1/3, 2/3, or 3/3), and writes `ENSEMBLE_REVIEW.md` with tier-weighted output. Issues are ordered by tier (3/3 > 2/3 > 1/3); 1/3 minority findings include genuine novel concerns alongside spurious noise and require explicit user confirmation before entering experiment design. Use when you want a high-recall finding sweep and will triage precision manually — no structured verdict, no convergence loop.
 
@@ -152,7 +152,7 @@ flowchart TD
 
 | File | Role | Spawned by |
 |------|------|------------|
-| `ml-lab.md` | Orchestrator — runs the full 12-step investigation | User / calling agent |
+| `ml-lab.md` | Orchestrator — runs the full 13-step investigation | User / calling agent |
 | `ml-critic.md` | Adversarial critic — finds flaws the PoC hasn't tested (Stage A.1) | `ml-lab` (Step 3: 1× in debate Stage A; 3× in ensemble mode) |
 | `ml-critic-r2.md` | R2 challenger — issues ACCEPT/CHALLENGE/PARTIAL verdicts on defender rebuttals (Stage B.1) | `ml-lab` (Step 3: debate Stage B only) |
 | `ml-defender.md` | Design defender — 7-type structured rebuttal taxonomy; concedes, rebuts, or defers (Stage A.2 and B.2) | `ml-lab` (Step 3 — **debate mode only**) |
@@ -166,7 +166,7 @@ All agents except `ml-lab` are subagents dispatched via the Agent tool. In **deb
 ```
 User hypothesis
       |
-   [ml-lab]  ←——————————————— orchestrates all 12 core steps
+   [ml-lab]  ←——————————————— orchestrates all 13 core steps
       |
       +——— Steps 1-2:   builds PoC, reviews intent
       |
@@ -242,7 +242,7 @@ To validate that `ml-lab` correctly navigates the full iteration stack — not j
 
 > *"An LSTM on ordered transaction category sequences outperforms a bag-of-categories baseline because fraud exhibits characteristic temporal patterns."*
 
-The run exercised every major feature of the workflow using the adversarial debate path (`review_mode: debate`). The default mode is now `ensemble` — three independent critics with union-of-issues output — but debate remains available as an opt-in for cases where iterative adversarial exchange is warranted.
+The run exercised every major feature of the workflow using the adversarial debate path (`review_mode: debate`), which is the default mode under v8 calibration.
 
 **Setup.** Before any code, ml-lab asked for report mode (full report selected), review mode (`debate` selected — adversarial critic/defender path), and confirmed the primary metric (average precision, given 0.05 prevalence). It also checked whether there was a reference implementation to match — there wasn't, so all parameters were set explicitly in the PoC rather than inherited from framework defaults.
 
@@ -356,7 +356,7 @@ The deeper lesson is about *what structure buys and what it doesn't*. More compu
 
 **Study 1** (v6 pilot: 120 cases, 6 conditions, GPT-4o scorer) identified the following failures:
 
-**`isolated_debate`** — the original ml-lab protocol (critic → defender → adjudicator):
+**`isolated_debate`** — the original ml-lab protocol (critic → defender → adjudicator, a role since replaced by deterministic `derive_verdict()`):
 - H1a (Study 1): lift over baseline = −0.0026, CI [−0.0108, +0.0059]. Non-significant — CI spans zero; debate spends 3× compute with no measurable benefit on regular-case composite score.
 - **Study 2 upgrade:** H1a FAIL — FC Δ = −0.050, CI [−0.065, −0.036], entirely below the ±0.015 equivalence bound. Isolated debate is not merely non-equivalent to baseline; it is significantly *worse*. The mechanism: a blind defender (arguing methodology without seeing the specific critique) corrupts valid critiques ~10% of the time, dropping DRQ/FVC from 0.993 (baseline) to 0.891.
 - H2 FAIL (ensemble superior, Study 1): isolated_debate − ensemble_3x = −0.0287, CI [−0.0434, −0.0154]. Study 2 H2_reg: +0.106 FC advantage for ensemble, CI [+0.092, +0.120].
@@ -510,7 +510,7 @@ Yes. ml-lab is a Claude Code agent — it requires Claude Code to be installed. 
 
 **Is manual installation equivalent to the plugin?**
 
-Yes — both copy the same seven agent files to `~/.claude/agents/`. The plugin method automates the copy and surfaces updates when you run `/plugin marketplace update ml-lab`. Manual install gives you direct control but requires manual updates.
+Yes — both copy the same eight agent files to `~/.claude/agents/`. The plugin method automates the copy and surfaces updates when you run `/plugin marketplace update ml-lab`. Manual install gives you direct control but requires manual updates.
 
 **If I uninstall the plugin, what happens to my investigation data?**
 
@@ -522,7 +522,7 @@ Uninstalling removes the agent files from `~/.claude/agents/` but does **not** r
 
 **What happens when I first invoke ml-lab?**
 
-Before writing any code, ml-lab asks four questions: (1) the hypothesis sharpened into a falsifiable claim with a named mechanism and expected observable, (2) the primary evaluation metric(s), (3) report mode — full report or conclusions only, and (4) review mode — ensemble (default) or debate. It will not dispatch any subagents or write any code until all four are settled and `HYPOTHESIS.md` is written.
+Before writing any code, ml-lab asks four questions: (1) the hypothesis sharpened into a falsifiable claim with a named mechanism and expected observable, (2) the primary evaluation metric(s), (3) report mode — full report or conclusions only, and (4) review mode — debate (default) or ensemble (opt-in). It will not dispatch any subagents or write any code until all four are settled and `HYPOTHESIS.md` is written.
 
 **How long does a full investigation take?**
 
@@ -578,7 +578,7 @@ Both studies addressed the most critical model concern: detection metrics (IDR, 
 
 **Could using the same model family across all roles bias the results?**
 
-This was a known limitation in v2 (all roles including scorer used Claude). Both studies (v6 and v7) partially address it: detection metrics (IDR, IDP, ETD) are scored by GPT-4o, breaking the closed loop. The agent roles (Critic, Defender, Adjudicator) still use Claude, so systematic patterns in how Claude processes prompts could affect reasoning behavior in ways that wouldn't generalize. FVC and DRQ use rule-based scoring (no LLM). Cross-model agent validation (running the same protocol with a different model family for agent dispatches) remains future work. The [technical report](experiments/self_debate_experiment_v2/TECHNICAL_REPORT.md) discusses the original v2 limitation.
+This was a known limitation in v2 (all roles including scorer used Claude). Both studies partially address it: Study 1 (v6) used GPT-4o; Study 2 (v7) used gpt-5.4-mini — both cross-vendor scorers break the closed loop. The agent roles (Critic, Defender) still use Claude — verdict derivation is handled by deterministic `derive_verdict()` (no LLM) — so systematic patterns in how Claude processes prompts could affect reasoning behavior in ways that wouldn't generalize. FVC and DRQ use rule-based scoring (no LLM). Cross-model agent validation (running the same protocol with a different model family for agent dispatches) remains future work. The [technical report](experiments/self_debate_experiment_v2/TECHNICAL_REPORT.md) discusses the original v2 limitation.
 
 ---
 
@@ -614,7 +614,7 @@ This was a known limitation in v2 (all roles including scorer used Claude). Both
 | [`experiments/self_debate_experiment_v6/REPORT.md`](experiments/self_debate_experiment_v6/REPORT.md) | v6 full technical report — 120-case benchmark results |
 | [`experiments/self_debate_experiment_v6/plan/PLAN.md`](experiments/self_debate_experiment_v6/plan/PLAN.md) | v6 10-phase experimental design, reference documents |
 | [`experiments/self_debate_experiment_v2/TECHNICAL_REPORT.md`](experiments/self_debate_experiment_v2/TECHNICAL_REPORT.md) | **v2 technical report** — all v2 findings, decomposition, external validation, limitations |
-| [`plugins/ml-lab/`](plugins/ml-lab/) | Plugin source: all seven agent definitions, install config, and flow diagram |
+| [`plugins/ml-lab/`](plugins/ml-lab/) | Plugin source: all eight agent definitions, install config, and flow diagram |
 | [`multi-agent-prompt.md`](experiments/self_debate_experiment/multi-agent-prompt.md) | Bootstrap prompt for the full multi-agent harness (v1) |
 | [`experiments/self_debate_experiment/`](experiments/self_debate_experiment/) | Phase 1: frozen transcripts, contaminated + isolated protocol, 11–15 cases |
 | [`experiments/self_debate_experiment_v2/`](experiments/self_debate_experiment_v2/) | Phase 2: live API, isolated protocol, 20 cases, full results |
