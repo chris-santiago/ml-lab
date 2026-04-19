@@ -4,7 +4,7 @@
 penalty-aware scoring. [→ OBJECTIVE.md]
 
 **Branch:** `feat/v8-defender-iteration`  
-**Last updated:** 2026-04-19 (Options A+C probed; haiku + maverick removed; Stage 4 framing fix in place, unvalidated)
+**Last updated:** 2026-04-19 (question-4 DEFER gate + canary_run3/run4 complete; backstop reverted; ML_LAB_PORT_PLAN.md written)
 
 ---
 
@@ -37,12 +37,17 @@ penalty-aware scoring. [→ OBJECTIVE.md]
 | `prompts/DEFENDER.md` | ✅ Updated | **Options A+C:** Resolve/mitigate distinction added — REBUT-DESIGN requires control *eliminates* mechanism; if only mitigates → DEFER. DEFER reframed as stronger than CONCEDE (design has partial answer vs. no answer). [→ commit 50bf6b4] |
 | `prompts/DEFENDER_R2.md` | ✅ Updated | Same Options A+C applied to R2 pass — resolve/mitigate test in decision tree step 2; DEFER>CONCEDE reframing added. [→ commit 50bf6b4] |
 | `scripts/run_multiround.py` | ✅ Updated | **Stage 4 framing fix:** `build_defender_r2_user_msg` rewritten to name all three R2 paths (REBUT/DEFER/CONCEDE) with explicit conditions. Old binary "defend or concede" framing suppressed DEFER awareness. [→ commit dd87a4f] |
+| `prompts/DEFENDER_R2.md` | ✅ Updated | **FATAL REBUT-DESIGN text-citation gate:** REBUT-DESIGN on orig_sev ≥ 7 findings requires citation of specific named methodology text — logical inferences about what the design "implies" do not qualify. No specific text → DEFER or CONCEDE. [→ commit 2cb8406] |
+| `prompts/DEFENDER.md` | ✅ Updated | **Question-4 conclusion-survival DEFER gate:** 4th required DEFER question — "Can the experiment's primary conclusion remain valid even if the critique is correct?" If the flaw would invalidate the primary metric or affect conditions asymmetrically, CONCEDE is required instead of DEFER. [→ commit 3b14db5] |
+| `prompts/DEFENDER_R2.md` | ✅ Updated | Same question-4 conclusion-survival test applied to R2 pass. [→ commit 3b14db5] |
+| `scripts/run_multiround.py` | ✅ REVERTED | **FATAL DEFER backstop added then reverted:** Rule `DEFER + orig_sev ≥ 7 + adj_sev ≥ 6 → critique_wins` added in derive_verdict(). Fired indiscriminately on any FATAL DEFER regardless of whether the flaw was conclusion-invalidating — caused widespread false critique_wins on ETA and defense_wins cases (canary_run3). Reverted. **DO NOT PORT.** The prompt-level question 4 is the correct mechanism. [→ commit 3b14db5; reverted] |
 
-**Intervention priority (post Options A+C + pool cleanup):**
-- Options A+C confirmed working on ETA cases (probe_ac3: 185 3/3 ✓, 862 2/3 ✓). AER fix is gated on critic short-circuits, not defender prompts.
-- Stage 4 framing fix in place but unvalidated — probe_stage4b was noisy (maverick short-circuits, 2 failures). Needs clean re-probe.
-- IDR gap (critique_wins cases) remains open — no CONCEDEs produced at any model size including Opus 4.6. Requires further calibration.
-- Pool reduced to 8 models: haiku removed (short-circuits as critic, malformed JSON as defender); maverick removed (same short-circuit pattern). Seeds patched.
+**Intervention priority (post question-4 + canary_run4):**
+- Options A+C + Stage 4 framing fix: both validated — probe_ac3 confirmed ETA recovery; Opus 4.6 test confirmed IDR failure is prompt calibration, not capability ceiling.
+- Question 4 (conclusion-survival test): added to DEFENDER.md + DEFENDER_R2.md. canary_run4 confirms IDR lift from 0.000 (run2) to ~0.60 while AER is dramatically better than backstop run3. Real signal.
+- FATAL DEFER backstop: **REVERTED** — over-fires on any FATAL DEFER, blocking legitimate ETA/defense_wins cases. DO NOT PORT. Smarter backstop would need a `conclusion_survives` field from DEFER output JSON.
+- IDR ceiling with Q4 alone: ~0.60 (705 regresses to ETA without backstop; 185 produces false CW on ETA case). Remaining IDR gap is partially addressable but requires either (a) field-level output from defenders confirming conclusion survival or (b) stronger Sonnet agents in ml-lab context.
+- Pool: 8 models. haiku and maverick removed. Seeds patched.
 
 ---
 
@@ -238,6 +243,8 @@ The prior canary iterations tested single-round (not either intended protocol). 
 | canary_run2 | single-round | REBUT-IMMATERIAL → MINOR; tighter caps; FATAL floor rule | 0.565 | — | — | 0.083 | — | +0.079 | Caps over-tightened: DER collapsed, IDR unchanged |
 | canary_multiround_run1 | multi-round | Restored caps; CONCEDE trigger; 3-outcome reframe; re-labeled 6 ETA cases | 0.471 | 0.786 | 0.739 | 0.000 | 0.773 | −0.107 | ETA over-prediction: DEFER free path, FATAL rule fires on partial rebuttals |
 | canary_multiround_run2 | multi-round | Substantive DEFER (3-question requirement) in DEFENDER.md + DEFENDER_R2.md | 0.588 | 0.536 | 0.217 | 0.600 | 0.227 | −0.064 | IDR recovered; AER collapsed (overcorrection) — IDR/AER tradeoff open |
+| canary_multiround_run3 | multi-round | Options A+C + Stage 4 fix + FATAL text-citation gate + Q4 + **FATAL DEFER backstop** | ~0.10 | est. | ~0.05 | ~0.80 | — | — | Backstop over-fires on all FATAL DEFERs: 862 (confirmed ETA) → 3/3 CW; widespread DW/ETA flip to CW. 20 failures (14.8%). Only 4 cases correct. Backstop reverted. [→ experiment acd59c3e] |
+| canary_multiround_run4 | multi-round | Same as run3 with backstop reverted; Q4 only | est. | est. | ~0.65 | ~0.60 | est. | est. | Q4 alone: IDR 0.000→~0.60 (801 2/2, 852 2/3, hyp_037 2/3). AER recovered vs run3. 705 regresses to ETA without backstop. 185 false CW on ETA case. 23 failures (17%). Net: meaningful improvement over run2 baseline. [→ experiment 3b22f651] |
 
 ---
 

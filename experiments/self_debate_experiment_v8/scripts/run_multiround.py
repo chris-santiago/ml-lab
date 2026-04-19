@@ -253,10 +253,6 @@ def derive_verdict(defender_output: dict) -> dict:
         elif rtype == "DEFER" and adj_sev <= 3:
             pv = "defense_wins"
             rule = f"constitutional: DEFER + adj_sev={adj_sev} ≤ 3 → defense_wins"
-        elif rtype == "DEFER" and orig_sev >= 7 and adj_sev >= 6:
-            pv = "critique_wins"
-            rule = (f"constitutional: DEFER + orig_sev={orig_sev} ≥ 7 + adj_sev={adj_sev} ≥ 6 "
-                    f"→ critique_wins (FATAL finding unresolved by DEFER)")
 
         point_verdicts.append({
             "finding_id": fid,
