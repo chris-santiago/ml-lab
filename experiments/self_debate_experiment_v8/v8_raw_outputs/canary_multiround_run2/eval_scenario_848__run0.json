@@ -1,0 +1,470 @@
+{
+  "case_id": "eval_scenario_848",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 30-day grace period for label finalization ensures high-quality labels without conflating label quality with model performance.",
+        "failure_mechanism": "The 30-day grace period may introduce a temporal bias where emails with delayed detections (e.g., those requiring incident response confirmation) are systematically different from emails with immediate detections. If the transformer model is better at identifying subtle or delayed phishing indicators (e.g., post-compromise behavior), it could appear to outperform the baseline not because of semantic understanding but because its predictions align more closely with the delayed labeling process. This would conflate model capability with label timing bias.",
+        "evidence_test": "Compare transformer and baseline performance on a subset of emails where labels are finalized within 7 days vs. those finalized after 7 days. If the transformer's uplift is concentrated in the delayed-label subset, the grace period may be introducing bias. Alternatively, hold out a subset of emails labeled within 7 days for both training and evaluation to ensure label timing does not influence results.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split (months 1\u201312 train, 13\u201315 validation, 16\u201318 test) ensures generalization to future, unseen campaigns.",
+        "failure_mechanism": "Phishing campaigns often span multiple months, and a campaign starting in month 12 could have near-duplicate or related emails in month 13 or later. While the split is chronological, it does not guarantee that test emails are temporally isolated from training emails in terms of campaign membership. This could lead to inflated performance if the transformer memorizes campaign-specific patterns rather than generalizing to novel campaigns. The near-duplicate removal (same sender, recipient, subject within 7 days) only addresses exact duplicates, not campaign-level leakage.",
+        "evidence_test": "Stratify test performance by campaign overlap: compare performance on emails from campaigns entirely new in the test period vs. campaigns that have emails in both training and test periods. If uplift is driven by the latter, the temporal split is insufficient to prevent campaign-level leakage. Alternatively, use a leave-one-campaign-out evaluation where entire campaigns are held out for testing.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The transformer model's uplift is due to semantic understanding of phishing emails rather than template memorization.",
+        "failure_mechanism": "The near-duplicate removal (same sender, recipient, subject within 7 days) only addresses exact or near-exact duplicates. Phishing campaigns often reuse templates with minor variations (e.g., different URLs, sender names, or timestamps). The transformer could still memorize campaign-specific templates or stylistic patterns (e.g., urgency language, sender impersonation) that generalize within a campaign but fail on novel campaigns. The campaign novelty stratification is a good step but may not capture template-level memorization.",
+        "evidence_test": "Evaluate the transformer and baseline on a held-out set of emails from campaigns entirely new in the test period, but with templates that are slight variations of training campaign templates (e.g., same subject line but different URLs). If the transformer's uplift persists, it suggests template memorization rather than semantic understanding. Alternatively, use synthetic template variations in the test set to explicitly test generalization to novel templates.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline model (logistic regression on header/URL features) is a fair and strong comparison for the transformer model.",
+        "failure_mechanism": "The baseline is logistic regression, which is a linear model and may struggle to capture complex interactions in header/URL features (e.g., combinations of SPF failures, URL domain age, and keyword matches). Modern baselines like gradient-boosted trees or even simple neural networks could outperform logistic regression on these features, making the comparison unfair. The baseline tuning (L2 regularization, class weights) may not be sufficient to match the transformer's capacity.",
+        "evidence_test": "Compare the logistic regression baseline against a gradient-boosted tree (e.g., XGBoost) or a simple neural network on the same header/URL features. If the latter outperforms logistic regression, the baseline is not strong enough to claim the transformer's uplift is meaningful. Alternatively, use a more sophisticated linear model (e.g., elastic net) or feature engineering to strengthen the baseline.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer model's performance on the label-uncertain cohort (unresolved after 30 days) tests robustness to label noise.",
+        "failure_mechanism": "The label-uncertain cohort is held out for robustness checks, but it is not used in the primary evaluation. If the transformer's uplift is driven by its ability to handle ambiguous or borderline cases (which may have higher label noise), excluding this cohort from the primary evaluation could mask a critical weakness. The label-uncertain cohort may represent a significant fraction of real-world phishing cases, and excluding it could overestimate performance.",
+        "evidence_test": "Include the label-uncertain cohort in the primary evaluation (with labels treated as noisy or probabilistic) and compare transformer and baseline performance. If the transformer's uplift diminishes or disappears, label noise is a critical confound. Alternatively, quantify the fraction of label-uncertain emails in the test set and report performance separately for this subset.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer model's performance on the held-out recent training cohort (months 10\u201312) quantifies temporal drift.",
+        "failure_mechanism": "Evaluating on a recent training cohort does not directly measure temporal drift in the test set. The recent training cohort may not reflect the distribution of the test set if phishing tactics evolve rapidly. The drift quantification is indirect and may not capture the true gap between training and deployment distributions.",
+        "evidence_test": "Compare transformer and baseline performance on the test set vs. the recent training cohort. If the performance gap is similar, temporal drift is minimal. If the gap widens on the test set, drift is significant. Alternatively, use a rolling window evaluation where models are trained on sliding windows of the training data and evaluated on the test set to directly measure drift.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The transformer model's use of focal loss or class-weighted cross-entropy handles class imbalance effectively.",
+        "failure_mechanism": "The choice of loss function (focal loss vs. class-weighted cross-entropy) is not motivated by empirical evidence. Focal loss is designed to handle extreme class imbalance by down-weighting easy examples, but it may not be optimal for phishing detection where the imbalance is severe but not extreme (e.g., 1:1000). Class-weighted cross-entropy is simpler and may perform comparably or better.",
+        "evidence_test": "Ablate the loss function choice: train the transformer with focal loss, class-weighted cross-entropy, and standard cross-entropy, and compare validation PR-AUC. If focal loss does not outperform the others, it is not necessary and could introduce unnecessary complexity.",
+        "flaw_category": "silent_misconfig"
+      }
+    ],
+    "summary": "The PoC has critical flaws in label timing bias, campaign-level leakage, and template memorization that could invalidate the core claim of semantic uplift. The baseline comparison and label noise robustness checks are also materially weak. Addressing these flaws is essential before drawing conclusions.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 claims the 30-day grace period introduces temporal bias. However, the grace period is applied uniformly to all labels regardless of the model being tested. Both the transformer and the baseline are evaluated against the same finalized labels. The 'bias' the critic describes is simply the nature of the ground truth; if an email is only discovered as phishing after 30 days, it is still phishing. The model's ability to detect it is a feature, not a flaw. This is a misunderstanding of label quality vs. label timing.\n\nF2 and F3 concern campaign-level leakage and template memorization. The critic argues that chronological splits and near-duplicate removal are insufficient. However, the design explicitly includes 'Confound Control (b)': stratifying test performance by campaign novelty (campaigns first seen in training vs. test period). This directly addresses the critic's concern by isolating performance on entirely new campaigns, which is the gold standard for detecting memorization in phishing.\n\nF4 suggests the logistic regression baseline is too weak. While a GBDT might be stronger, the goal of this PoC is to isolate the effect of *text modeling* (transformer) vs. *metadata/header modeling* (baseline). Using a linear model for the baseline is a standard starting point to establish a floor. However, the critic makes a fair point that a non-linear baseline would be more rigorous. This is a material point but doesn't invalidate the current hypothesis test; it just suggests a stronger baseline.\n\nF5 argues that excluding label-uncertain emails masks weaknesses. The design intent is to ensure the primary metric is based on high-confidence ground truth to avoid noise. The 'robustness check' on the uncertain cohort is exactly where this analysis happens. Including them in the primary PR-AUC would contaminate the metric with noise, which is why they are handled separately.\n\nF6 claims the recent training cohort (months 10-12) doesn't measure drift. The intent of this cohort is to establish a 'baseline' performance on data the model has seen (or is close to) to compare against the test set (months 16-18). This is a standard way to quantify the 'drop' associated with temporal drift. The critic's suggestion of a rolling window is a more complex evaluation strategy, but the current approach is a valid first-order approximation for a PoC.\n\nF7 is a minor point about the choice of loss function. The design states the choice is 'to be determined in ablation,' meaning it is already planned as a variable to be tested, not a fixed, unmotivated choice.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The grace period is a label-generation protocol, not a model-specific feature. Since both the transformer and baseline are evaluated against the same finalized labels, any 'bias' in which emails are labeled is constant across both models. The ability of a model to detect 'delayed' phishing is the objective of the system, not a confound."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The design explicitly addresses campaign-level leakage in 'Confound Controls (b)', where performance is stratified by campaign novelty. This separates results for campaigns seen in training from those entirely new in the test period, directly mitigating the risk of campaign-specific memorization."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "Similar to F2, the campaign novelty stratification in 'Confound Controls (b)' is the primary mechanism to detect template memorization. If the transformer's uplift persists on campaigns entirely new to the test period, the 'template memorization' hypothesis is rejected."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic is correct that a non-linear baseline (e.g., XGBoost) would provide a more rigorous comparison of feature sets, as logistic regression may underfit the header/URL interactions."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The design intentionally separates the label-uncertain cohort into a 'separate robustness check' to prevent label noise from contaminating the primary PR-AUC metric. This is a deliberate choice to ensure the primary conclusion is based on verified ground truth."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Evaluating on months 10-12 provides a performance benchmark on 'near-term' data to compare against the 'future' test set (16-18). This is a valid method for quantifying the magnitude of the performance drop caused by drift."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The choice of loss function is explicitly listed as an item for ablation in Section 4, meaning it is not a fixed assumption but a parameter to be optimized."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Most findings were rebutted by existing design controls (campaign novelty stratification and label protocols). However, the critique regarding the baseline model (F4) was conceded as a material point, requiring a stronger baseline (e.g., GBDT) to fully validate the transformer's uplift."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The defender argues that the grace period is a label-generation protocol and thus any 'bias' is constant across models. However, this does not address the core failure mechanism: the transformer may align better with delayed labels *because it detects subtle indicators that take time to confirm*, not because it is a better model. The rebuttal conflates label timing with model capability. The suggested evidence test (comparing performance on early vs. delayed labels) is not addressed in the rebuttal, leaving the temporal bias unresolved."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The defender directly addresses the failure mechanism by pointing to the campaign novelty stratification in 'Confound Controls (b)', which explicitly separates results for campaigns seen in training vs. entirely new in the test period. This mechanism directly tests for campaign-level memorization, resolving the concern."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The defender correctly identifies that the campaign novelty stratification in 'Confound Controls (b)' is the primary mechanism to detect template memorization. If uplift persists on novel campaigns, the hypothesis is rejected. This directly addresses the failure mechanism."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 6,
+        "reasoning": "The defender concedes the finding, acknowledging that a non-linear baseline (e.g., XGBoost) would provide a more rigorous comparison. This fully resolves the concern."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The defender argues that excluding the label-uncertain cohort is deliberate to ensure the primary metric is based on verified ground truth. While this reduces the concern, it does not fully resolve it: the label-uncertain cohort may represent a significant fraction of real-world cases, and excluding it could still overestimate performance. The rebuttal does not address the evidence test (including the cohort in primary evaluation) or quantify its impact."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The defender explains that evaluating on months 10\u201312 provides a benchmark to quantify the performance drop due to drift, which directly addresses the failure mechanism. This is a valid method for measuring temporal drift."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The defender states that the loss function choice is explicitly listed as an ablation item, meaning it is not a fixed assumption. This directly addresses the concern that the choice was not motivated by empirical evidence."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I am maintaining my position on F1 and F5. For F1, the critic's challenge mischaracterizes the nature of a label-generation protocol; if a model is better at detecting 'subtle' indicators that take time to confirm, that is a genuine capability of the model, not a bias of the design. For F5, the separation of the uncertain cohort is a standard data-quality control to ensure the primary metric is grounded in truth, though I will clarify the robustness check's role. F2, F3, F4, F6, and F7 are already accepted or conceded.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The critic's challenge suggests that if the transformer is better at identifying 'subtle indicators' that are only confirmed via delayed labeling, this is a 'bias'. This is a fundamental misunderstanding of the objective. The goal of the investigation is to determine if the transformer outperforms the baseline. If the transformer can identify subtle phishing indicators that the baseline cannot\u2014regardless of whether those indicators take 1 day or 30 days to be confirmed by a human analyst\u2014that is a genuine performance uplift, not a design flaw. The 30-day grace period ensures that the ground truth is accurate. Since both models are evaluated against the same ground truth, the 'timing' of the label is a constant. The transformer's ability to align with these labels is the signal we are measuring, not a confound.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The design explicitly addresses campaign-level leakage in 'Confound Controls (b)', where performance is stratified by campaign novelty. This separates results for campaigns seen in training from those entirely new in the test period, directly mitigating the risk of campaign-specific memorization.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "Similar to F2, the campaign novelty stratification in 'Confound Controls (b)' is the primary mechanism to detect template memorization. If the transformer's uplift persists on campaigns entirely new to the test period, the 'template memorization' hypothesis is rejected.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic is correct that a non-linear baseline (e.g., XGBoost) would provide a more rigorous comparison of feature sets, as logistic regression may underfit the header/URL interactions.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The exclusion of the label-uncertain cohort from the primary PR-AUC is a deliberate choice to ensure the primary metric is based on verified ground truth. However, the design does not ignore this cohort; it is used in a 'separate robustness check'. This allows the researchers to quantify the performance gap between 'certain' and 'uncertain' cases without polluting the primary evaluation metric with noise. This is a standard approach to handle label ambiguity in high-stakes security contexts.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Evaluating on months 10-12 provides a performance benchmark on 'near-term' data to compare against the 'future' test set (16-18). This is a valid method for quantifying the magnitude of the performance drop caused by drift.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The choice of loss function is explicitly listed as an item for ablation in Section 4, meaning it is not a fixed assumption but a parameter to be optimized.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "While most findings were successfully rebutted or minimized, F4 was conceded and remains at a material severity (6), meaning the baseline is acknowledged as insufficient to fully isolate the transformer's semantic uplift."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 30-day grace period for label finalization ensures high-quality labels without conflating label quality with model performance.",
+        "failure_mechanism": "The 30-day grace period may introduce a temporal bias where emails with delayed detections (e.g., those requiring incident response confirmation) are systematically different from emails with immediate detections. If the transformer model is better at identifying subtle or delayed phishing indicators (e.g., post-compromise behavior), it could appear to outperform the baseline not because of semantic understanding but because its predictions align more closely with the delayed labeling process. This would conflate model capability with label timing bias.",
+        "evidence_test": "Compare transformer and baseline performance on a subset of emails where labels are finalized within 7 days vs. those finalized after 7 days. If the transformer's uplift is concentrated in the delayed-label subset, the grace period may be introducing bias. Alternatively, hold out a subset of emails labeled within 7 days for both training and evaluation to ensure label timing does not influence results.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split (months 1\u201312 train, 13\u201315 validation, 16\u201318 test) ensures generalization to future, unseen campaigns.",
+        "failure_mechanism": "Phishing campaigns often span multiple months, and a campaign starting in month 12 could have near-duplicate or related emails in month 13 or later. While the split is chronological, it does not guarantee that test emails are temporally isolated from training emails in terms of campaign membership. This could lead to inflated performance if the transformer memorizes campaign-specific patterns rather than generalizing to novel campaigns. The near-duplicate removal (same sender, recipient, subject within 7 days) only addresses exact duplicates, not campaign-level leakage.",
+        "evidence_test": "Stratify test performance by campaign overlap: compare performance on emails from campaigns entirely new in the test period vs. campaigns that have emails in both training and test periods. If uplift is driven by the latter, the temporal split is insufficient to prevent campaign-level leakage. Alternatively, use a leave-one-campaign-out evaluation where entire campaigns are held out for testing.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The transformer model's uplift is due to semantic understanding of phishing emails rather than template memorization.",
+        "failure_mechanism": "The near-duplicate removal (same sender, recipient, subject within 7 days) only addresses exact or near-exact duplicates. Phishing campaigns often reuse templates with minor variations (e.g., different URLs, sender names, or timestamps). The transformer could still memorize campaign-specific templates or stylistic patterns (e.g., urgency language, sender impersonation) that generalize within a campaign but fail on novel campaigns. The campaign novelty stratification is a good step but may not capture template-level memorization.",
+        "evidence_test": "Evaluate the transformer and baseline on a held-out set of emails from campaigns entirely new in the test period, but with templates that are slight variations of training campaign templates (e.g., same subject line but different URLs). If the transformer's uplift persists, it suggests template memorization rather than semantic understanding. Alternatively, use synthetic template variations in the test set to explicitly test generalization to novel templates.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline model (logistic regression on header/URL features) is a fair and strong comparison for the transformer model.",
+        "failure_mechanism": "The baseline is logistic regression, which is a linear model and may struggle to capture complex interactions in header/URL features (e.g., combinations of SPF failures, URL domain age, and keyword matches). Modern baselines like gradient-boosted trees or even simple neural networks could outperform logistic regression on these features, making the comparison unfair. The baseline tuning (L2 regularization, class weights) may not be sufficient to match the transformer's capacity.",
+        "evidence_test": "Compare the logistic regression baseline against a gradient-boosted tree (e.g., XGBoost) or a simple neural network on the same header/URL features. If the latter outperforms logistic regression, the baseline is not strong enough to claim the transformer's uplift is meaningful. Alternatively, use a more sophisticated linear model (e.g., elastic net) or feature engineering to strengthen the baseline.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer model's performance on the label-uncertain cohort (unresolved after 30 days) tests robustness to label noise.",
+        "failure_mechanism": "The label-uncertain cohort is held out for robustness checks, but it is not used in the primary evaluation. If the transformer's uplift is driven by its ability to handle ambiguous or borderline cases (which may have higher label noise), excluding this cohort from the primary evaluation could mask a critical weakness. The label-uncertain cohort may represent a significant fraction of real-world phishing cases, and excluding it could overestimate performance.",
+        "evidence_test": "Include the label-uncertain cohort in the primary evaluation (with labels treated as noisy or probabilistic) and compare transformer and baseline performance. If the transformer's uplift diminishes or disappears, label noise is a critical confound. Alternatively, quantify the fraction of label-uncertain emails in the test set and report performance separately for this subset.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer model's performance on the held-out recent training cohort (months 10\u201312) quantifies temporal drift.",
+        "failure_mechanism": "Evaluating on a recent training cohort does not directly measure temporal drift in the test set. The recent training cohort may not reflect the distribution of the test set if phishing tactics evolve rapidly. The drift quantification is indirect and may not capture the true gap between training and deployment distributions.",
+        "evidence_test": "Compare transformer and baseline performance on the test set vs. the recent training cohort. If the performance gap is similar, temporal drift is minimal. If the gap widens on the test set, drift is significant. Alternatively, use a rolling window evaluation where models are trained on sliding windows of the training data and evaluated on the test set to directly measure drift.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The transformer model's use of focal loss or class-weighted cross-entropy handles class imbalance effectively.",
+        "failure_mechanism": "The choice of loss function (focal loss vs. class-weighted cross-entropy) is not motivated by empirical evidence. Focal loss is designed to handle extreme class imbalance by down-weighting easy examples, but it may not be optimal for phishing detection where the imbalance is severe but not extreme (e.g., 1:1000). Class-weighted cross-entropy is simpler and may perform comparably or better.",
+        "evidence_test": "Ablate the loss function choice: train the transformer with focal loss, class-weighted cross-entropy, and standard cross-entropy, and compare validation PR-AUC. If focal loss does not outperform the others, it is not necessary and could introduce unnecessary complexity.",
+        "flaw_category": "silent_misconfig"
+      }
+    ],
+    "summary": "The PoC has critical flaws in label timing bias, campaign-level leakage, and template memorization that could invalidate the core claim of semantic uplift. The baseline comparison and label noise robustness checks are also materially weak. Addressing these flaws is essential before drawing conclusions.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I am maintaining my position on F1 and F5. For F1, the critic's challenge mischaracterizes the nature of a label-generation protocol; if a model is better at detecting 'subtle' indicators that take time to confirm, that is a genuine capability of the model, not a bias of the design. For F5, the separation of the uncertain cohort is a standard data-quality control to ensure the primary metric is grounded in truth, though I will clarify the robustness check's role. F2, F3, F4, F6, and F7 are already accepted or conceded.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The critic's challenge suggests that if the transformer is better at identifying 'subtle indicators' that are only confirmed via delayed labeling, this is a 'bias'. This is a fundamental misunderstanding of the objective. The goal of the investigation is to determine if the transformer outperforms the baseline. If the transformer can identify subtle phishing indicators that the baseline cannot\u2014regardless of whether those indicators take 1 day or 30 days to be confirmed by a human analyst\u2014that is a genuine performance uplift, not a design flaw. The 30-day grace period ensures that the ground truth is accurate. Since both models are evaluated against the same ground truth, the 'timing' of the label is a constant. The transformer's ability to align with these labels is the signal we are measuring, not a confound.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The design explicitly addresses campaign-level leakage in 'Confound Controls (b)', where performance is stratified by campaign novelty. This separates results for campaigns seen in training from those entirely new in the test period, directly mitigating the risk of campaign-specific memorization.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "Similar to F2, the campaign novelty stratification in 'Confound Controls (b)' is the primary mechanism to detect template memorization. If the transformer's uplift persists on campaigns entirely new to the test period, the 'template memorization' hypothesis is rejected.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic is correct that a non-linear baseline (e.g., XGBoost) would provide a more rigorous comparison of feature sets, as logistic regression may underfit the header/URL interactions.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The exclusion of the label-uncertain cohort from the primary PR-AUC is a deliberate choice to ensure the primary metric is based on verified ground truth. However, the design does not ignore this cohort; it is used in a 'separate robustness check'. This allows the researchers to quantify the performance gap between 'certain' and 'uncertain' cases without polluting the primary evaluation metric with noise. This is a standard approach to handle label ambiguity in high-stakes security contexts.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Evaluating on months 10-12 provides a performance benchmark on 'near-term' data to compare against the 'future' test set (16-18). This is a valid method for quantifying the magnitude of the performance drop caused by drift.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The choice of loss function is explicitly listed as an item for ablation in Section 4, meaning it is not a fixed assumption but a parameter to be optimized.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "While most findings were successfully rebutted or minimized, F4 was conceded and remains at a material severity (6), meaning the baseline is acknowledged as insufficient to fully isolate the transformer's semantic uplift."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=6, CONCEDE \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

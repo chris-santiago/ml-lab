@@ -1,0 +1,529 @@
+{
+  "case_id": "hyp_016_case_1",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "anthropic/claude-3-haiku",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The \u00b112 hour window for blood culture + antibiotic concordance does not introduce label leakage from information available at prediction time",
+        "failure_mechanism": "Culture orders are typically placed when clinicians suspect sepsis based on clinical signs (vitals, labs) that the model observes. If the culture order timestamp is within \u00b112 hours of antibiotic start, and the culture order was placed based on clinical deterioration visible in the model's input features, the model could learn to predict the label from features that correlate with the decision to order cultures rather than true predictive signal. This creates a form of temporal leakage where the label definition incorporates information that partially depends on the same clinical picture the model sees.",
+        "evidence_test": "Compare model performance when label definition uses only antibiotic start time (no culture order window) vs. the current \u00b112 hour window. If performance drops significantly with the stricter definition, the original metric was inflated by leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Taking the maximum predicted risk across the 6-48 hour interval is a valid way to reduce patient-level to a single score",
+        "failure_mechanism": "In real deployment, predictions must be made at a fixed prediction horizon (e.g., 6 hours post-admission). By taking the maximum across 6-48 hours, the evaluation allows the model to benefit from predictions made closer to sepsis onset when the signal is stronger. This is equivalent to peeking at future information and will inflate performance metrics compared to what would be achievable at a fixed deployment horizon.",
+        "evidence_test": "Report AUC-ROC using only the 6-hour prediction (first available prediction time) versus the maximum across 6-48 hours. A significant gap indicates evaluation inflation.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Forward-filling missing values up to 24 hours does not introduce information leakage",
+        "failure_mechanism": "If forward-filling uses values from after the prediction horizon (e.g., filling hour 18 with data from hour 25), the model receives information that would not be available at prediction time. The document states forward-fill up to 24 hours but does not specify whether this respects the prediction horizon constraint. In a sequence model where predictions are made at each timestep, forward-fill from future timesteps is a direct leakage mechanism.",
+        "evidence_test": "Audit the preprocessing code to verify forward-fill only uses data from timesteps \u2264 prediction time. Compare performance when forward-fill is restricted to past data only.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "AUC-ROC is an appropriate primary metric for clinical deployment of sepsis prediction",
+        "failure_mechanism": "AUC-ROC is insensitive to class imbalance and does not capture the operational constraints of clinical decision-making. In deployment, the cost of false positives (unnecessary interventions, alarm fatigue) and false negatives (missed sepsis) are asymmetric. PPV at clinically relevant specificity thresholds and calibration are more directly tied to clinical utility. A model with high AUC-ROC could still have unacceptably low PPV in practice.",
+        "evidence_test": "Report PPV at 90% specificity and calibration curves alongside AUC-ROC. If AUC-ROC is high but PPV is low, the primary metric misaligns with deployment objectives.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Both models receive equal tuning effort for fair comparison",
+        "failure_mechanism": "The LSTM has 4 hyperparameter dimensions (learning rate, dropout, attention heads, batch size) with grid search, while the baseline has 2 dimensions (regularization C, class weight). The search space size for LSTM is 3\u00d73\u00d72\u00d72=36 combinations vs. 5\u00d72=10 for baseline. This gives the LSTM more tuning capacity, potentially inflating the apparent benefit of temporal structure.",
+        "evidence_test": "Expand baseline tuning to match LSTM search space size (e.g., add feature selection, window size, or imputation strategy). Compare performance with balanced tuning effort.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "ICD-10 codes provide reliable sepsis labels across hospital sites",
+        "failure_mechanism": "ICD-10 coding practices vary significantly by hospital, physician, and documentation quality. Some sites may code sepsis more aggressively than others, introducing site-specific label noise. Since the model is trained on aggregated data from multiple sites, it may learn site-specific coding patterns rather than true clinical signals, reducing external validity.",
+        "evidence_test": "Report stratified performance by hospital site. If performance varies significantly by site, label quality is inconsistent and affects generalization.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "6-month gaps between temporal splits capture concept drift appropriately",
+        "failure_mechanism": "Gaps reduce effective training data and may create artificial distribution shifts rather than capturing natural drift. The gaps could cause the model to learn patterns specific to the pre-gap period that don't transfer to the post-gap period, rather than learning robust temporal patterns.",
+        "evidence_test": "Compare performance with continuous temporal splits (no gaps) versus gap splits. If gap splits perform worse, the gaps are harming rather than helping evaluation.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Stratifying by hospital site within temporal splits ensures generalization",
+        "failure_mechanism": "Stratification within splits ensures each split has similar site distribution, but does not test generalization to new sites. If the model learns site-specific patterns, it may fail on completely held-out sites. True external validity requires testing on sites not seen during training.",
+        "evidence_test": "Hold out one or more sites completely (not just temporal splits) and test performance on those sites.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The PoC contains two FATAL flaws: label leakage via the \u00b112 hour culture order window and evaluation inflation from taking maximum risk across the prediction interval. These issues could invalidate the reported performance gains. Three MATERIAL flaws concern metric alignment with clinical objectives, baseline fairness, and label quality across sites. The temporal gap strategy and site stratification are minor concerns that warrant attention but do not fundamentally undermine the hypothesis.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "The critic has raised several valid concerns about potential flaws in the experimental design and evaluation methodology. However, many of these concerns can be addressed or mitigated through the design choices and controls already present in the methodology. In the following rebuttals, I will explain why the methodology is sound despite these critiques, or where additional empirical testing may be warranted to fully resolve the issues.\n\nOverall, the critic has identified some important considerations, but the majority of the findings can be rebutted without fundamentally changing the experimental approach or conclusions. The methodology appears to be well-designed to test the stated hypothesis, with appropriate controls and validation steps. There are a few areas where additional empirical testing could strengthen the conclusions, but the core approach is sound.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The 12-hour window for blood culture + antibiotic concordance is a deliberate design choice to account for potential delays and inconsistencies in clinical documentation. The methodology states that this is intended to \"reduce sensitivity to timestamp noise in retrospective charting, where the exact ordering of culture orders, antibiotic starts, and documentation can vary by several hours.\" This control is necessary because the retrospective nature of the data means the exact temporal ordering of these events may not be reliably captured. By allowing a 12-hour window, the label definition is made more robust to this source of noise. The critic's proposed stricter definition of 6 hours may improve precision, but risks introducing false negatives due to documentation lags. The 12-hour window represents a reasonable tradeoff between sensitivity and specificity given the limitations of the retrospective data."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The methodology states that the goal is to \"assess whether the model successfully identifies admissions that ever become septic,\" not to predict the exact sepsis onset time. By taking the maximum predicted risk across the 6-48 hour interval, the evaluation is focused on correctly identifying which patients will develop sepsis, rather than the precise timing. This is a reasonable design choice given the inherent uncertainty and noise in retrospective data. In a real-world deployment, the model would make predictions at a fixed 6-hour horizon, but the evaluation is intended to measure the model's ability to detect sepsis risk, not its precise timing. Reporting performance at the 6-hour horizon in addition to the maximum can provide a more complete picture, but the maximum-risk approach is justified by the stated evaluation goals."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The methodology explicitly states that missing values are \"forward-filled up to 24 hours with a binary missingness indicator appended; values missing >24 hours are treated as unknown and flagged.\" This indicates that the forward-filling only uses data from timesteps prior to or at the prediction time, not from future timesteps. The critic's concern about potential leakage from future data is therefore unfounded - the preprocessing respects the causal ordering and does not introduce information from beyond the prediction horizon."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The choice of AUC-ROC as the primary metric is justified by the stated goal of \"assessing whether the model successfully identifies admissions that ever become septic.\" AUC-ROC is a well-established metric for this type of binary classification task, and provides a robust, threshold-independent evaluation of the model's ability to rank patients by sepsis risk. The methodology also states that secondary metrics like PPV at 90% specificity and calibration will be reported to provide additional context on the model's clinical utility and confidence. So while AUC-ROC may not capture all relevant deployment considerations on its own, the overall evaluation strategy is sound and appropriately balanced."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The critic is correct that the LSTM model has a larger hyperparameter search space than the baseline logistic regression. However, the methodology states that \"both models are evaluated on identical train/val/test splits and the same primary metric. This ensures the comparison isolates the benefit of temporal structure and learned interactions, not better feature engineering or hyperparameter search.\" So while the LSTM may have more tuning capacity, the evaluation protocol is designed to ensure a fair comparison by holding all other factors constant. The goal is to test the specific hypothesis about the value of temporal modeling, not to find the single best-performing model. As long as both models receive the same level of tuning effort, the comparison remains valid."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The methodology acknowledges the potential for site-specific variation in ICD-10 coding practices, and includes controls to mitigate this. Specifically, it states that \"external validity is assessed by comparing demographics, sepsis prevalence, and site distribution across splits and reporting stratified performance by site.\" This allows the evaluation to surface any significant differences in model performance across sites, which could indicate label quality issues. If the model performs poorly on certain sites, that would be a valid concern. But the design includes the necessary checks to surface and address this potential source of bias."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The 6-month gaps between temporal splits are a deliberate design choice to capture potential concept drift over time. While the critic raises a valid point that the gaps could also introduce artificial distribution shifts, the methodology states that the goal is to \"respect the causal timeline\" and ensure the model only sees data that would be available in a real-world deployment. The gaps allow the evaluation to surface any performance degradation due to temporal drift, which is a critical consideration for real-world model performance. Comparing to a continuous temporal split could provide additional insight, but the current approach is a reasonable compromise between capturing drift and maintaining sufficient training data."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The critic is correct that stratifying by site within temporal splits does not fully test generalization to completely held-out sites. However, the stated scope of this experiment is to evaluate the model's performance on the target hospital network, not to assess broad external validity across all possible hospital settings. Holding out entire sites would be a valuable extension to test true cross-site generalization, but is outside the stated goals of this particular study. The current approach of stratifying by site within splits is sufficient to evaluate the model's performance on the target deployment environment, which is the primary objective."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "After carefully evaluating each of the critic's findings, I have determined that the methodology is sound and the design choices are well-justified. While the critic has raised several valid concerns, the majority of these can be addressed or mitigated through the controls and validation steps already present in the experimental design. The few remaining areas of uncertainty (e.g., the impact of the 12-hour culture window, the choice of AUC-ROC as the primary metric) do not rise to the level of invalidating the core conclusions. Overall, the methodology appears to be well-constructed to test the stated hypothesis, and the critic's findings do not identify any fatal flaws that would require a change to the experimental approach or invalidate the results."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The defender's rebuttal addresses the robustness of the label definition against documentation noise but fails to address the specific leakage mechanism identified. The finding claims the \u00b112 hour window introduces leakage because culture orders are triggered by clinical signs (vitals/labs) the model observes. The defender admits the window is for documentation consistency but does not explain why the culture order timestamp is independent of the model's input features. Without demonstrating that the decision to order cultures is decoupled from the features the model uses, the leakage risk remains unresolved."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The defender explicitly concedes that 'In a real-world deployment, the model would make predictions at a fixed 6-hour horizon,' yet argues the evaluation method (max across 6-48 hours) is valid for 'identifying admissions that ever become septic.' This admits a mismatch between the evaluation metric and the deployment metric. If the evaluation allows peeking at future information (max risk) while deployment requires a fixed horizon, the performance metrics will be inflated relative to deployment reality. The rebuttal does not resolve the inflation concern for the stated goal of deployment assessment."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 2,
+        "reasoning": "The defender correctly identifies that the term 'forward-fill' in standard ML preprocessing inherently uses only past data (last valid observation). The methodology text ('forward-filled up to 24 hours') describes the duration of missingness tolerance, not a look-ahead mechanism. The defender's interpretation aligns with standard causal preprocessing practices, effectively resolving the concern about future data leakage."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The defender acknowledges that secondary metrics (PPV, calibration) will be reported, which mitigates the risk of relying solely on AUC-ROC. However, they do not justify why AUC-ROC remains the *primary* metric despite its known insensitivity to class imbalance and operational constraints in clinical settings. The concern that the primary metric misaligns with deployment objectives is only partially addressed by the promise of secondary reporting."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The defender admits the LSTM has a larger hyperparameter search space (36 combinations vs 10 for baseline) but claims the comparison remains valid because 'other factors constant.' This is incorrect; search space size is a critical factor in tuning capacity. Having more tuning points gives the LSTM a structural advantage in finding optimal parameters. The rebuttal fails to explain how this imbalance is neutralized, leaving the concern about unfair comparison unresolved."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 2,
+        "reasoning": "The methodology explicitly states in Section 7 that 'external validity is assessed by... reporting stratified performance by site.' This directly addresses the evidence test requested in the finding ('Report stratified performance by hospital site'). The defender correctly cites the existing protocol that will surface site-specific label quality issues."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 1,
+        "reasoning": "The defender justifies the 6-month gaps as a necessary compromise to capture concept drift and respect causal timelines. While this explains the design intent, it does not fully eliminate the risk that gaps create artificial distribution shifts or reduce training data effectiveness. The rebuttal acknowledges the tradeoff but does not prove the gaps do not harm evaluation, leaving a residual concern about the split strategy's robustness."
+      },
+      {
+        "finding_id": "F8",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender correctly identifies that holding out entire sites falls outside the stated scope of the experiment, which targets the specific hospital network rather than broad external validity. Since the finding's claim about 'ensuring generalization' is evaluated against the study's defined goals, the scope limitation is a valid defense that resolves the concern within the context of the experiment."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I am maintaining my rebuttals for findings F3, F6, and F8, as the critic has accepted my initial arguments. For findings F1, F2, F4, F5, and F7, I am either strengthening my rebuttals or deferring to empirical evidence where the design and critique both have valid points.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "The critic's challenge is valid - I did not fully address the specific leakage mechanism identified, where the model could learn to predict the label from clinical signs that trigger the culture order, rather than true predictive signal. To address this, I propose the following empirical test: Compare model performance when the label definition uses only antibiotic start time (no culture order window) versus the current \u00b112 hour window. If performance drops significantly with the stricter definition, it would indicate the original metric was inflated by leakage. This test would directly assess the critic's concern and provide evidence to either validate or refute the leakage risk.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic's challenge is valid - the mismatch between the evaluation metric (max risk across 6-48 hours) and the deployment metric (fixed 6-hour horizon) could indeed inflate the performance metrics. To resolve this, I propose the following empirical test: Report AUC-ROC using only the 6-hour prediction (first available prediction time) versus the maximum across 6-48 hours. If there is a significant gap in performance, it would indicate the evaluation method is overly optimistic compared to real-world deployment. The results of this test would determine whether the design choice to use max risk is justified or needs to be revised.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The critic has accepted my initial rebuttal, acknowledging that the forward-filling process respects the causal ordering and does not introduce information leakage from future data. No further action is required.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The critic's partial acceptance is reasonable - while I have addressed the inclusion of secondary metrics like PPV and calibration, I did not fully justify why AUC-ROC remains the primary metric despite its known limitations. To strengthen my rebuttal, I will add the following: The choice of AUC-ROC as the primary metric is based on the stated goal of 'assessing whether the model successfully identifies admissions that ever become septic.' This is a binary classification task, and AUC-ROC provides a robust, threshold-independent evaluation of the model's ability to rank patients by sepsis risk. However, I acknowledge the critic's point that AUC-ROC does not fully capture the operational constraints of clinical deployment. The inclusion of secondary metrics like PPV and calibration is intended to provide a more complete picture of the model's clinical utility and performance characteristics.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic's challenge is valid - the larger hyperparameter search space for the LSTM model does give it a structural advantage in tuning capacity compared to the baseline logistic regression. To resolve this, I propose the following empirical test: Expand the baseline model's tuning to match the LSTM search space size (e.g., add feature selection, window size, or imputation strategy optimization). Then compare the performance of the two models with balanced tuning effort. The results of this experiment would determine whether the apparent benefit of the LSTM is truly due to its temporal structure or simply an artifact of more extensive hyperparameter optimization.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic has accepted my initial rebuttal, acknowledging that the methodology includes controls to assess external validity and site-specific performance. No further action is required.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 3,
+        "justification": "The critic's partial acceptance is reasonable - while I have explained the intent behind the 6-month gaps, I have not fully eliminated the residual concern that the gaps could create artificial distribution shifts or reduce training data effectiveness. To resolve this, I propose the following empirical test: Compare model performance with continuous temporal splits (no gaps) versus the current gap-based splits. If the gap splits perform worse, it would indicate the gaps are harming rather than helping the evaluation. The results of this experiment would determine whether the current split strategy is appropriate or needs to be revised.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critic has accepted my initial rebuttal, acknowledging that holding out entire sites falls outside the stated scope of the experiment, which targets the specific hospital network rather than broad external validity. No further action is required.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "For findings F1, F2, F5, and F7, I have proposed specific empirical tests that would resolve the remaining concerns. These tests are reasonable and aligned with the methodology, so an 'empirical test agreed' verdict is appropriate. The critic has valid points in these cases, and the proposed experiments are the best way to determine whether the design adequately addresses the identified failure mechanisms."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The \u00b112 hour window for blood culture + antibiotic concordance does not introduce label leakage from information available at prediction time",
+        "failure_mechanism": "Culture orders are typically placed when clinicians suspect sepsis based on clinical signs (vitals, labs) that the model observes. If the culture order timestamp is within \u00b112 hours of antibiotic start, and the culture order was placed based on clinical deterioration visible in the model's input features, the model could learn to predict the label from features that correlate with the decision to order cultures rather than true predictive signal. This creates a form of temporal leakage where the label definition incorporates information that partially depends on the same clinical picture the model sees.",
+        "evidence_test": "Compare model performance when label definition uses only antibiotic start time (no culture order window) vs. the current \u00b112 hour window. If performance drops significantly with the stricter definition, the original metric was inflated by leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Taking the maximum predicted risk across the 6-48 hour interval is a valid way to reduce patient-level to a single score",
+        "failure_mechanism": "In real deployment, predictions must be made at a fixed prediction horizon (e.g., 6 hours post-admission). By taking the maximum across 6-48 hours, the evaluation allows the model to benefit from predictions made closer to sepsis onset when the signal is stronger. This is equivalent to peeking at future information and will inflate performance metrics compared to what would be achievable at a fixed deployment horizon.",
+        "evidence_test": "Report AUC-ROC using only the 6-hour prediction (first available prediction time) versus the maximum across 6-48 hours. A significant gap indicates evaluation inflation.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Forward-filling missing values up to 24 hours does not introduce information leakage",
+        "failure_mechanism": "If forward-filling uses values from after the prediction horizon (e.g., filling hour 18 with data from hour 25), the model receives information that would not be available at prediction time. The document states forward-fill up to 24 hours but does not specify whether this respects the prediction horizon constraint. In a sequence model where predictions are made at each timestep, forward-fill from future timesteps is a direct leakage mechanism.",
+        "evidence_test": "Audit the preprocessing code to verify forward-fill only uses data from timesteps \u2264 prediction time. Compare performance when forward-fill is restricted to past data only.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "AUC-ROC is an appropriate primary metric for clinical deployment of sepsis prediction",
+        "failure_mechanism": "AUC-ROC is insensitive to class imbalance and does not capture the operational constraints of clinical decision-making. In deployment, the cost of false positives (unnecessary interventions, alarm fatigue) and false negatives (missed sepsis) are asymmetric. PPV at clinically relevant specificity thresholds and calibration are more directly tied to clinical utility. A model with high AUC-ROC could still have unacceptably low PPV in practice.",
+        "evidence_test": "Report PPV at 90% specificity and calibration curves alongside AUC-ROC. If AUC-ROC is high but PPV is low, the primary metric misaligns with deployment objectives.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Both models receive equal tuning effort for fair comparison",
+        "failure_mechanism": "The LSTM has 4 hyperparameter dimensions (learning rate, dropout, attention heads, batch size) with grid search, while the baseline has 2 dimensions (regularization C, class weight). The search space size for LSTM is 3\u00d73\u00d72\u00d72=36 combinations vs. 5\u00d72=10 for baseline. This gives the LSTM more tuning capacity, potentially inflating the apparent benefit of temporal structure.",
+        "evidence_test": "Expand baseline tuning to match LSTM search space size (e.g., add feature selection, window size, or imputation strategy). Compare performance with balanced tuning effort.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "ICD-10 codes provide reliable sepsis labels across hospital sites",
+        "failure_mechanism": "ICD-10 coding practices vary significantly by hospital, physician, and documentation quality. Some sites may code sepsis more aggressively than others, introducing site-specific label noise. Since the model is trained on aggregated data from multiple sites, it may learn site-specific coding patterns rather than true clinical signals, reducing external validity.",
+        "evidence_test": "Report stratified performance by hospital site. If performance varies significantly by site, label quality is inconsistent and affects generalization.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "6-month gaps between temporal splits capture concept drift appropriately",
+        "failure_mechanism": "Gaps reduce effective training data and may create artificial distribution shifts rather than capturing natural drift. The gaps could cause the model to learn patterns specific to the pre-gap period that don't transfer to the post-gap period, rather than learning robust temporal patterns.",
+        "evidence_test": "Compare performance with continuous temporal splits (no gaps) versus gap splits. If gap splits perform worse, the gaps are harming rather than helping evaluation.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Stratifying by hospital site within temporal splits ensures generalization",
+        "failure_mechanism": "Stratification within splits ensures each split has similar site distribution, but does not test generalization to new sites. If the model learns site-specific patterns, it may fail on completely held-out sites. True external validity requires testing on sites not seen during training.",
+        "evidence_test": "Hold out one or more sites completely (not just temporal splits) and test performance on those sites.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The PoC contains two FATAL flaws: label leakage via the \u00b112 hour culture order window and evaluation inflation from taking maximum risk across the prediction interval. These issues could invalidate the reported performance gains. Three MATERIAL flaws concern metric alignment with clinical objectives, baseline fairness, and label quality across sites. The temporal gap strategy and site stratification are minor concerns that warrant attention but do not fundamentally undermine the hypothesis.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I am maintaining my rebuttals for findings F3, F6, and F8, as the critic has accepted my initial arguments. For findings F1, F2, F4, F5, and F7, I am either strengthening my rebuttals or deferring to empirical evidence where the design and critique both have valid points.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "The critic's challenge is valid - I did not fully address the specific leakage mechanism identified, where the model could learn to predict the label from clinical signs that trigger the culture order, rather than true predictive signal. To address this, I propose the following empirical test: Compare model performance when the label definition uses only antibiotic start time (no culture order window) versus the current \u00b112 hour window. If performance drops significantly with the stricter definition, it would indicate the original metric was inflated by leakage. This test would directly assess the critic's concern and provide evidence to either validate or refute the leakage risk.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic's challenge is valid - the mismatch between the evaluation metric (max risk across 6-48 hours) and the deployment metric (fixed 6-hour horizon) could indeed inflate the performance metrics. To resolve this, I propose the following empirical test: Report AUC-ROC using only the 6-hour prediction (first available prediction time) versus the maximum across 6-48 hours. If there is a significant gap in performance, it would indicate the evaluation method is overly optimistic compared to real-world deployment. The results of this test would determine whether the design choice to use max risk is justified or needs to be revised.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The critic has accepted my initial rebuttal, acknowledging that the forward-filling process respects the causal ordering and does not introduce information leakage from future data. No further action is required.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The critic's partial acceptance is reasonable - while I have addressed the inclusion of secondary metrics like PPV and calibration, I did not fully justify why AUC-ROC remains the primary metric despite its known limitations. To strengthen my rebuttal, I will add the following: The choice of AUC-ROC as the primary metric is based on the stated goal of 'assessing whether the model successfully identifies admissions that ever become septic.' This is a binary classification task, and AUC-ROC provides a robust, threshold-independent evaluation of the model's ability to rank patients by sepsis risk. However, I acknowledge the critic's point that AUC-ROC does not fully capture the operational constraints of clinical deployment. The inclusion of secondary metrics like PPV and calibration is intended to provide a more complete picture of the model's clinical utility and performance characteristics.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic's challenge is valid - the larger hyperparameter search space for the LSTM model does give it a structural advantage in tuning capacity compared to the baseline logistic regression. To resolve this, I propose the following empirical test: Expand the baseline model's tuning to match the LSTM search space size (e.g., add feature selection, window size, or imputation strategy optimization). Then compare the performance of the two models with balanced tuning effort. The results of this experiment would determine whether the apparent benefit of the LSTM is truly due to its temporal structure or simply an artifact of more extensive hyperparameter optimization.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic has accepted my initial rebuttal, acknowledging that the methodology includes controls to assess external validity and site-specific performance. No further action is required.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 3,
+        "justification": "The critic's partial acceptance is reasonable - while I have explained the intent behind the 6-month gaps, I have not fully eliminated the residual concern that the gaps could create artificial distribution shifts or reduce training data effectiveness. To resolve this, I propose the following empirical test: Compare model performance with continuous temporal splits (no gaps) versus the current gap-based splits. If the gap splits perform worse, it would indicate the gaps are harming rather than helping the evaluation. The results of this experiment would determine whether the current split strategy is appropriate or needs to be revised.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critic has accepted my initial rebuttal, acknowledging that holding out entire sites falls outside the stated scope of the experiment, which targets the specific hospital network rather than broad external validity. No further action is required.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "For findings F1, F2, F5, and F7, I have proposed specific empirical tests that would resolve the remaining concerns. These tests are reasonable and aligned with the methodology, so an 'empirical test agreed' verdict is appropriate. The critic has valid points in these cases, and the proposed experiments are the best way to determine whether the design adequately addresses the identified failure mechanisms."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 7,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 4,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 3,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "defense_wins",
+        "rule_applied": "constitutional: DEFER + adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "3 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

@@ -1,0 +1,470 @@
+{
+  "case_id": "rc_rescience_2020_menon2021re_journal",
+  "stratum": "mixed",
+  "flaw_category": "ambiguous_evidence",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The hybrid abnormality measure (PSNR + L2 distance to memory) is a valid proxy for anomaly detection performance.",
+        "failure_mechanism": "The metric is constructed from internal model states (PSNR, feature distance) without validation that it correlates with the true objective of detecting semantically anomalous events. The L2 distance term assumes anomalies produce feature vectors that are far from all memory items, but a clever anomaly could be reconstructed well (high PSNR) using a nearby but semantically inappropriate memory prototype, resulting in a low anomaly score. The metric could be gamed by the model learning to produce normal-looking outputs regardless of input.",
+        "evidence_test": "Correlate the proposed anomaly score with human-annotated anomaly labels on a held-out validation set containing diverse anomaly types. Perform an ablation where anomalies are manually crafted to have low feature distance but be semantically anomalous, and check if the score fails.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Test-time memory updating improves performance without introducing contamination from anomalous patterns.",
+        "failure_mechanism": "Updating the memory bank during inference assumes all observed test frames are normal. If an anomaly occurs, its features could be incorporated into the memory, polluting the normality prototypes and degrading future detection. The method lacks a safeguard to prevent this. In a streaming scenario, even a short anomaly could cause persistent failure.",
+        "evidence_test": "Simulate a test sequence where an anomaly occurs mid-sequence and evaluate detection performance before and after the anomaly. Compare memory contents pre- and post-anomaly to see if anomalous features were stored.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The compactness and separateness losses effectively shape the memory to store diverse, prototypical normal patterns.",
+        "failure_mechanism": "The losses operate on feature distances. There is no guarantee that 'compact' clusters correspond to semantically meaningful normal prototypes, or that 'separate' items capture the full diversity of normality. The memory could collapse to a few trivial patterns (e.g., background textures) or over-diversify, storing noisy variations. The method assumes the loss landscape guides the memory correctly without verification.",
+        "evidence_test": "Visualize memory items (e.g., via feature inversion or by identifying representative frames) to assess semantic meaningfulness and diversity. Measure the coverage of normal patterns in the training set by the memory (e.g., fraction of normal frames whose feature is within a threshold of any memory item).",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The reconstruction and prediction tasks are equally valid bases for the memory module's operation.",
+        "failure_mechanism": "The paper compares reconstruction and prediction models but treats the memory mechanism as task-agnostic. Prediction tasks involve modeling dynamics, which may require different normality prototypes than static reconstruction. The memory's effectiveness might be task-dependent, but the hypothesis presents it as a general improvement. The auxiliary losses might interact differently with the two tasks.",
+        "evidence_test": "Perform a per-task ablation of the memory module and losses, showing that the performance delta attributed to memory is consistent across tasks. Analyze if the memory items learned for prediction are temporally predictive versus spatially reconstructive.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Training only on normal data is sufficient to learn a representation that generalizes to unseen normal patterns during inference.",
+        "failure_mechanism": "The model may overfit to the specific normal events in the training set. During inference, a novel but normal event (e.g., a person walking in a previously unobserved location) could be far from all memory items, leading to a high L2 distance and a false positive. The memory's capacity and update mechanism may not adapt quickly enough.",
+        "evidence_test": "Evaluate on a test set with significant covariate shift in normal activities (e.g., different camera angle, new background) and measure false positive rate. Compare the feature distance distribution for in-distribution normal vs. shifted normal frames.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The reported performance improvements over non-memory variants are due to the memory's discriminative power, not other confounding factors.",
+        "failure_mechanism": "The memory module adds parameters and complexity. The comparison may not be controlled for parameter count or model capacity. A larger non-memory model might achieve similar performance. The improvement could be due to the additional training losses (compactness/separateness) regularizing the feature space, not the memory retrieval mechanism itself.",
+        "evidence_test": "Include a baseline with equivalent increased capacity (e.g., a wider/deeper non-memory network) and/or a baseline with a regularization loss similar to compactness but without a memory bank. Perform an ablation where memory retrieval is replaced with a random projection.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The PSNR component of the anomaly score is a reliable measure of reconstruction/prediction quality for anomaly detection.",
+        "failure_mechanism": "PSNR is sensitive to global intensity shifts and may not align with human perception of reconstruction fidelity. A semantically anomalous object might be replaced with a normal-looking blob, resulting in decent PSNR but a missed detection. Conversely, noise or compression artifacts in normal frames could lower PSNR, causing false alarms.",
+        "evidence_test": "Correlate PSNR with perceptual metrics (e.g., SSIM, LPIPS) on anomalous frames. Manually inspect frames where PSNR is high but anomaly is present.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC proposes a memory module for unsupervised anomaly detection with several unverified assumptions, most critically an unvalidated anomaly score and a test-time update mechanism vulnerable to contamination. The core memory mechanism lacks verification that it learns semantically meaningful prototypes.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 claims the hybrid anomaly score is an unvalidated proxy. However, the design intent of the memory module is specifically to prevent the 'generalization' problem where autoencoders reconstruct anomalies too well. By combining PSNR with the L2 distance to the memory prototypes, the design explicitly creates a safeguard: even if PSNR is high, a high L2 distance (indicating the feature is not a known normal prototype) will trigger an anomaly. The validity of this proxy is empirically demonstrated by the reported performance improvements over non-memory baselines on standard benchmarks.\n\nF2 raises a critical point about test-time memory updating. The methodology describes updating the memory to adapt to scene patterns but does not specify a gating mechanism to prevent anomalous features from being stored. If an anomaly is stored, it becomes 'normal' for future frames. This is a genuine flaw in the proposed update logic that could lead to contamination.\n\nF3 questions whether compactness/separateness losses actually capture semantic prototypes. This is a theoretical concern about the nature of unsupervised learning. The design intent is to shape the latent space to be discriminative; whether these are 'semantically meaningful' to a human is secondary to whether they distinguish normal from abnormal in the feature space, which is what the evaluation metrics measure.\n\nF4 suggests that reconstruction and prediction tasks might require different memory dynamics. The PoC explicitly evaluates both variants and compares them. The hypothesis is that the memory module is a general enhancer for normality modeling; the fact that it is tested on both tasks and shows improvement in both supports the hypothesis rather than undermining it.\n\nF5 concerns overfitting to training normal data (distribution shift). This is a fundamental challenge of all unsupervised anomaly detection (UAD). The inclusion of test-time memory updating is the design's specific answer to this problem, allowing the model to adapt to novel normal patterns at inference.\n\nF6 argues that parameter count or regularization (not the memory itself) might be the cause of improvement. The design includes ablations on the losses (compactness/separateness) separately from the memory module, which allows the designer to isolate the effect of the memory retrieval mechanism from the regularization losses.\n\nF7 is a standard critique of PSNR. In the context of a PoC for anomaly detection, PSNR is a standard baseline metric. While not perfect, it is sufficient for establishing the hypothesis that memory-guided reconstruction is superior to standard reconstruction.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The hybrid score is a deliberate design choice to solve the 'over-generalization' flaw of standard autoencoders. The L2 distance acts as a semantic constraint that prevents the model from ignoring anomalies that happen to be reconstructed well (high PSNR). The empirical results on benchmark datasets validate that this proxy correlates with true anomalies."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic is correct. The current description of test-time updating lacks a mechanism to filter out anomalous features before they are incorporated into the memory bank, which could lead to prototype pollution during long anomalies."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The goal of the losses is not human-interpretable semantic clustering, but the creation of a discriminative feature space. The effectiveness of these losses is validated by the performance gain in the final anomaly detection metric, which is the primary objective of the PoC."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The PoC does not claim the memory is identical for both tasks, but rather that it provides a benefit to both. By evaluating and reporting results for both reconstruction and prediction variants, the design explicitly accounts for the task-dependency the critic mentions."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The design explicitly addresses the risk of distribution shift and overfitting to training data through the implementation of test-time memory updating, which allows the model to incorporate novel normal patterns encountered during inference."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The methodology includes ablations on the auxiliary losses separately from the memory module, allowing the design to distinguish between the effects of regularization and the effects of the memory retrieval mechanism."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "PSNR is a standard, widely accepted metric for reconstruction-based anomaly detection PoCs. While perceptual metrics exist, PSNR is sufficient for the purpose of this hypothesis investigation."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "While most design choices were sound and rebutted, the critic identified a fatal flaw (F2) regarding the lack of safeguards in the test-time memory update mechanism, which could lead to prototype pollution. This finding was conceded and remains at a high severity."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The rebuttal is generic and does not address the specific failure mechanism. While it mentions the L2 distance as a 'semantic constraint,' it does not explain how it prevents the scenario where an anomaly is reconstructed well (high PSNR) using a nearby but semantically inappropriate memory prototype. The claim that 'empirical results validate the proxy' is circular\u2014performance on benchmarks doesn't prove the metric's internal validity against adversarial cases. The failure mechanism (clever anomalies gaming the system) remains unaddressed."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 7,
+        "reasoning": "The defender concedes the finding. No challenge is needed."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The rebuttal changes the goalposts. The finding's failure mechanism is that there's no guarantee the losses produce semantically meaningful prototypes\u2014they could collapse to trivial patterns or over-diversify. The rebuttal states the goal is 'not human-interpretable semantic clustering' but 'discriminative feature space,' yet the memory is intended to store 'prototypical patterns of normality.' If the memory items aren't semantically meaningful prototypes, the method's core premise is undermined. Performance gains alone don't verify that the memory works as intended."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The rebuttal misapplies scope. The finding questions whether the memory mechanism is equally valid for both tasks, given their different demands (static vs. dynamic). The defender claims the PoC 'does not claim the memory is identical' and that evaluating both variants 'accounts for task-dependency.' However, presenting the memory as a general improvement across tasks without analyzing task-specific differences in memory function is exactly the issue. Reporting results for both variants doesn't address whether the memory's effectiveness stems from the same mechanism in each case."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The rebuttal partially addresses the concern by citing test-time memory updating. However, it doesn't resolve the full failure mechanism: (1) Memory updating may be too slow to adapt to novel normal patterns before causing false positives. (2) The updating mechanism itself (as noted in F2) risks contamination if novel patterns are actually anomalous. The design mentions updating but doesn't specify its speed, capacity, or safeguards against incorporating anomalies, leaving residual risk."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The rebuttal directly addresses the failure mechanism by noting that ablations on auxiliary losses separate from the memory module allow distinguishing regularization effects from memory retrieval effects. This is a specific design feature that mitigates the confounding factor concern."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal correctly notes that PSNR is a standard metric for this type of PoC, and the finding's severity is minor. While perceptual mismatches could occur, the defender's position that it's 'sufficient for the purpose of this hypothesis investigation' is reasonable given the low original severity."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I am maintaining my position on F1 and F3 by clarifying the mechanistic role of the memory module and the nature of the objective. I am switching F4 to DEFER because the critic correctly identifies that the mechanism of memory utility for static vs. dynamic tasks is an empirical question that the current design reports but does not analyze. I am maintaining F5 as a design-based rebuttal, as the critic's concerns about speed and contamination are either secondary to the core hypothesis or already addressed in F2. F2, F6, and F7 remain as previously settled.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic's 'clever anomaly' scenario (low L2 distance but semantically anomalous) is precisely what the separateness loss is designed to prevent. By forcing memory items to be distinct, the model cannot collapse all normality into a single 'catch-all' prototype that might accidentally match an anomaly. The hybrid score is not circular; it is a multi-modal check: PSNR captures reconstruction fidelity, while L2 distance captures representation fidelity. For an anomaly to 'game' both, it would need to be both visually similar to a normal frame AND map to a specific, distinct normality prototype in the latent space, which is statistically improbable given the training on normal-only data. The design controls for this by decoupling the decoder's ability to reconstruct from the encoder's ability to map to a known prototype.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic is correct. The current description of test-time updating lacks a mechanism to filter out anomalous features before they are incorporated into the memory bank, which could lead to prototype pollution during long anomalies.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The critic argues that if prototypes aren't 'semantically meaningful' to humans, the premise is undermined. This is a misunderstanding of the design. The 'prototypes' are mathematical centroids in a high-dimensional feature space optimized for the task of anomaly detection. The 'meaning' of these prototypes is defined by their ability to minimize the reconstruction error of normal data while maximizing the error for anomalies. The compactness and separateness losses ensure these centroids are stable and diverse. Whether a human can interpret a specific memory item as 'a person walking' is irrelevant to whether that item effectively represents a recurring normal pattern in the data stream.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic is correct that reporting results for both tasks does not explain if the memory mechanism operates identically for static reconstruction vs. dynamic prediction. To settle this: (1) We would perform a cross-task memory transfer experiment, where a memory bank trained on reconstruction is used for prediction and vice versa. (2) If performance remains stable, it vindicates the design's claim that the memory is a general-purpose normality store. (3) If performance drops significantly, it validates the critique that the memory captures task-specific (spatial vs. temporal) prototypes, requiring the conclusion to be narrowed to task-specific utility.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The critic's concerns regarding the speed of adaptation and contamination are separate issues. Contamination is already conceded in F2. Regarding adaptation speed: the memory update is a direct update to the prototype bank, which is the fastest possible form of adaptation in this architecture (zero-gradient update). The design's use of test-time updating is the primary control against the distribution shift mentioned in the finding. The residual risk of a few false positives during the initial adaptation window is a known trade-off in online learning, not a failure of the design's ability to generalize.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The methodology includes ablations on the auxiliary losses separately from the memory module, allowing the design to distinguish between the effects of regularization and the effects of the memory retrieval mechanism.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "PSNR is a standard, widely accepted metric for reconstruction-based anomaly detection PoCs. While perceptual metrics exist, PSNR is sufficient for the purpose of this hypothesis investigation.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "While most findings were successfully rebutted or conceded, F4 was moved to DEFER as a genuine empirical question regarding the nature of memory prototypes across different tasks. Additionally, F2 remains a conceded material flaw."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The hybrid abnormality measure (PSNR + L2 distance to memory) is a valid proxy for anomaly detection performance.",
+        "failure_mechanism": "The metric is constructed from internal model states (PSNR, feature distance) without validation that it correlates with the true objective of detecting semantically anomalous events. The L2 distance term assumes anomalies produce feature vectors that are far from all memory items, but a clever anomaly could be reconstructed well (high PSNR) using a nearby but semantically inappropriate memory prototype, resulting in a low anomaly score. The metric could be gamed by the model learning to produce normal-looking outputs regardless of input.",
+        "evidence_test": "Correlate the proposed anomaly score with human-annotated anomaly labels on a held-out validation set containing diverse anomaly types. Perform an ablation where anomalies are manually crafted to have low feature distance but be semantically anomalous, and check if the score fails.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Test-time memory updating improves performance without introducing contamination from anomalous patterns.",
+        "failure_mechanism": "Updating the memory bank during inference assumes all observed test frames are normal. If an anomaly occurs, its features could be incorporated into the memory, polluting the normality prototypes and degrading future detection. The method lacks a safeguard to prevent this. In a streaming scenario, even a short anomaly could cause persistent failure.",
+        "evidence_test": "Simulate a test sequence where an anomaly occurs mid-sequence and evaluate detection performance before and after the anomaly. Compare memory contents pre- and post-anomaly to see if anomalous features were stored.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The compactness and separateness losses effectively shape the memory to store diverse, prototypical normal patterns.",
+        "failure_mechanism": "The losses operate on feature distances. There is no guarantee that 'compact' clusters correspond to semantically meaningful normal prototypes, or that 'separate' items capture the full diversity of normality. The memory could collapse to a few trivial patterns (e.g., background textures) or over-diversify, storing noisy variations. The method assumes the loss landscape guides the memory correctly without verification.",
+        "evidence_test": "Visualize memory items (e.g., via feature inversion or by identifying representative frames) to assess semantic meaningfulness and diversity. Measure the coverage of normal patterns in the training set by the memory (e.g., fraction of normal frames whose feature is within a threshold of any memory item).",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The reconstruction and prediction tasks are equally valid bases for the memory module's operation.",
+        "failure_mechanism": "The paper compares reconstruction and prediction models but treats the memory mechanism as task-agnostic. Prediction tasks involve modeling dynamics, which may require different normality prototypes than static reconstruction. The memory's effectiveness might be task-dependent, but the hypothesis presents it as a general improvement. The auxiliary losses might interact differently with the two tasks.",
+        "evidence_test": "Perform a per-task ablation of the memory module and losses, showing that the performance delta attributed to memory is consistent across tasks. Analyze if the memory items learned for prediction are temporally predictive versus spatially reconstructive.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Training only on normal data is sufficient to learn a representation that generalizes to unseen normal patterns during inference.",
+        "failure_mechanism": "The model may overfit to the specific normal events in the training set. During inference, a novel but normal event (e.g., a person walking in a previously unobserved location) could be far from all memory items, leading to a high L2 distance and a false positive. The memory's capacity and update mechanism may not adapt quickly enough.",
+        "evidence_test": "Evaluate on a test set with significant covariate shift in normal activities (e.g., different camera angle, new background) and measure false positive rate. Compare the feature distance distribution for in-distribution normal vs. shifted normal frames.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The reported performance improvements over non-memory variants are due to the memory's discriminative power, not other confounding factors.",
+        "failure_mechanism": "The memory module adds parameters and complexity. The comparison may not be controlled for parameter count or model capacity. A larger non-memory model might achieve similar performance. The improvement could be due to the additional training losses (compactness/separateness) regularizing the feature space, not the memory retrieval mechanism itself.",
+        "evidence_test": "Include a baseline with equivalent increased capacity (e.g., a wider/deeper non-memory network) and/or a baseline with a regularization loss similar to compactness but without a memory bank. Perform an ablation where memory retrieval is replaced with a random projection.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The PSNR component of the anomaly score is a reliable measure of reconstruction/prediction quality for anomaly detection.",
+        "failure_mechanism": "PSNR is sensitive to global intensity shifts and may not align with human perception of reconstruction fidelity. A semantically anomalous object might be replaced with a normal-looking blob, resulting in decent PSNR but a missed detection. Conversely, noise or compression artifacts in normal frames could lower PSNR, causing false alarms.",
+        "evidence_test": "Correlate PSNR with perceptual metrics (e.g., SSIM, LPIPS) on anomalous frames. Manually inspect frames where PSNR is high but anomaly is present.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC proposes a memory module for unsupervised anomaly detection with several unverified assumptions, most critically an unvalidated anomaly score and a test-time update mechanism vulnerable to contamination. The core memory mechanism lacks verification that it learns semantically meaningful prototypes.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I am maintaining my position on F1 and F3 by clarifying the mechanistic role of the memory module and the nature of the objective. I am switching F4 to DEFER because the critic correctly identifies that the mechanism of memory utility for static vs. dynamic tasks is an empirical question that the current design reports but does not analyze. I am maintaining F5 as a design-based rebuttal, as the critic's concerns about speed and contamination are either secondary to the core hypothesis or already addressed in F2. F2, F6, and F7 remain as previously settled.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic's 'clever anomaly' scenario (low L2 distance but semantically anomalous) is precisely what the separateness loss is designed to prevent. By forcing memory items to be distinct, the model cannot collapse all normality into a single 'catch-all' prototype that might accidentally match an anomaly. The hybrid score is not circular; it is a multi-modal check: PSNR captures reconstruction fidelity, while L2 distance captures representation fidelity. For an anomaly to 'game' both, it would need to be both visually similar to a normal frame AND map to a specific, distinct normality prototype in the latent space, which is statistically improbable given the training on normal-only data. The design controls for this by decoupling the decoder's ability to reconstruct from the encoder's ability to map to a known prototype.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic is correct. The current description of test-time updating lacks a mechanism to filter out anomalous features before they are incorporated into the memory bank, which could lead to prototype pollution during long anomalies.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The critic argues that if prototypes aren't 'semantically meaningful' to humans, the premise is undermined. This is a misunderstanding of the design. The 'prototypes' are mathematical centroids in a high-dimensional feature space optimized for the task of anomaly detection. The 'meaning' of these prototypes is defined by their ability to minimize the reconstruction error of normal data while maximizing the error for anomalies. The compactness and separateness losses ensure these centroids are stable and diverse. Whether a human can interpret a specific memory item as 'a person walking' is irrelevant to whether that item effectively represents a recurring normal pattern in the data stream.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic is correct that reporting results for both tasks does not explain if the memory mechanism operates identically for static reconstruction vs. dynamic prediction. To settle this: (1) We would perform a cross-task memory transfer experiment, where a memory bank trained on reconstruction is used for prediction and vice versa. (2) If performance remains stable, it vindicates the design's claim that the memory is a general-purpose normality store. (3) If performance drops significantly, it validates the critique that the memory captures task-specific (spatial vs. temporal) prototypes, requiring the conclusion to be narrowed to task-specific utility.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The critic's concerns regarding the speed of adaptation and contamination are separate issues. Contamination is already conceded in F2. Regarding adaptation speed: the memory update is a direct update to the prototype bank, which is the fastest possible form of adaptation in this architecture (zero-gradient update). The design's use of test-time updating is the primary control against the distribution shift mentioned in the finding. The residual risk of a few false positives during the initial adaptation window is a known trade-off in online learning, not a failure of the design's ability to generalize.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The methodology includes ablations on the auxiliary losses separately from the memory module, allowing the design to distinguish between the effects of regularization and the effects of the memory retrieval mechanism.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "PSNR is a standard, widely accepted metric for reconstruction-based anomaly detection PoCs. While perceptual metrics exist, PSNR is sufficient for the purpose of this hypothesis investigation.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "While most findings were successfully rebutted or conceded, F4 was moved to DEFER as a genuine empirical question regarding the nature of memory prototypes across different tasks. Additionally, F2 remains a conceded material flaw."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

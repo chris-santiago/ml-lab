@@ -1,0 +1,293 @@
+{
+  "case_id": "hyp_003_regular",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The comparison between the GBM and Logistic Regression isolates the effect of the survival formulation and richer features.",
+        "failure_mechanism": "The experiment introduces a massive confound by giving the GBM a vastly superior feature set (longitudinal trends, sentiment, billing velocity) while restricting the baseline to a tiny subset of static, last-month aggregates. If the GBM wins, it is impossible to determine if the success is due to the 'survival model' (the hypothesis) or simply because the GBM had access to the actual predictive signals (the features). The baseline is a 'straw man' that doesn't test the model architecture, but rather the presence of data.",
+        "evidence_test": "Run a third model: a Logistic Regression (or Random Forest) trained on the full, rich feature set used by the GBM. If this model performs similarly to the GBM, the 'survival formulation' is not the driver of success; the features are.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split and snapshotting method prevent label leakage and reflect deployment conditions.",
+        "failure_mechanism": "The PoC describes creating snapshots at monthly intervals and defining churn as occurring within 90 days. In a longitudinal dataset where the same account appears in multiple snapshots (e.g., Jan 1, Feb 1, Mar 1), the snapshots are highly autocorrelated. If the temporal split is done by 'month of snapshot' but the 90-day look-ahead window overlaps across the train/val/test boundaries, the model may 'see' the future. Specifically, a snapshot on Month 24 (Train) has a label determined by events up to Month 27. A snapshot on Month 25 (Val) has a label determined by events up to Month 28. The events in Months 25-27 are used as labels for the training set and as features for the validation set, creating a temporal leak.",
+        "evidence_test": "Implement a 'gap period' between the training set end-date and the validation set start-date equal to the prediction horizon (90 days). If performance drops significantly with the gap, leakage was present.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The Concordance Index (C-index) is a sufficient primary metric for ranking quality and intervention prioritization.",
+        "failure_mechanism": "The C-index is a global ranking metric that does not account for the *timing* of the churn. In a B2B SaaS context, identifying a churner 10 days before they leave is far less valuable than identifying them 80 days before. The C-index treats any correct ranking of a churner vs. a non-churner as a success, regardless of whether the 'lead time' provided by the model is actionable for a Customer Success Manager.",
+        "evidence_test": "Calculate 'Lead Time to Churn' for the top-k at-risk accounts. If the model correctly ranks churners but only does so shortly before the event, the C-index is inflated relative to the actual business utility.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Log-transforming skewed features and one-hot encoding categoricals is sufficient preprocessing for the GBM.",
+        "failure_mechanism": "While GBMs are generally invariant to monotonic transformations (like log-scaling), the PoC mentions using a Cox partial likelihood loss. Depending on the specific implementation (e.g., if any linear components or specific regularization are used), extreme outliers in the feature space can still influence the gradient updates in early trees, potentially leading to suboptimal splits in high-cardinality categorical features if one-hot encoding creates an extremely sparse matrix.",
+        "evidence_test": "Compare performance of the GBM using one-hot encoding versus target encoding or native categorical handling (available in LightGBM/XGBoost).",
+        "flaw_category": "defensible_unconventional"
+      }
+    ],
+    "summary": "The PoC suffers from a critical 'straw man' baseline and a likely temporal leakage flaw due to overlapping prediction windows across the train/val/test split. These issues make it impossible to attribute success to the survival model architecture rather than simply better data or data leakage.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 (FATAL 8): The critic claims the feature set difference creates a confound that invalidates the comparison. However, Section 4 explicitly states the baseline is restricted to 'Last-month aggregate usage metrics' to isolate the effect of 'richer features and the survival formulation'. The hypothesis (Section 1) is to test the *solution* (GBM + Survival + Rich Features) vs the *current baseline* (LR + Static). The critic's request for an LR + Rich Features model is valid for a 'model architecture isolation' study, but not for this 'solution validation' experiment. This is a scope mismatch.\n\nF2 (FATAL 7): The critic claims overlapping 90-day windows create label leakage. In survival analysis, labels are inherently future-determined (churn within 90 days). The temporal split (Section 3) is on the *snapshot date*, not the label window. Training on Snapshot 24 (features from 24, label from 24-27) and validating on Snapshot 25 (features from 25, label from 25-28) is standard practice. The critic's claim that 'events in Months 25-27 are used as labels for the training set and as features for the validation set' is true, but this does not constitute leakage because the model does not see Validation features during Training. The critic's evidence test (gap period) would reduce data without addressing the actual risk.\n\nF3 (MATERIAL 5): The critic claims C-index is insufficient because it ignores lead time. Section 7 explicitly lists 'Recall at top-k accounts' and 'Time-dependent AUC' as secondary metrics to measure 'outreach utility' and 'sensitivity'. The primary metric (C-index) is chosen for 'ranking quality' (Section 1), which is the core hypothesis. The design acknowledges the limitation and addresses it with secondary metrics.\n\nF4 (MINOR 2): The critic claims log-transform + one-hot encoding might be suboptimal for Cox loss/GBM. GBMs are robust to monotonic transformations. One-hot is standard for tree models. This is a minor tuning detail that does not affect the validity of the hypothesis test. The design is sound.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The finding is valid for a 'model architecture isolation' experiment, but invalid for this 'solution validation' experiment. Section 4 explicitly states the feature constraint is deliberate to compare the proposed solution against the current operational baseline. The hypothesis (Section 1) tests the combined value of features + model, not the model in isolation."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The critic's claim that overlapping windows create 'temporal leak' is factually incorrect for survival analysis. Labels are inherently future-determined (Section 2). The temporal split on snapshot dates (Section 3) ensures no features from the validation set are used during training. The critic's evidence test (gap period) would reduce data without addressing the actual risk."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The design explicitly addresses lead time concerns with secondary metrics (Section 7: 'Recall at top-k accounts', 'Time-dependent AUC'). The primary metric (C-index) is appropriate for the stated hypothesis of 'ranking quality' (Section 1). The design choice is deliberate and justified."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "This is a minor preprocessing detail. GBMs are robust to monotonic transformations, and one-hot encoding is standard. This does not affect the validity of the hypothesis test or the primary evaluation metric. The concern is below significance for the experiment's conclusions."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have been rebutted to adjusted severity \u2264 3, with F1 and F2 resolved via scope and evidence arguments, and F3 and F4 via design justification and immateriality. No material flaw survives rebuttal."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 8,
+        "reasoning": "The defender attempts a REBUT-SCOPE by claiming this is a 'solution validation' rather than 'architecture isolation'. However, the hypothesis explicitly states the goal is to test whether a 'gradient-boosted survival model... outperforms a static logistic regression baseline'. By bundling a superior feature set with a superior model, the defender has created a confounded experiment. You cannot validate a 'solution' if you cannot determine which part of the solution (the data or the model) is providing the lift. The severity remains FATAL because the results will be uninterpretable regarding the actual hypothesis."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The defender's REBUT-EVIDENCE is logically flawed. They claim that because labels are 'future-determined', there is no leak. This is exactly the problem: if a snapshot in the Training set (Month 24) uses a label determined by events in Months 25-27, and a snapshot in the Validation set (Month 25) uses features derived from events in Months 25-27, the model is training on the same temporal events it is being validated on. This is a classic temporal leak in window-based snapshotting. The defender fails to address the mechanism of overlapping windows."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The defender correctly points out that secondary metrics (Time-dependent AUC and Recall at top-k) provide some visibility into the utility of the predictions. However, these do not replace the need for a lead-time analysis to ensure the C-index isn't being driven by 'last-minute' churners. The concern is mitigated but not fully resolved, as the primary success criterion remains the C-index."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The defender is correct that GBMs are largely invariant to monotonic transformations and that one-hot encoding is a standard, albeit sometimes suboptimal, approach. This does not threaten the fundamental validity of the hypothesis test."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "F1 and F3 require empirical resolution due to genuine ambiguity in the design's scope and metric alignment. F2's challenge is mechanistically incorrect regarding survival analysis principles, allowing a strengthened defense. F4 is accepted by the critic.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The hypothesis tests the 'solution package' (GBM + rich features) vs. the 'operational baseline' (LR + basic features). However, the design does not isolate the model contribution from the feature contribution. To claim the 'survival model' is the driver, a 'LR + Rich Features' control is required. This is a genuine empirical question: does the model architecture add value beyond the features? The current design validates the solution, not the model isolation.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The critic's mechanism conflates label dependency with feature leakage. In survival analysis, labels are inherently future-determined (e.g., Month 24 snapshot label depends on Months 25-27 events). This is not a leak. A leak occurs only if *features* for the validation set include events from the future relative to the validation snapshot. The design splits on snapshot dates (Section 3), ensuring Val features (up to Month 25) never overlap with Train features (up to Month 24). The critic's 'gap period' test is unnecessary for this design.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 3,
+        "justification": "The primary metric (C-index) measures ranking quality, but the hypothesis also claims 'earlier... identification' (Section 1). Secondary metrics (Time-dependent AUC, Recall at top-k) provide visibility, but the success criteria (Section 9) focus on C-index. It is empirically unknown whether high C-index correlates with actionable lead time in this domain. This requires validation to ensure the primary metric aligns with business utility.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The critic accepted this finding in R2. GBMs are robust to monotonic transformations, and one-hot encoding is standard practice. This does not threaten the validity of the hypothesis test or primary metric.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Two findings (F1, F3) are deferred to empirical resolution due to genuine design ambiguities regarding feature isolation and metric utility. F2 is defended as a mechanistic misunderstanding of survival analysis. The presence of deferred findings indicates the experiment is valid but requires follow-up tests to fully disentangle confounds."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The comparison between the GBM and Logistic Regression isolates the effect of the survival formulation and richer features.",
+        "failure_mechanism": "The experiment introduces a massive confound by giving the GBM a vastly superior feature set (longitudinal trends, sentiment, billing velocity) while restricting the baseline to a tiny subset of static, last-month aggregates. If the GBM wins, it is impossible to determine if the success is due to the 'survival model' (the hypothesis) or simply because the GBM had access to the actual predictive signals (the features). The baseline is a 'straw man' that doesn't test the model architecture, but rather the presence of data.",
+        "evidence_test": "Run a third model: a Logistic Regression (or Random Forest) trained on the full, rich feature set used by the GBM. If this model performs similarly to the GBM, the 'survival formulation' is not the driver of success; the features are.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split and snapshotting method prevent label leakage and reflect deployment conditions.",
+        "failure_mechanism": "The PoC describes creating snapshots at monthly intervals and defining churn as occurring within 90 days. In a longitudinal dataset where the same account appears in multiple snapshots (e.g., Jan 1, Feb 1, Mar 1), the snapshots are highly autocorrelated. If the temporal split is done by 'month of snapshot' but the 90-day look-ahead window overlaps across the train/val/test boundaries, the model may 'see' the future. Specifically, a snapshot on Month 24 (Train) has a label determined by events up to Month 27. A snapshot on Month 25 (Val) has a label determined by events up to Month 28. The events in Months 25-27 are used as labels for the training set and as features for the validation set, creating a temporal leak.",
+        "evidence_test": "Implement a 'gap period' between the training set end-date and the validation set start-date equal to the prediction horizon (90 days). If performance drops significantly with the gap, leakage was present.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The Concordance Index (C-index) is a sufficient primary metric for ranking quality and intervention prioritization.",
+        "failure_mechanism": "The C-index is a global ranking metric that does not account for the *timing* of the churn. In a B2B SaaS context, identifying a churner 10 days before they leave is far less valuable than identifying them 80 days before. The C-index treats any correct ranking of a churner vs. a non-churner as a success, regardless of whether the 'lead time' provided by the model is actionable for a Customer Success Manager.",
+        "evidence_test": "Calculate 'Lead Time to Churn' for the top-k at-risk accounts. If the model correctly ranks churners but only does so shortly before the event, the C-index is inflated relative to the actual business utility.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Log-transforming skewed features and one-hot encoding categoricals is sufficient preprocessing for the GBM.",
+        "failure_mechanism": "While GBMs are generally invariant to monotonic transformations (like log-scaling), the PoC mentions using a Cox partial likelihood loss. Depending on the specific implementation (e.g., if any linear components or specific regularization are used), extreme outliers in the feature space can still influence the gradient updates in early trees, potentially leading to suboptimal splits in high-cardinality categorical features if one-hot encoding creates an extremely sparse matrix.",
+        "evidence_test": "Compare performance of the GBM using one-hot encoding versus target encoding or native categorical handling (available in LightGBM/XGBoost).",
+        "flaw_category": "defensible_unconventional"
+      }
+    ],
+    "summary": "The PoC suffers from a critical 'straw man' baseline and a likely temporal leakage flaw due to overlapping prediction windows across the train/val/test split. These issues make it impossible to attribute success to the survival model architecture rather than simply better data or data leakage.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "F1 and F3 require empirical resolution due to genuine ambiguity in the design's scope and metric alignment. F2's challenge is mechanistically incorrect regarding survival analysis principles, allowing a strengthened defense. F4 is accepted by the critic.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The hypothesis tests the 'solution package' (GBM + rich features) vs. the 'operational baseline' (LR + basic features). However, the design does not isolate the model contribution from the feature contribution. To claim the 'survival model' is the driver, a 'LR + Rich Features' control is required. This is a genuine empirical question: does the model architecture add value beyond the features? The current design validates the solution, not the model isolation.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The critic's mechanism conflates label dependency with feature leakage. In survival analysis, labels are inherently future-determined (e.g., Month 24 snapshot label depends on Months 25-27 events). This is not a leak. A leak occurs only if *features* for the validation set include events from the future relative to the validation snapshot. The design splits on snapshot dates (Section 3), ensuring Val features (up to Month 25) never overlap with Train features (up to Month 24). The critic's 'gap period' test is unnecessary for this design.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 3,
+        "justification": "The primary metric (C-index) measures ranking quality, but the hypothesis also claims 'earlier... identification' (Section 1). Secondary metrics (Time-dependent AUC, Recall at top-k) provide visibility, but the success criteria (Section 9) focus on C-index. It is empirically unknown whether high C-index correlates with actionable lead time in this domain. This requires validation to ensure the primary metric aligns with business utility.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The critic accepted this finding in R2. GBMs are robust to monotonic transformations, and one-hot encoding is standard practice. This does not threaten the validity of the hypothesis test or primary metric.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Two findings (F1, F3) are deferred to empirical resolution due to genuine design ambiguities regarding feature isolation and metric utility. F2 is defended as a mechanistic misunderstanding of survival analysis. The presence of deferred findings indicates the experiment is valid but requires follow-up tests to fully disentangle confounds."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=8, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "defense_wins",
+        "rule_applied": "constitutional: DEFER + adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

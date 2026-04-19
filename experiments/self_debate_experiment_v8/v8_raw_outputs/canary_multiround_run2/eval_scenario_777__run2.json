@@ -1,0 +1,431 @@
+{
+  "case_id": "eval_scenario_777",
+  "stratum": "regular",
+  "flaw_category": "distribution_shift",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer's performance gain over logistic regression comes from learning clinically meaningful temporal patterns in sequences, rather than from increased capacity to memorize baseline features or from artifacts in sequence encoding.",
+        "failure_mechanism": "The transformer receives the same baseline features as logistic regression, plus sequences. Its higher parameter count could allow it to better fit complex, non-linear interactions among baseline features alone, without leveraging temporal structure. Alternatively, the sequence encoding (e.g., padding, tokenization) could introduce spurious, non-temporal signals that the model learns. The experiment lacks a control to isolate the marginal value of the temporal sequences.",
+        "evidence_test": "Add an ablation: train a feed-forward neural network (FFNN) with the same capacity as the transformer but on the baseline features only (no sequences). If the FFNN matches transformer performance, the gain is from capacity, not temporality. Alternatively, train the transformer on temporally shuffled sequences. If performance remains high, the signal is not temporal.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal-stratified split by patient ensures no leakage and realistically simulates deployment, making test-set performance a reliable estimate of future performance.",
+        "failure_mechanism": "While patient-level leakage is prevented, the split assumes stationarity: that the relationship between features (including temporal sequences) and readmission risk is stable across the 36-month period. Hospital practices, coding, patient populations, and readmission drivers can shift over time. The final 20% test period may represent a different data distribution. The model's performance could degrade due to this temporal distribution shift, not because the transformer fails to learn temporality, but because the world changed.",
+        "evidence_test": "Report performance metrics (PR-AUC) calculated on rolling windows within the test period (e.g., quarterly). Significant degradation across quarters indicates non-stationarity. Compare feature distributions (e.g., mean lab values, common diagnoses) between train and test periods.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Precision-Recall AUC (PR-AUC) is the optimal primary metric for the operational goal of maximizing high-precision alerts within a fixed capacity.",
+        "failure_mechanism": "PR-AUC integrates over all recall levels, but the operational constraint is a fixed alert budget (e.g., top 20% of risk scores). The model optimized for overall PR-AUC may not be the model that maximizes precision at that specific operational threshold. A model with slightly lower PR-AUC could provide much higher precision at the 20% recall point, which is what matters for deployment.",
+        "evidence_test": "The primary metric should be precision at the recall level defined by the operational alert budget (or recall at that precision), not the area under the entire curve. Report this threshold-specific metric alongside PR-AUC.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Restricting the cohort to patients with at least 12 months of observable history does not introduce significant selection bias that would invalidate the comparison between models.",
+        "failure_mechanism": "This restriction creates a cohort of 'established' patients with prior system contact. These patients are systematically different from new patients (sicker, more complex, higher baseline risk). Both models are trained and evaluated only on this subgroup. The transformer, which uses prior sequences, may have an artificial advantage in this cohort because sequences exist. Its performance on new patients (with sparse or no history) is untested and could be worse than logistic regression.",
+        "evidence_test": "Report the proportion of the full hospital population excluded by the 12-month rule. Conduct a sensitivity analysis: evaluate both models on a held-out set of 'new' patients (observable history < 12 months) if available, or simulate sparse sequences.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Manual validation of a 5% sample of labels is sufficient to ensure label quality and that error rates >5% will be caught and corrected.",
+        "failure_mechanism": "Label errors may be systematic (e.g., certain elective procedures consistently miscoded as unplanned) and not uniformly distributed. A 5% random sample may miss rare but important error clusters. Furthermore, the 'refine or exclude' process if error rate >5% is underspecified\u2014if labels are refined, the entire dataset must be relabeled, which is not described.",
+        "evidence_test": "Stratify the validation sample by high-risk subgroups (e.g., discharge unit, specific diagnoses) to check for differential error rates. Specify the relabeling protocol upfront.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The transformer architecture with 2-4 heads and 2-3 layers is sufficiently expressive to capture the relevant temporal dependencies for this task.",
+        "failure_mechanism": "Clinical trajectories may involve long-range dependencies (e.g., a medication 11 months ago influencing current risk). The chosen architecture may be too shallow or have insufficient context window to capture these. This is a capacity assumption, not directly a methodology flaw, but if the architecture is arbitrarily limited, it creates a silent ceiling on transformer performance.",
+        "evidence_test": "Report sensitivity of validation performance to transformer depth and context window length as part of hyperparameter tuning. Ensure the search space for sequence length is clinically justified (e.g., up to 24 months).",
+        "flaw_category": "context_dependent"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The experiment's conclusion that the transformer 'can' outperform logistic regression on this specific data is sufficiently limited in scope.",
+        "failure_mechanism": "None. The scope is explicitly and appropriately limited. This is a strength of the design.",
+        "evidence_test": "N/A",
+        "flaw_category": "null"
+      }
+    ],
+    "summary": "The experiment design is generally rigorous with strong protections against leakage. The main methodological gaps are the lack of an ablation to isolate the value of temporal sequences (F1) and potential non-stationarity in the temporal split (F2), which materially weaken the interpretability of a positive result.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "I will analyze each finding against the methodology document to determine if it identifies a genuine flaw or if the design is sound.\n\nF1 (Severity 6 - MATERIAL): The critic argues the experiment lacks a control to isolate the marginal value of temporal sequences versus model capacity (e.g., FFNN vs Transformer). The methodology compares Transformer vs Logistic Regression (Section 4). While LR is a capacity-limited baseline, the critique correctly notes this doesn't rule out capacity as the driver of performance. However, Section 7 explicitly states: 'We also compute permutation importance to verify that the transformer's gain comes from temporal sequences, not just baseline features.' This is the designated control for temporal value. The critique asks for an FFNN ablation, which is a different experimental design (Transformer vs FFNN) rather than the stated scope (Transformer vs LR). This is a valid concern for a mechanism study but falls outside the scope of this specific model comparison PoC.\n\nF2 (Severity 5 - MATERIAL): The critic argues the temporal split assumes stationarity and distribution shift could degrade performance. Section 7 (Confound Controls) explicitly states: 'We report performance across temporal quarters and discharge units to detect drift or unit-specific bias.' The methodology anticipates and plans to audit for temporal drift. The critique's evidence test is already part of the design.\n\nF3 (Severity 4 - MATERIAL): The critic argues PR-AUC is suboptimal for fixed alert budgets. Section 5 (Evaluation Metrics) states: 'Primary metric: Precision-Recall AUC (PR-AUC)... If the care team specifies a fixed alert budget (e.g., 20% of discharges), the primary metric is recall at that threshold.' The methodology explicitly addresses the operational constraint by defining a conditional primary metric. The critique assumes a fixed budget is the only scenario, but the design accommodates it.\n\nF4 (Severity 3 - MATERIAL): The critic argues the 12-month history restriction introduces selection bias and limits generalizability to new patients. Section 1 restricts the cohort to ensure temporal sequences are well-defined. Section 8 (Scope of Inference) explicitly limits the inference to 'this specific hospital's data within the temporal window studied' and notes external validation is required for broader claims. The critique asks for sensitivity analysis on new patients, which is outside the stated scope of this PoC (which focuses on temporal sequences in established patients).\n\nF5 (Severity 2 - MINOR): The critic argues 5% random label validation may miss systematic errors. Section 1 and 7 describe the 5% validation and refinement protocol. While stratification is better, for a PoC, 5% random sampling is a standard baseline for label quality assurance. It does not materially affect the model comparison conclusion.\n\nF6 (Severity 1 - MINOR): The critic argues the transformer architecture may be too shallow. Section 4 states hyperparameters (including sequence length, which relates to context) are tuned via random search/Bayesian optimization. The architecture is a design choice for the PoC, and tuning is planned. This is a minor concern regarding capacity ceiling, not a methodological flaw.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The critique asks for an FFNN ablation to isolate capacity, which is a valid control for a mechanism study. However, the stated experiment scope is a model comparison between Transformer and Logistic Regression (Section 4). The methodology addresses the temporal value concern via permutation importance on sequence tokens (Section 7), which is the designated control for this specific comparison. The FFNN request falls outside the defined scope."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The methodology explicitly anticipates distribution shift in Section 7 (Confound Controls): 'We report performance across temporal quarters... to detect drift.' The critique's evidence test is already incorporated into the design, making the concern addressed by the design."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Section 5 (Evaluation Metrics) explicitly addresses the operational constraint: 'If the care team specifies a fixed alert budget... the primary metric is recall at that threshold.' The design accommodates the critique's concern by defining a conditional primary metric based on the alert budget."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The critique is valid for a general deployment claim, but the experiment scope is explicitly defined in Section 1 and Section 8 as patients with at least 12 months of history to ensure temporal sequences are well-defined. The sensitivity analysis on new patients requested is outside the stated scope of this PoC."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "While stratification is better, 5% random label validation is a standard baseline for PoC label quality assurance (Section 1). This does not materially affect the validity of the model comparison conclusion."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Section 4 states hyperparameters (including sequence length) are tuned via random search. The architecture is a design choice for the PoC, and the tuning process addresses capacity concerns. This is a minor concern that does not invalidate the methodology."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have been rebutted with adjusted severities \u2264 3 (F1: 2, F2: 1, F3: 0, F4: 0, F5: 0, F6: 0). The methodology explicitly addresses the concerns regarding temporal drift, operational metrics, and cohort scope through design controls and scope limitations, rendering the critique's concerns immaterial to the experiment's validity."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The rebuttal mischaracterizes the scope and fails to address the mechanism. The experiment's stated objective is to test whether a transformer 'outperforms logistic regression... when predicting unplanned 30-day readmission.' The failure mechanism is that the observed gain may come from increased capacity to fit baseline features, not from temporal patterns. The defender cites 'permutation importance on sequence tokens' (Section 7) as the designated control. However, permutation importance only shows which features are important; it cannot distinguish whether the transformer's advantage comes from learning temporal dependencies versus simply having more parameters to model complex, non-linear interactions in the baseline features. An FFNN ablation (or transformer on shuffled sequences) is the standard control for isolating the value of temporal structure versus capacity. A scope rebuttal is invalid here because the core claim being tested ('transformer outperforms due to temporal sequences') is precisely within the experiment's scope. The rebuttal leaves the causal mechanism unresolved."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The rebuttal is valid. The failure mechanism was that temporal distribution shift could degrade performance and make test-set estimates unreliable. The defender correctly cites Section 7, which explicitly states: 'We report performance across temporal quarters and discharge units to detect drift or unit-specific bias.' This directly addresses the evidence test proposed in the finding ('Report performance metrics calculated on rolling windows within the test period'). The design has incorporated the necessary check for non-stationarity, thereby mitigating the concern that the split alone guarantees reliable future performance. The severity adjustment is appropriate."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal is valid and specific. The failure mechanism was that PR-AUC might not align with the operational goal of a fixed alert budget. The defender correctly cites Section 5, which states: 'If the care team specifies a fixed alert budget (e.g., 20% of discharges), the primary metric is recall at that threshold (equivalently, precision at that recall level).' This directly addresses the concern by making the primary metric conditional on the operational constraint. The design therefore accommodates the critique. The severity adjustment to 0 is proportionate."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 2,
+        "reasoning": "The rebuttal is partially valid but leaves a residual issue. The defender correctly notes the cohort restriction is explicit in the scope (Section 1, Section 8). However, the failure mechanism is not about general deployment claims; it is about the validity of the comparison *within the defined cohort*. The concern is that the transformer may have an 'artificial advantage' in this cohort because sequences exist for all patients, and this advantage might not reflect a fundamental superiority in modeling temporal patterns, but rather a better fit for a population where such patterns are available. The comparison's internal validity is still at stake. While a sensitivity analysis on new patients may be outside scope, the design could still acknowledge this as a limitation of the inference. The rebuttal does not address this nuance. The severity should be reduced but not to zero."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal is reasonable. The finding identified a potential for systematic label errors and an underspecified relabeling protocol. The defender concedes stratification is better but argues that 5% random validation is a standard baseline for a proof-of-concept and does not materially affect the model comparison. Given the low original severity (2, MINOR) and the fact that both models are subject to the same label noise, it is plausible that this concern has minimal impact on the comparative conclusion. The severity adjustment to 0 is acceptable."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal is valid. The failure mechanism was that the architecture might be arbitrarily limited, creating a silent performance ceiling. The defender correctly notes that hyperparameters (including those related to capacity like sequence length) are tuned via random search (Section 4). This tuning process directly addresses the capacity concern by exploring a range of configurations. The finding's suggested evidence test ('Report sensitivity of validation performance to transformer depth and context window') is essentially fulfilled by the hyperparameter tuning and analysis. This is a minor concern well-handled by the design. The severity adjustment to 0 is appropriate."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic correctly challenged F1 regarding the lack of a capacity control (FFNN ablation) to isolate temporal value from model capacity. This is a genuine ambiguity requiring empirical resolution, warranting a DEFER. F4 was partially accepted; while the scope limitation is valid, the nuance about 'artificial advantage' within the cohort is acknowledged, leading to a strengthened scope rebuttal with a slight severity adjustment. F2, F3, F5, and F6 were accepted as valid design controls or immaterial concerns, maintaining their original rebuttal positions.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic correctly identifies that permutation importance cannot distinguish between capacity-driven gains and temporal-pattern gains. The current design lacks an FFNN ablation control. This is a genuine ambiguity where empirical evidence is required to settle the causal mechanism. The experiment will be extended to include an FFNN trained on baseline features only; if Transformer > FFNN, the temporal hypothesis is vindicated. If Transformer \u2248 FFNN, the critique regarding capacity is validated.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The design explicitly incorporates temporal drift detection in Section 7 ('report performance across temporal quarters'). This directly addresses the evidence test for non-stationarity. The concern is mitigated by the design's built-in monitoring.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Section 5 explicitly defines the primary metric as conditional on the operational alert budget ('If the care team specifies a fixed alert budget... the primary metric is recall at that threshold'). The design accommodates the critique's concern by aligning the metric with the operational constraint.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The cohort restriction is explicit and defines the scope of inference. While the 'artificial advantage' nuance is acknowledged, the internal comparison remains valid for the defined population (established patients). The limitation regarding new patients is an external validity boundary, not an internal flaw. The design scope is maintained, but the nuance is acknowledged in the justification.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "5% random label validation is a standard baseline for PoC. Since both models are subject to the same label noise, the comparative conclusion is not materially affected. The concern is minor and does not invalidate the methodology.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Hyperparameter tuning (Section 4) includes sequence length and depth, directly addressing capacity concerns. The architecture is not arbitrarily limited but optimized for the task. This is a minor concern well-handled by the design.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 is deferred to empirical testing to resolve the capacity vs. temporality ambiguity, while all other findings are resolved in favor of the defense with low adjusted severity. This outcome reflects a valid scientific process where genuine uncertainty is identified and slated for experimental resolution."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer's performance gain over logistic regression comes from learning clinically meaningful temporal patterns in sequences, rather than from increased capacity to memorize baseline features or from artifacts in sequence encoding.",
+        "failure_mechanism": "The transformer receives the same baseline features as logistic regression, plus sequences. Its higher parameter count could allow it to better fit complex, non-linear interactions among baseline features alone, without leveraging temporal structure. Alternatively, the sequence encoding (e.g., padding, tokenization) could introduce spurious, non-temporal signals that the model learns. The experiment lacks a control to isolate the marginal value of the temporal sequences.",
+        "evidence_test": "Add an ablation: train a feed-forward neural network (FFNN) with the same capacity as the transformer but on the baseline features only (no sequences). If the FFNN matches transformer performance, the gain is from capacity, not temporality. Alternatively, train the transformer on temporally shuffled sequences. If performance remains high, the signal is not temporal.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal-stratified split by patient ensures no leakage and realistically simulates deployment, making test-set performance a reliable estimate of future performance.",
+        "failure_mechanism": "While patient-level leakage is prevented, the split assumes stationarity: that the relationship between features (including temporal sequences) and readmission risk is stable across the 36-month period. Hospital practices, coding, patient populations, and readmission drivers can shift over time. The final 20% test period may represent a different data distribution. The model's performance could degrade due to this temporal distribution shift, not because the transformer fails to learn temporality, but because the world changed.",
+        "evidence_test": "Report performance metrics (PR-AUC) calculated on rolling windows within the test period (e.g., quarterly). Significant degradation across quarters indicates non-stationarity. Compare feature distributions (e.g., mean lab values, common diagnoses) between train and test periods.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Precision-Recall AUC (PR-AUC) is the optimal primary metric for the operational goal of maximizing high-precision alerts within a fixed capacity.",
+        "failure_mechanism": "PR-AUC integrates over all recall levels, but the operational constraint is a fixed alert budget (e.g., top 20% of risk scores). The model optimized for overall PR-AUC may not be the model that maximizes precision at that specific operational threshold. A model with slightly lower PR-AUC could provide much higher precision at the 20% recall point, which is what matters for deployment.",
+        "evidence_test": "The primary metric should be precision at the recall level defined by the operational alert budget (or recall at that precision), not the area under the entire curve. Report this threshold-specific metric alongside PR-AUC.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Restricting the cohort to patients with at least 12 months of observable history does not introduce significant selection bias that would invalidate the comparison between models.",
+        "failure_mechanism": "This restriction creates a cohort of 'established' patients with prior system contact. These patients are systematically different from new patients (sicker, more complex, higher baseline risk). Both models are trained and evaluated only on this subgroup. The transformer, which uses prior sequences, may have an artificial advantage in this cohort because sequences exist. Its performance on new patients (with sparse or no history) is untested and could be worse than logistic regression.",
+        "evidence_test": "Report the proportion of the full hospital population excluded by the 12-month rule. Conduct a sensitivity analysis: evaluate both models on a held-out set of 'new' patients (observable history < 12 months) if available, or simulate sparse sequences.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Manual validation of a 5% sample of labels is sufficient to ensure label quality and that error rates >5% will be caught and corrected.",
+        "failure_mechanism": "Label errors may be systematic (e.g., certain elective procedures consistently miscoded as unplanned) and not uniformly distributed. A 5% random sample may miss rare but important error clusters. Furthermore, the 'refine or exclude' process if error rate >5% is underspecified\u2014if labels are refined, the entire dataset must be relabeled, which is not described.",
+        "evidence_test": "Stratify the validation sample by high-risk subgroups (e.g., discharge unit, specific diagnoses) to check for differential error rates. Specify the relabeling protocol upfront.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The transformer architecture with 2-4 heads and 2-3 layers is sufficiently expressive to capture the relevant temporal dependencies for this task.",
+        "failure_mechanism": "Clinical trajectories may involve long-range dependencies (e.g., a medication 11 months ago influencing current risk). The chosen architecture may be too shallow or have insufficient context window to capture these. This is a capacity assumption, not directly a methodology flaw, but if the architecture is arbitrarily limited, it creates a silent ceiling on transformer performance.",
+        "evidence_test": "Report sensitivity of validation performance to transformer depth and context window length as part of hyperparameter tuning. Ensure the search space for sequence length is clinically justified (e.g., up to 24 months).",
+        "flaw_category": "context_dependent"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The experiment's conclusion that the transformer 'can' outperform logistic regression on this specific data is sufficiently limited in scope.",
+        "failure_mechanism": "None. The scope is explicitly and appropriately limited. This is a strength of the design.",
+        "evidence_test": "N/A",
+        "flaw_category": "null"
+      }
+    ],
+    "summary": "The experiment design is generally rigorous with strong protections against leakage. The main methodological gaps are the lack of an ablation to isolate the value of temporal sequences (F1) and potential non-stationarity in the temporal split (F2), which materially weaken the interpretability of a positive result.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic correctly challenged F1 regarding the lack of a capacity control (FFNN ablation) to isolate temporal value from model capacity. This is a genuine ambiguity requiring empirical resolution, warranting a DEFER. F4 was partially accepted; while the scope limitation is valid, the nuance about 'artificial advantage' within the cohort is acknowledged, leading to a strengthened scope rebuttal with a slight severity adjustment. F2, F3, F5, and F6 were accepted as valid design controls or immaterial concerns, maintaining their original rebuttal positions.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic correctly identifies that permutation importance cannot distinguish between capacity-driven gains and temporal-pattern gains. The current design lacks an FFNN ablation control. This is a genuine ambiguity where empirical evidence is required to settle the causal mechanism. The experiment will be extended to include an FFNN trained on baseline features only; if Transformer > FFNN, the temporal hypothesis is vindicated. If Transformer \u2248 FFNN, the critique regarding capacity is validated.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The design explicitly incorporates temporal drift detection in Section 7 ('report performance across temporal quarters'). This directly addresses the evidence test for non-stationarity. The concern is mitigated by the design's built-in monitoring.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Section 5 explicitly defines the primary metric as conditional on the operational alert budget ('If the care team specifies a fixed alert budget... the primary metric is recall at that threshold'). The design accommodates the critique's concern by aligning the metric with the operational constraint.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The cohort restriction is explicit and defines the scope of inference. While the 'artificial advantage' nuance is acknowledged, the internal comparison remains valid for the defined population (established patients). The limitation regarding new patients is an external validity boundary, not an internal flaw. The design scope is maintained, but the nuance is acknowledged in the justification.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "5% random label validation is a standard baseline for PoC. Since both models are subject to the same label noise, the comparative conclusion is not materially affected. The concern is minor and does not invalidate the methodology.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Hyperparameter tuning (Section 4) includes sequence length and depth, directly addressing capacity concerns. The architecture is not arbitrarily limited but optimized for the task. This is a minor concern well-handled by the design.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 is deferred to empirical testing to resolve the capacity vs. temporality ambiguity, while all other findings are resolved in favor of the defense with low adjusted severity. This outcome reflects a valid scientific process where genuine uncertainty is identified and slated for experimental resolution."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

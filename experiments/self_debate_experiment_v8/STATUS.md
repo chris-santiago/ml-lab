@@ -4,7 +4,7 @@
 penalty-aware scoring. [→ OBJECTIVE.md]
 
 **Branch:** `feat/v8-defender-iteration`  
-**Last updated:** 2026-04-18 (canary run 2 complete; run 3 pending)
+**Last updated:** 2026-04-19 (canary_multiround_run2 complete; AER/IDR tradeoff open)
 
 ---
 
@@ -31,11 +31,15 @@ penalty-aware scoring. [→ OBJECTIVE.md]
 | `prompts/DEFENDER.md` | ✅ Updated | Added critic-exhaustiveness framing block; DEFER section-scan instruction. [→ experiment f634bda9] |
 | `prompts/DEFENDER.md` | ✅ Updated | **Canary run 1 fix:** REBUT-IMMATERIAL restricted to MINOR findings (original sev 1–3) only; adjustment tightened to −1 to −2. All other adjustment caps tightened: REBUT-DESIGN −2 to −4, REBUT-SCOPE −2 to −4, REBUT-EVIDENCE −3 to −5. Proportionality guidance added. [→ discovery 2b3ebbd8] |
 | `prompts/ADJUDICATOR.md` | ✅ Retired as LLM prompt | Now serves as spec document for `derive_verdict()`. Updated to reflect FATAL-finding rule: original_sev ≥ 7 + adj_sev 4–6 + REBUT-* → `empirical_test_agreed`. [→ decision c93e0fb6, discovery 2b3ebbd8] |
+| `prompts/DEFENDER_R2.md` | ✅ Added | R2 defender prompt for multi-round protocol. Mirrors DEFENDER.md rebuttal logic with three-path decision tree (REBUT/DEFER/CONCEDE) for ACCEPT/CHALLENGE/PARTIAL verdicts from R2 critic. |
+| `prompts/DEFENDER.md` | ✅ Updated | **Substantive DEFER requirement:** DEFER must name (1) specific settling experiment, (2) result that vindicates the design and mechanism, (3) result that validates the critique and what changes. "I'm not sure" is not a valid DEFER. [→ experiment ab4ee47f] |
+| `prompts/DEFENDER_R2.md` | ✅ Updated | Same 3-question DEFER requirement applied to R2 pass. Invalid `challenge_verdict=DEFER` from R2 critic coerced to CHALLENGE in `run_multiround.py`. [→ experiment ab4ee47f] |
 
-**Intervention priority (post canary run 1):** Prompt and scoring calibration only. Intervention A
-already present in CRITIC.md; Intervention C retired in favor of hard verdict rules. AOR measures
-defender self-consistency. Root cause of IDR=0.083 was REBUT-IMMATERIAL misuse + floor bug —
-both fixed. Run 2 tests whether DER holds while IDR recovers.
+**Intervention priority (post canary_multiround_run2):** Primary open tension is IDR/AER tradeoff.
+Substantive DEFER requirement recovered IDR (0.000 → 0.600) but collapsed AER (0.739 → 0.217).
+Root cause: when DEFER is hard, defenders resort to REBUT or CONCEDE, both of which lose ambiguity
+recognition on genuinely uncertain cases. Next intervention: distinguish between "ambiguous significance"
+and "undeniable flaw" in DEFER guidance without enumerating specific flaw types.
 
 ---
 
@@ -221,11 +225,14 @@ The prior canary iterations tested single-round (not either intended protocol). 
 
 ## Canary Run Log
 
-| Run | Key changes | DER | IDR | FAR | ARR | MCC | Verdict |
-|---|---|---|---|---|---|---|---|
-| canary_run1 | Framing block + DEFER instruction + deterministic verdict + 10-model pool | 1.00 | 0.083 | 0.00 | 0.00 | +0.169 | DER fixed; IDR collapsed — over-rebuttal |
-| canary_run2 | REBUT-IMMATERIAL → MINOR only; tighter adj caps (−2 to −4); FATAL REBUT-* floor rule | 0.565 | 0.083 | 0.435 | 0.500 | +0.079 | Caps over-tightened: DER collapsed, IDR unchanged |
-| canary_run3 | Restore caps (REBUT-DESIGN −3 to −5, REBUT-SCOPE −3 to −5, REBUT-EVIDENCE −4 to −6); add CONCEDE trigger | pending | pending | — | — | — | **NOT RUN** — pivoted to multi-round / ensemble probe before full canary |
+*(Metrics use correct_position-aware scoring. DER = defense_wins recall on sound cases; FDR = NOT defense_wins on flawed; AER = ETA on ETA cases; IDR = critique_wins on 5 undeniable-flaw cases; FHR = ETA rate on clear-verdict cases.)*
+
+| Run | Protocol | Key changes | DER | FDR | AER | IDR | FHR | MCC | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| canary_run1 | single-round | Framing block + DEFER instruction + deterministic verdict + 10-model pool | 1.00 | — | — | 0.083 | — | +0.169 | Pre-reframe; IDR used old binary metric. DER fixed; over-rebuttal |
+| canary_run2 | single-round | REBUT-IMMATERIAL → MINOR; tighter caps; FATAL floor rule | 0.565 | — | — | 0.083 | — | +0.079 | Caps over-tightened: DER collapsed, IDR unchanged |
+| canary_multiround_run1 | multi-round | Restored caps; CONCEDE trigger; 3-outcome reframe; re-labeled 6 ETA cases | 0.471 | 0.786 | 0.739 | 0.000 | 0.773 | −0.107 | ETA over-prediction: DEFER free path, FATAL rule fires on partial rebuttals |
+| canary_multiround_run2 | multi-round | Substantive DEFER (3-question requirement) in DEFENDER.md + DEFENDER_R2.md | 0.588 | 0.536 | 0.217 | 0.600 | 0.227 | −0.064 | IDR recovered; AER collapsed (overcorrection) — IDR/AER tradeoff open |
 
 ---
 
@@ -352,13 +359,7 @@ Reviewed but kept `defense_wins`: hyp_204_case — subagent flagged 30-day matur
 | eval_scenario_812 | Span-level hypothesis, report-level metric | Direct hypothesis/metric mismatch — no design rationale explains testing X with a metric for Y |
 | eval_scenario_852 | Test set used in model selection | Test contamination is undeniable |
 
-**Final case distribution (45 total):**
-
-| Label | Count | % |
-|---|---|---|
-| defense_wins | 23 | 51% |
-| empirical_test_agreed | 17 | 38% |
-| critique_wins | 5 | 11% |
+*(Post-first-pass intermediate distribution: 23 defense_wins / 17 ETA / 5 critique_wins — superseded by second pass at top of this section. Final distribution: 17 / 23 / 5.)*
 
 **Files updated:** `canary_cases.json`, `canary_full.json` — `correct_position`, `final_verdict`, `correct_verdict`, and `ideal_debate_resolution.type` updated for all 7 cases.
 

@@ -1,0 +1,352 @@
+{
+  "case_id": "eval_scenario_868",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (Logistic Regression) and the Transformer model are compared on an equal footing to isolate the contribution of text modeling.",
+        "failure_mechanism": "The Transformer model receives 'attachment metadata' (file type, size, hash) as input features, while the Baseline model does not. Attachment metadata is a strong predictive signal for phishing (e.g., .exe, .zip, macro-enabled documents). By providing this feature to the Transformer but not the Baseline, the experiment conflates architectural superiority with feature availability. The claim that 'text modeling outperforms sender reputation' is confounded by the claim that 'text modeling + attachment metadata outperforms sender reputation + headers'.",
+        "evidence_test": "Re-run the experiment with the Baseline model also receiving attachment metadata features. If the performance gap narrows or reverses, the original advantage was due to feature imbalance, not text modeling.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline model's use of threat-intelligence reputation scores simulates the production status quo.",
+        "failure_mechanism": "The document states reputation scores are 'frozen at a snapshot taken at the end of the training period' (Month 12) to prevent leakage. However, in a production deployment during the Test Period (Months 16-18), the baseline would have access to reputation scores current to Month 16-18. Using stale (Month 12) reputation data for the Test Set artificially handicaps the baseline, inflating the Transformer's relative performance. This creates a silent misconfiguration where the baseline is evaluated under sub-optimal conditions compared to its real-world counterpart.",
+        "evidence_test": "Re-evaluate the baseline using reputation scores available at the time of inference for each test sample (M16-18). If the baseline performance improves significantly, the original advantage was an artifact of the configuration.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The training data (emails with 7-day dwell time) represents the distribution of phishing attacks in production.",
+        "failure_mechanism": "Filtering for a 'minimum 7-day dwell time' introduces a severe selection bias. It excludes 'fast-acting' phishing (reported immediately by users) and 'missed' phishing (never reported). The model is trained exclusively on 'slow-burn' or 'confirmed' phishing. In production, the model will encounter fast-acting attacks that lack the temporal history required to generate the training labels. This creates a distribution shift between the training distribution (slow, high-confidence) and the deployment distribution (fast, mixed-confidence).",
+        "evidence_test": "Evaluate the model on a held-out set of emails reported within 24 hours of receipt. If performance degrades significantly compared to the 7-day set, the training distribution is not representative of production.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Labels from user reports, sandbox detonation, and threat intelligence constitute reliable ground truth for training.",
+        "failure_mechanism": "Security labels are inherently noisy. User reports contain false positives (legitimate emails marked as phishing). Sandbox detonation misses zero-days. Threat intelligence signatures lag. While the 7-day dwell filter mitigates some noise, it does not eliminate label error. Training a classifier on noisy labels can lead to the model learning spurious correlations or failing to generalize to true negatives that were mislabeled as positives (or vice versa). The hypothesis assumes these labels are sufficiently accurate to drive learning, which is an unverified prerequisite.",
+        "evidence_test": "Perform a label audit on a random sample of training data by independent security analysts. Calculate the inter-annotator agreement and compare against the model's confidence scores. If high-confidence predictions align with mislabeled data, the label noise is corrupting the model.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A strict temporal split (Months 1-12, 13-15, 16-18) can be maintained while ensuring 'No email thread or campaign cluster is split across folds'.",
+        "failure_mechanism": "Phishing campaigns often span multiple months. A strict temporal split forces a decision: either split the campaign (violating the 'no split' rule and risking leakage) or exclude the campaign (violating the temporal split's data integrity). The document claims both constraints are met without explaining how campaigns crossing the Month 12/13 or 15/16 boundaries are handled. If they are moved to maintain cluster integrity, temporal leakage occurs. If they are dropped, the dataset is biased against long-running campaigns.",
+        "evidence_test": "Inspect the dataset to identify campaigns that span the validation/test boundaries. Verify if they were excluded or moved. If moved, check for temporal leakage.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC contains three material flaws that weaken the central claim: an unfair baseline comparison due to missing attachment features, a silent misconfiguration that handicaps the baseline with stale reputation data, and a distribution shift caused by filtering for 7-day dwell time. These issues suggest the reported performance advantage may be inflated or not generalizable to production conditions.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "The critique raises several valid concerns regarding the methodology of the experiment. Finding F1 highlights a potential flaw in the comparison between the Transformer model and the baseline model due to the inclusion of attachment metadata in the former but not the latter. This is a legitimate concern as it may confound the results. Finding F2 points out that using outdated threat-intelligence scores for the baseline model could unfairly disadvantage it, which is a significant issue that could skew results. Finding F3 discusses the potential selection bias introduced by the 7-day dwell time filter, which may not accurately represent the distribution of phishing attacks encountered in production. Finding F4 raises concerns about the reliability of the labels used for training, suggesting that noisy labels could lead to poor generalization. Finally, Finding F5 questions the feasibility of maintaining both a strict temporal split and the integrity of campaign clusters, which could introduce bias in the dataset. Each of these findings presents a material concern that could impact the validity of the experiment's conclusions, particularly regarding the comparison of model performance and the representativeness of the training data.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The inclusion of attachment metadata in the Transformer model is a deliberate design choice aimed at leveraging all available features for improved detection. The baseline model's architecture is intentionally limited to sender reputation and header features to establish a clear comparison of text modeling capabilities. This design decision is justified as it reflects the real-world scenario where attachment metadata is available and relevant for phishing detection."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The decision to freeze threat-intelligence scores at Month 12 was made to prevent future data leakage and ensure a fair evaluation of the model's performance. While it may not perfectly simulate real-world conditions, it provides a controlled environment for assessing the model's capabilities without introducing bias from more current data. This design choice is critical for maintaining the integrity of the evaluation process."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The 7-day dwell time filter is implemented to ensure that only high-confidence phishing emails are included in the training set. While this may introduce some bias, it is a necessary trade-off to reduce noise and improve the quality of training labels. The model's performance can still be evaluated on a broader set of emails in production, which may include faster-acting phishing attempts."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The methodology acknowledges the potential for label noise and includes a 7-day dwell time filter to mitigate this risk. While the labels may not be perfect, they are derived from multiple reliable sources, and the design incorporates post-hoc qualitative analysis to assess the impact of label quality on model performance. This approach allows for a more nuanced understanding of label reliability."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The methodology is designed to maintain both temporal integrity and campaign cluster integrity. While it is challenging to manage campaigns that span multiple months, the design includes controls to minimize leakage and ensure that the evaluation remains valid. The potential for bias is acknowledged, but the design aims to balance these competing constraints as effectively as possible."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been addressed with substantial rebuttals that demonstrate the design choices were deliberate and justified, resulting in adjusted severities that are all 3 or lower."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The defender's justification admits the Baseline model is 'intentionally limited' to sender reputation and headers, while the Transformer receives attachment metadata. This directly contradicts the claim that models are 'compared on an equal footing'. The rebuttal justifies the design choice but fails to resolve the confound identified in the finding: the performance gap may be due to feature availability rather than text modeling. The severity reduction (-4) is disproportionate given the fundamental feature imbalance remains unaddressed."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The defender explicitly concedes that freezing reputation scores 'may not perfectly simulate real-world conditions'. This admission validates the finding that the baseline is artificially handicapped compared to its production counterpart (which would use live scores). The argument that this prevents 'leakage' does not address the specific failure mechanism of evaluating the baseline under sub-optimal conditions. The severity reduction (-4) is unjustified as the simulation flaw remains."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The defender acknowledges the 7-day filter 'may introduce some bias' by excluding fast-acting phishing. This confirms the finding that the training distribution does not represent the production distribution (which includes fast-acting attacks). The rebuttal frames this as a 'necessary trade-off' but does not resolve the distribution shift risk or the claim that the training data represents production. The severity reduction (-4) is disproportionate."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 2,
+        "reasoning": "The defender acknowledges the 'potential for label noise' and cites mitigation strategies (7-day filter, post-hoc qualitative analysis). This partially addresses the concern about unverified prerequisites by introducing controls. However, it does not fully verify the reliability of the labels prior to training, leaving a residual risk that noise could still corrupt the model. The severity reduction is appropriate but not complete."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 3,
+        "reasoning": "The defender states the design 'includes controls to minimize leakage' but fails to specify the mechanism for handling campaigns that span temporal boundaries (e.g., how a campaign crossing Month 12 is handled). The finding specifically challenges the claim that both constraints can be maintained 'without explaining how'. The rebuttal admits 'potential for bias' but offers no evidence of the mechanism. The severity reduction (-3) is unjustified."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic's challenges highlight significant concerns regarding feature imbalance, simulation conditions, distribution representation, label reliability, and campaign handling. I contest the challenges where the design does address the concerns, but I will concede on the aspects where the methodology lacks direct control.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The feature imbalance between the Transformer and the Baseline models is a valid concern that I cannot adequately address. The inclusion of attachment metadata in the Transformer model does create a confounding factor that undermines the claim of an equal comparison. This flaw is significant enough to warrant a concession.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The admission that freezing reputation scores may not simulate real-world conditions accurately acknowledges a critical flaw in the evaluation of the baseline model. This misconfiguration does indeed handicap the baseline's performance and warrants a concession.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The acknowledgment that the 7-day dwell time filter may introduce bias confirms the risk of a distribution shift between training and production. This limitation is significant enough to concede as it affects the generalizability of the model's performance.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "While I recognize the residual risk of label noise, the design includes multiple controls to mitigate this issue. The 7-day dwell time filter and post-hoc qualitative analysis are designed to enhance label reliability, and while they do not fully eliminate the risk, they provide a structured approach to understanding label quality.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 3,
+        "justification": "The lack of a clear mechanism for handling campaigns that span temporal boundaries is a valid concern. The design does not adequately address how to maintain both temporal integrity and campaign cluster integrity, leading to a concession on this point.",
+        "r2_challenge_response": "CONCEDED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The concessions on findings F1, F2, F3, and F5 indicate undeniable flaws in the design that materially affect the evaluation. The remaining finding (F4) has been partially rebutted, but the overall outcome suggests that empirical testing is necessary to resolve the remaining uncertainties."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (Logistic Regression) and the Transformer model are compared on an equal footing to isolate the contribution of text modeling.",
+        "failure_mechanism": "The Transformer model receives 'attachment metadata' (file type, size, hash) as input features, while the Baseline model does not. Attachment metadata is a strong predictive signal for phishing (e.g., .exe, .zip, macro-enabled documents). By providing this feature to the Transformer but not the Baseline, the experiment conflates architectural superiority with feature availability. The claim that 'text modeling outperforms sender reputation' is confounded by the claim that 'text modeling + attachment metadata outperforms sender reputation + headers'.",
+        "evidence_test": "Re-run the experiment with the Baseline model also receiving attachment metadata features. If the performance gap narrows or reverses, the original advantage was due to feature imbalance, not text modeling.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline model's use of threat-intelligence reputation scores simulates the production status quo.",
+        "failure_mechanism": "The document states reputation scores are 'frozen at a snapshot taken at the end of the training period' (Month 12) to prevent leakage. However, in a production deployment during the Test Period (Months 16-18), the baseline would have access to reputation scores current to Month 16-18. Using stale (Month 12) reputation data for the Test Set artificially handicaps the baseline, inflating the Transformer's relative performance. This creates a silent misconfiguration where the baseline is evaluated under sub-optimal conditions compared to its real-world counterpart.",
+        "evidence_test": "Re-evaluate the baseline using reputation scores available at the time of inference for each test sample (M16-18). If the baseline performance improves significantly, the original advantage was an artifact of the configuration.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The training data (emails with 7-day dwell time) represents the distribution of phishing attacks in production.",
+        "failure_mechanism": "Filtering for a 'minimum 7-day dwell time' introduces a severe selection bias. It excludes 'fast-acting' phishing (reported immediately by users) and 'missed' phishing (never reported). The model is trained exclusively on 'slow-burn' or 'confirmed' phishing. In production, the model will encounter fast-acting attacks that lack the temporal history required to generate the training labels. This creates a distribution shift between the training distribution (slow, high-confidence) and the deployment distribution (fast, mixed-confidence).",
+        "evidence_test": "Evaluate the model on a held-out set of emails reported within 24 hours of receipt. If performance degrades significantly compared to the 7-day set, the training distribution is not representative of production.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Labels from user reports, sandbox detonation, and threat intelligence constitute reliable ground truth for training.",
+        "failure_mechanism": "Security labels are inherently noisy. User reports contain false positives (legitimate emails marked as phishing). Sandbox detonation misses zero-days. Threat intelligence signatures lag. While the 7-day dwell filter mitigates some noise, it does not eliminate label error. Training a classifier on noisy labels can lead to the model learning spurious correlations or failing to generalize to true negatives that were mislabeled as positives (or vice versa). The hypothesis assumes these labels are sufficiently accurate to drive learning, which is an unverified prerequisite.",
+        "evidence_test": "Perform a label audit on a random sample of training data by independent security analysts. Calculate the inter-annotator agreement and compare against the model's confidence scores. If high-confidence predictions align with mislabeled data, the label noise is corrupting the model.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A strict temporal split (Months 1-12, 13-15, 16-18) can be maintained while ensuring 'No email thread or campaign cluster is split across folds'.",
+        "failure_mechanism": "Phishing campaigns often span multiple months. A strict temporal split forces a decision: either split the campaign (violating the 'no split' rule and risking leakage) or exclude the campaign (violating the temporal split's data integrity). The document claims both constraints are met without explaining how campaigns crossing the Month 12/13 or 15/16 boundaries are handled. If they are moved to maintain cluster integrity, temporal leakage occurs. If they are dropped, the dataset is biased against long-running campaigns.",
+        "evidence_test": "Inspect the dataset to identify campaigns that span the validation/test boundaries. Verify if they were excluded or moved. If moved, check for temporal leakage.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC contains three material flaws that weaken the central claim: an unfair baseline comparison due to missing attachment features, a silent misconfiguration that handicaps the baseline with stale reputation data, and a distribution shift caused by filtering for 7-day dwell time. These issues suggest the reported performance advantage may be inflated or not generalizable to production conditions.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic's challenges highlight significant concerns regarding feature imbalance, simulation conditions, distribution representation, label reliability, and campaign handling. I contest the challenges where the design does address the concerns, but I will concede on the aspects where the methodology lacks direct control.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The feature imbalance between the Transformer and the Baseline models is a valid concern that I cannot adequately address. The inclusion of attachment metadata in the Transformer model does create a confounding factor that undermines the claim of an equal comparison. This flaw is significant enough to warrant a concession.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The admission that freezing reputation scores may not simulate real-world conditions accurately acknowledges a critical flaw in the evaluation of the baseline model. This misconfiguration does indeed handicap the baseline's performance and warrants a concession.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The acknowledgment that the 7-day dwell time filter may introduce bias confirms the risk of a distribution shift between training and production. This limitation is significant enough to concede as it affects the generalizability of the model's performance.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "While I recognize the residual risk of label noise, the design includes multiple controls to mitigate this issue. The 7-day dwell time filter and post-hoc qualitative analysis are designed to enhance label reliability, and while they do not fully eliminate the risk, they provide a structured approach to understanding label quality.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 3,
+        "justification": "The lack of a clear mechanism for handling campaigns that span temporal boundaries is a valid concern. The design does not adequately address how to maintain both temporal integrity and campaign cluster integrity, leading to a concession on this point.",
+        "r2_challenge_response": "CONCEDED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The concessions on findings F1, F2, F3, and F5 indicate undeniable flaws in the design that materially affect the evaluation. The remaining finding (F4) has been partially rebutted, but the overall outcome suggests that empirical testing is necessary to resolve the remaining uncertainties."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=6, CONCEDE \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 5,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=5, CONCEDE \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=5, CONCEDE \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 3,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "3 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

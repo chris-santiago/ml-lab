@@ -29,6 +29,7 @@ For each finding, apply this decision tree:
 2. **If the critic issued CHALLENGE or PARTIAL:**
    - Ask: "Is the critic's challenge mechanistically correct, or does it mischaracterize the design?"
    - If the design genuinely addresses the concern (even if you argued it imperfectly in R1): maintain or strengthen your `REBUT-DESIGN` or `REBUT-SCOPE` with a clearer explanation. You do not need to concede because your R1 argument was imperfect — only because the design is imperfect.
+   - **Before strengthening a REBUT-DESIGN:** Apply the resolve/mitigate test. Does the cited control *eliminate* the mechanism raised, or does it only *reduce its probability or impact*? If the control only mitigates, the concern's significance is still genuinely uncertain — switch to `DEFER` (with the settling experiment named) rather than doubling down on a REBUT that overstates what the control achieves.
    - If the concern cannot be resolved by argument — both sides are making valid points and only an experiment can settle it: switch to `DEFER`. Do not concede on genuinely ambiguous questions.
    - If the critic is correct and the methodology **has no design control for this concern at all**, AND the flaw would materially affect the primary evaluation metric: concede it. But this bar is high — only when there is genuinely nothing in the design addressing the issue.
 
@@ -52,6 +53,8 @@ However, DEFER must be substantive. To use DEFER, your justification must answer
 "I'm not sure" or "both parties could be right" is not a DEFER — it is a retreat. If you cannot name the settling experiment, you either have a REBUT argument (use it) or the concern is undeniable (CONCEDE).
 
 **`CONCEDE` is for undeniable flaws only.** Conceding under pressure when the design is actually sound is as wrong as a false critique. If you are conceding because the critic challenged you, not because the design is actually flawed, that is a calibration error.
+
+**DEFER signals a healthier design than CONCEDE.** `CONCEDE` means the design has nothing to say. `DEFER` means the design has a partial answer — the flaw is not undeniable, but the magnitude needs empirical resolution. Under challenge pressure, switching from REBUT to DEFER (when you recognize the control only mitigates) is correct and expected. Switching from REBUT to CONCEDE when the design does have something to say — even partially — is a calibration error in the wrong direction.
 
 ---
 

@@ -1,0 +1,293 @@
+{
+  "case_id": "eval_scenario_862",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "nvidia/nemotron-3-super-120b-a12b",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline is a fair comparison to the transformer to isolate the value of learned text representations.",
+        "failure_mechanism": "The experiment design creates a 'feature asymmetry' that guarantees the transformer an advantage regardless of its ability to 'understand' text. The transformer receives raw text (subject, body, sender name) as input, while the baseline is explicitly denied raw text and only receives 'keyword flags' and 'keyword density'. This means the transformer can learn any arbitrary n-gram, structural pattern, or semantic signal in the text, whereas the baseline is limited to the specific keywords the researchers chose to engineer. The result will not prove that 'transformers are better at text', but rather that 'having access to raw text is better than having access to a human-curated list of keywords'.",
+        "evidence_test": "Implement a baseline that uses a TF-IDF or BM25 representation of the raw text fed into the same XGBoost/LightGBM model. If the Transformer still outperforms the TF-IDF+GBM baseline, the claim about the Transformer's architectural advantage for text holds. If they perform similarly, the advantage was simply due to raw text access.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split (Quarters 1-12 train, 13-15 val, 16 test) ensures generalization to novel attack patterns.",
+        "failure_mechanism": "The PoC states that 'sender reputation score' is a feature for the baseline, derived from 'historical frequency and flagging rate from training data'. However, it does not specify how this is handled for the test set. If the sender reputation is updated using a sliding window or if the model is evaluated on a per-email basis without simulating the exact state of the reputation database at the moment of delivery in Quarter 16, it introduces look-ahead bias. More critically, if the 'sender reputation' is a static feature calculated once, it fails to account for the fact that in production, reputation is a dynamic signal. The model may be relying on the 'reputation' of a domain that was benign in Q1-12 but became malicious in Q16, or vice versa, without a mechanism to simulate the real-time update lag.",
+        "evidence_test": "Perform a 'point-in-time' correctness audit: for a sample of emails in the test set, verify that the 'sender reputation' feature used during inference was calculated using only data available *prior* to that specific email's timestamp, not the aggregate of the training set.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer's input representation is sufficient for the task.",
+        "failure_mechanism": "The sequence is truncated to 512 tokens. Phishing emails often use 'padding' techniques (adding large amounts of benign text, such as news articles or legal disclaimers, at the bottom of the email) to push the malicious payload/link beyond the truncation window of standard transformers. By truncating the body after preserving the subject and sender, the model may be systematically blind to the actual phishing signal in long emails, which is a common adversarial tactic.",
+        "evidence_test": "Analyze the distribution of the 'malicious signal' (e.g., the phishing URL or call to action) location within the email body. If a significant percentage of malicious signals occur after token 512, the truncation is a silent failure mode.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The use of a domain-agnostic BERT-like model is appropriate for phishing detection.",
+        "failure_mechanism": "Phishing emails contain highly specific artifacts (obfuscated URLs, HTML encoding, specific header anomalies) that are not present in the general-purpose corpora (Wikipedia/Books) used to pre-train DistilBERT/RoBERTa. While fine-tuning helps, the initial vocabulary may be suboptimal for the 'noise' and 'artifacts' that characterize phishing, potentially leading to excessive [UNK] tokens or poor subword splitting of malicious domains.",
+        "evidence_test": "Compare the tokenization efficiency (tokens per word) and [UNK] rate of the general-purpose tokenizer vs. a tokenizer trained on a security-specific corpus.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The PoC suffers from a critical baseline flaw: it compares a model with raw text access to a model without it, meaning any observed gain is attributed to 'raw text' rather than 'transformer architecture'. Additionally, there is a high risk of signal leakage regarding how sender reputation is calculated for the temporal test set.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 challenges whether the baseline provides a fair comparison to isolate the value of learned text representations, arguing that the transformer's advantage may stem merely from raw text access rather than architectural superiority. The methodology intends to test whether transformer text encoding improves performance over hand-engineered features by giving the baseline metadata but no raw text; however, the baseline only receives aggregated text statistics (length, keyword flags, density), not the raw text itself, leaving open the possibility that the observed gain is due to raw text presence. F2 raises a potential look\u2011ahead bias in the sender reputation feature, questioning whether the feature is computed using only prior data for each test\u2011set email. The preprocessing fit policy states that all encoders and scalers are fit exclusively on the training set and applied identically to validation and test sets, which should prevent look\u2011ahead, but the exact handling of the reputation score is not explicit. F3 notes that truncating the email body to 512 tokens could discard malicious payloads hidden via padding attacks, a common adversarial tactic; the design preserves subject and sender but truncates the body, and no analysis is presented to verify that the truncation does not harm performance. F4 questions the suitability of a domain\u2011agnostic BERT tokenizer for phishing\u2011specific artifacts, suggesting a possible increase in [UNK] tokens; this is a minor concern as fine\u2011tuning can mitigate tokenization mismatches.\n\nIn Pass\u202f1 we assess each claim\u2019s validity, note any design controls that address it, and identify where empirical verification would be needed to settle the concern.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The experiment deliberately compares a model that can learn from raw email text (the transformer) with a model that receives only hand\u2011engineered features and no raw text, to test whether encoding text provides a performance advantage over those features. This isolates the value of text encoding, not the superiority of the transformer architecture over other text models. The baseline\u2019s feature set (metadata plus text\u2011derived statistics) is intentionally limited to prevent it from accessing raw text, which aligns with the stated hypothesis. Thus the design choice is justified for the claimed evaluation."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The preprocessing fit policy explicitly states that all transformers (tokenizers, scalers, encoders, imputation rules) are fit exclusively on the training set (quarters\u202f1\u201112) and applied identically to validation and test sets. The sender reputation score is derived from historical frequency and flagging rate in the training data; under this policy it is computed solely from the training set and then held constant for later quarters, eliminating look\u2011ahead bias. This control directly addresses the critic\u2019s concern."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The truncation to 512 tokens could discard adversarial padding that pushes the malicious signal beyond the window. The current design includes only subject/sender preservation and post\u2011hoc feature\u2011importance analysis, which does not guarantee that truncation does not harm performance. To resolve this, we would need to evaluate the transformer with a longer sequence limit (e.g., 1024 tokens) or a hierarchical architecture on the same temporal split and compare PR\u2011AUC. If performance improves, truncation was harmful; if not, the design is adequate. This empirical test would settle the question."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "While phishing emails contain artifacts not seen in general\u2011purpose corpora, the BERT\u2011like model is fine\u2011tuned on the task\u2011specific data, allowing it to adapt embeddings and mitigate unknown\u2011token issues. Subword tokenization further reduces the [UNK] rate. Any residual tokenization mismatch is unlikely to meaningfully affect the primary metric (PR\u2011AUC) given the large training corpus and the strong signal from metadata and text, making this concern immaterial to the experiment\u2019s conclusions."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "One finding (F3) received a DEFER rebuttal, indicating that an empirical test is needed to resolve the truncation concern. No finding with adjusted severity \u2265\u202f7 was conceded, and not all findings have adjusted severity \u2264\u202f3, so the appropriate verdict is empirical_test_agreed."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 8,
+        "reasoning": "The defender's rebuttal is a circular justification. They argue that the design is intended to test if 'encoding text provides an advantage,' but they fail to address the mechanism of the flaw: the baseline is not a 'text encoding' baseline, it is a 'no-text' baseline. To isolate the value of the *Transformer's* learned representations (the hypothesis), one must compare it against other ways of encoding raw text (e.g., TF-IDF, BM25, or FastText). As currently designed, the experiment only proves that 'raw text is better than a few human-picked keywords,' which is a trivial result and does not validate the Transformer's specific utility. The severity remains high because the primary claim of the experiment is fundamentally confounded."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 4,
+        "reasoning": "The defender successfully addresses the 'look-ahead bias' (leakage from the future) by confirming that reputation is fit only on Q1-12. However, they introduce a new operational flaw: by holding the reputation score constant from Q1-12 through Q16, they are using stale data. In a real production environment, a domain that was benign in Q1-12 but became a known phishing source in Q14 would be flagged in Q16. By freezing the reputation, the baseline is artificially handicapped compared to a real-world system, and the transformer may appear better simply because it can 'see' the current text of the attack while the baseline relies on a 12-month-old reputation score. The leakage is solved, but the simulation of the production environment is now broken."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 5,
+        "reasoning": "The defender conceded the point and deferred the resolution to a future empirical test. No further challenge is needed."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The argument that fine-tuning and subword tokenization mitigate the general-purpose nature of the pre-trained model is standard and acceptable for a minor finding. The impact on PR-AUC is likely negligible compared to the other architectural concerns."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "For F1 we maintain that the design tests raw text vs no raw text, but to isolate the transformer's specific learned representation advantage we defer to an experiment adding a TF-IDF/BM25 baseline. For F2 we hold that freezing reputation ensures equal metadata information for both models, yet to address the concern that stale features may differentially affect the models we defer to a test with dynamic, point-in-time reputation. For F3 we accept the critic's point and keep the deferral for a truncation sensitivity test. For F4 we accept the critic's judgment that the tokenization concern is immaterial.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic argues that the experiment only shows raw text is better than a few hand-picked keywords, not that the transformer's learned text representations confer an advantage over other ways of encoding text. Our original design intentionally compares a model that can learn from raw email text (the transformer) with a model that receives only hand-engineered features and no raw text, to test whether encoding text provides a performance advantage over those features. This isolates the value of text encoding, not the superiority of the transformer architecture over other text models. To settle whether the transformer's learned representations add value beyond simple text encoding, we need to add a baseline that encodes the raw text with a standard method (e.g., TF-IDF or BM25) fed into the same gradient-boosted model. If the transformer still outperforms this text-encoded baseline, the advantage is due to its learned representations; if not, the gain is merely from raw text access.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic correctly notes that freezing the sender reputation score to the training set eliminates look-ahead bias but creates a potential mismatch with production, where reputation is updated over time and could help the baseline detect newly malicious domains. By holding reputation constant, both models see the same metadata, but the impact may differ: the baseline may rely more on reputation while the transformer leans on text, so the static feature could unfairly advantage the transformer. To resolve whether this differential effect materially changes the relative performance, we should compute reputation in a point-in-time fashion\u2014using only data available prior to each email's timestamp\u2014and re-evaluate both models under this dynamic metadata condition. If the transformer's advantage persists, the original conclusion holds; if it diminishes, the static reputation was confounding the comparison.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic's concern about truncation discarding adversarial padding remains valid; our current design only preserves subject/sender and truncates the body, which could systematically drop the phishing payload in long emails. We agree that an empirical test is needed: re-run the transformer with a longer sequence limit (e.g., 1024 tokens) or a hierarchical architecture that can process the full email, keeping the same temporal split, and compare PR-AUC. If performance improves, truncation was harmful; if not, the design is adequate.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "While phishing-specific artifacts may be under-represented in the general-purpose tokenizer's vocabulary, the model is fine-tuned on the task-specific data, allowing it to adapt embeddings and reduce unknown-token rates via subword tokenization. Any residual tokenization mismatch is unlikely to meaningfully affect the primary metric (PR-AUC) given the large training corpus and strong signals from metadata and text, making this concern immaterial to the experiment's conclusions.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "We deferred on F1, F2, and F3, acknowledging that the design requires empirical tests to resolve concerns about baseline comparability, feature staleness, and truncation effects, while the minor tokenization concern (F4) is immaterial. This reflects a genuine need for additional evidence to settle the remaining uncertainties."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline is a fair comparison to the transformer to isolate the value of learned text representations.",
+        "failure_mechanism": "The experiment design creates a 'feature asymmetry' that guarantees the transformer an advantage regardless of its ability to 'understand' text. The transformer receives raw text (subject, body, sender name) as input, while the baseline is explicitly denied raw text and only receives 'keyword flags' and 'keyword density'. This means the transformer can learn any arbitrary n-gram, structural pattern, or semantic signal in the text, whereas the baseline is limited to the specific keywords the researchers chose to engineer. The result will not prove that 'transformers are better at text', but rather that 'having access to raw text is better than having access to a human-curated list of keywords'.",
+        "evidence_test": "Implement a baseline that uses a TF-IDF or BM25 representation of the raw text fed into the same XGBoost/LightGBM model. If the Transformer still outperforms the TF-IDF+GBM baseline, the claim about the Transformer's architectural advantage for text holds. If they perform similarly, the advantage was simply due to raw text access.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split (Quarters 1-12 train, 13-15 val, 16 test) ensures generalization to novel attack patterns.",
+        "failure_mechanism": "The PoC states that 'sender reputation score' is a feature for the baseline, derived from 'historical frequency and flagging rate from training data'. However, it does not specify how this is handled for the test set. If the sender reputation is updated using a sliding window or if the model is evaluated on a per-email basis without simulating the exact state of the reputation database at the moment of delivery in Quarter 16, it introduces look-ahead bias. More critically, if the 'sender reputation' is a static feature calculated once, it fails to account for the fact that in production, reputation is a dynamic signal. The model may be relying on the 'reputation' of a domain that was benign in Q1-12 but became malicious in Q16, or vice versa, without a mechanism to simulate the real-time update lag.",
+        "evidence_test": "Perform a 'point-in-time' correctness audit: for a sample of emails in the test set, verify that the 'sender reputation' feature used during inference was calculated using only data available *prior* to that specific email's timestamp, not the aggregate of the training set.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer's input representation is sufficient for the task.",
+        "failure_mechanism": "The sequence is truncated to 512 tokens. Phishing emails often use 'padding' techniques (adding large amounts of benign text, such as news articles or legal disclaimers, at the bottom of the email) to push the malicious payload/link beyond the truncation window of standard transformers. By truncating the body after preserving the subject and sender, the model may be systematically blind to the actual phishing signal in long emails, which is a common adversarial tactic.",
+        "evidence_test": "Analyze the distribution of the 'malicious signal' (e.g., the phishing URL or call to action) location within the email body. If a significant percentage of malicious signals occur after token 512, the truncation is a silent failure mode.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The use of a domain-agnostic BERT-like model is appropriate for phishing detection.",
+        "failure_mechanism": "Phishing emails contain highly specific artifacts (obfuscated URLs, HTML encoding, specific header anomalies) that are not present in the general-purpose corpora (Wikipedia/Books) used to pre-train DistilBERT/RoBERTa. While fine-tuning helps, the initial vocabulary may be suboptimal for the 'noise' and 'artifacts' that characterize phishing, potentially leading to excessive [UNK] tokens or poor subword splitting of malicious domains.",
+        "evidence_test": "Compare the tokenization efficiency (tokens per word) and [UNK] rate of the general-purpose tokenizer vs. a tokenizer trained on a security-specific corpus.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The PoC suffers from a critical baseline flaw: it compares a model with raw text access to a model without it, meaning any observed gain is attributed to 'raw text' rather than 'transformer architecture'. Additionally, there is a high risk of signal leakage regarding how sender reputation is calculated for the temporal test set.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "For F1 we maintain that the design tests raw text vs no raw text, but to isolate the transformer's specific learned representation advantage we defer to an experiment adding a TF-IDF/BM25 baseline. For F2 we hold that freezing reputation ensures equal metadata information for both models, yet to address the concern that stale features may differentially affect the models we defer to a test with dynamic, point-in-time reputation. For F3 we accept the critic's point and keep the deferral for a truncation sensitivity test. For F4 we accept the critic's judgment that the tokenization concern is immaterial.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic argues that the experiment only shows raw text is better than a few hand-picked keywords, not that the transformer's learned text representations confer an advantage over other ways of encoding text. Our original design intentionally compares a model that can learn from raw email text (the transformer) with a model that receives only hand-engineered features and no raw text, to test whether encoding text provides a performance advantage over those features. This isolates the value of text encoding, not the superiority of the transformer architecture over other text models. To settle whether the transformer's learned representations add value beyond simple text encoding, we need to add a baseline that encodes the raw text with a standard method (e.g., TF-IDF or BM25) fed into the same gradient-boosted model. If the transformer still outperforms this text-encoded baseline, the advantage is due to its learned representations; if not, the gain is merely from raw text access.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic correctly notes that freezing the sender reputation score to the training set eliminates look-ahead bias but creates a potential mismatch with production, where reputation is updated over time and could help the baseline detect newly malicious domains. By holding reputation constant, both models see the same metadata, but the impact may differ: the baseline may rely more on reputation while the transformer leans on text, so the static feature could unfairly advantage the transformer. To resolve whether this differential effect materially changes the relative performance, we should compute reputation in a point-in-time fashion\u2014using only data available prior to each email's timestamp\u2014and re-evaluate both models under this dynamic metadata condition. If the transformer's advantage persists, the original conclusion holds; if it diminishes, the static reputation was confounding the comparison.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic's concern about truncation discarding adversarial padding remains valid; our current design only preserves subject/sender and truncates the body, which could systematically drop the phishing payload in long emails. We agree that an empirical test is needed: re-run the transformer with a longer sequence limit (e.g., 1024 tokens) or a hierarchical architecture that can process the full email, keeping the same temporal split, and compare PR-AUC. If performance improves, truncation was harmful; if not, the design is adequate.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "While phishing-specific artifacts may be under-represented in the general-purpose tokenizer's vocabulary, the model is fine-tuned on the task-specific data, allowing it to adapt embeddings and reduce unknown-token rates via subword tokenization. Any residual tokenization mismatch is unlikely to meaningfully affect the primary metric (PR-AUC) given the large training corpus and strong signals from metadata and text, making this concern immaterial to the experiment's conclusions.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "We deferred on F1, F2, and F3, acknowledging that the design requires empirical tests to resolve concerns about baseline comparability, feature staleness, and truncation effects, while the minor tokenization concern (F4) is immaterial. This reflects a genuine need for additional evidence to settle the remaining uncertainties."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=8, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 7,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "3 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

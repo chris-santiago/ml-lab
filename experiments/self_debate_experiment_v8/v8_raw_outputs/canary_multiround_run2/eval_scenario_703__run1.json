@@ -1,0 +1,470 @@
+{
+  "case_id": "eval_scenario_703",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "x-ai/grok-4.1-fast",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Free-text notes are screened to exclude outcome-predictive language (e.g., 'poor prognosis', 'comfort care') before being used for model training and evaluation.",
+        "failure_mechanism": "This is a form of TARGET LEAKAGE applied to the input features. In real deployment, clinical notes WILL contain prognostic language that clinicians have written. By removing this information, the experiment tests a sanitized version of the input that does not reflect production conditions. The model will appear to perform worse on deployment data containing this language, because it was never trained on such cases. This systematically inflates the apparent utility of the note embeddings while creating a deployment gap.",
+        "evidence_test": "Compare model performance on (a) original unscreened notes vs (b) screened notes on a held-out subset. If performance drops significantly on unscreened data, the screening is creating artificial inflation. Alternatively, audit what percentage of notes in each set contain screened terms.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The C-index is used as the sole hyperparameter selection criterion during cross-validation.",
+        "failure_mechanism": "C-index measures ranking discrimination only, not calibration. A model can have excellent discrimination (high C-index) but poorly calibrated probability estimates (e.g., predicting 10% risk when true risk is 50%). In clinical deployment, miscalibrated risks lead to over- or under-triage. Selecting hyperparameters based only on C-index may yield models that rank patients correctly but provide unreliable absolute risk estimates for clinical decision-making.",
+        "evidence_test": "Include calibration metrics (expected calibration error, reliability diagrams) in the cross-validation selection criterion, or use a composite objective (e.g., C-index + Brier score). Compare calibration curves between the selected model and alternatives.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Laboratory values are handled via forward-fill within 72 hours plus binary missingness indicators.",
+        "failure_mechanism": "Forward-fill assumes patient stability between measurements. In ICU settings, deteriorating patients may have labs drawn less frequently (informative missingness), while stable patients have regular monitoring. Forward-filling last-known values for deteriorating patients propagates stale normal values, masking acute changes. This creates a systematic bias where deteriorating patients appear more stable than they are, potentially degrading model discrimination on the highest-risk cases.",
+        "evidence_test": "Analyze the correlation between time-since-last-lab and mortality outcome. If patients who die have longer intervals between lab draws, forward-fill is systematically biasing toward normal values for sicker patients. Compare model performance with alternative imputation (e.g., last-observation-carried-backward, or using only same-day values).",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Admissions with documentation completeness below 50% in their unit-year cohort are excluded.",
+        "failure_mechanism": "This exclusion threshold may systematically remove higher-acuity patients (who may be too unstable for thorough documentation), patients in understaffed periods, or admissions from units with workflow disruptions. If excluded patients have different mortality rates or different note patterns than included patients, the model is trained on a selected subset that does not represent the full ICU population it will encounter in deployment.",
+        "evidence_test": "Compare mortality rates, SOFA scores, and length of stay between excluded and included admissions. If excluded patients have meaningfully different outcomes, report performance on the full cohort including exclusions, or quantify the selection bias.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline models (structured-only) provide sufficient comparison to establish the marginal value of notes.",
+        "failure_mechanism": "Without a trivial baseline (e.g., mean predictor, or model using only age/sex), it's impossible to assess whether the structured-only model provides any meaningful predictive value. If the structured baseline performs at near-random levels, any 'improvement' from adding notes is relative to a weak baseline, inflating the apparent importance of notes. The experiment compares note-augmented to structured-only but doesn't establish that structured-only is above chance.",
+        "evidence_test": "Add a trivial baseline (mean predictor, or logistic regression on age/sex only) and report its C-index. If structured-only baseline is near-trivial (C-index < 0.55), the comparison framework is weak.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 60/20/20 temporal split provides sufficient training data while maintaining robust test evaluation.",
+        "failure_mechanism": "With 15,000-25,000 total admissions and 5-10% mortality (750-2,500 positive cases), a 60% training split yields 450-1,500 positive training examples. While statistically workable, this is at the lower end for training a complex model with 768-dimensional embeddings plus structured features. Smaller training sets increase variance in hyperparameter selection and may lead to overfitting, particularly for the high-dimensional note embedding space.",
+        "evidence_test": "Perform learning curve analysis: plot training and validation C-index as a function of training set size. If performance continues to improve with more data, the current split is underpowered. Consider a 70/15/15 split or acquiring more data.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Note embeddings are created via mean pooling across all notes for each admission.",
+        "failure_mechanism": "Mean pooling treats all notes as equally informative regardless of content, timing, or author. A brief nursing note at hour 70 with minimal information carries equal weight to a detailed critical care attending note at hour 2. This dilutes the signal from high-information notes with noise from routine documentation. More sophisticated pooling (attention-weighted, or using the most informative note) might improve performance.",
+        "evidence_test": "Compare mean pooling to alternative pooling strategies (max pooling, attention-weighted, or using only the first note) on the validation set. If meaningful differences exist, mean pooling is suboptimal.",
+        "flaw_category": "below_threshold"
+      }
+    ],
+    "summary": "The experiment design has a FATAL signal leakage flaw: screening outcome-predictive language from clinical notes creates a mismatch between experimental and deployment conditions, inflating apparent performance. Additional material concerns include using C-index alone as the selection criterion (ignoring calibration), forward-filling lab values (potentially masking deterioration), and excluding low-documentation admissions (potential selection bias). The most critical fix is removing the text screening or applying it identically across all splits to reflect real-world note content.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "Analyzing each finding against the methodology design intent, which is a PoC to test if note embeddings add discrimination (C-index) for 30-day ICU mortality prediction beyond structured data alone, in a temporally split single-hospital dataset, with explicit confound controls including stratification, indicators, and sensitivity analyses.\n\nF1 (FATAL sev9): Critic claims screening outcome-predictive language (e.g., 'poor prognosis', 'comfort care') causes target leakage by sanitizing inputs, inflating note utility and creating deployment gap. However, methodology explicitly states this as 'Leakage prevention' (Section 3), a deliberate design choice to isolate predictive signal from contemporaneous clinical observations in first 72h notes, excluding retrospective or decision-based phrases that proxy outcomes rather than early predictors. This disadvantages the note model (removes signal only from notes) while structured baseline unaffected, making outperformance conservative evidence of note value. Consistent screening across train/val/test prevents leakage within the experiment; deployment gap exists but PoC scope (Section 8) is not full deployment readiness but marginal discrimination in controlled setting. No evidence inflation occurs\u2014critic's premise reverses causality. Design controls via screening directly address leakage concerns; remains certain this holds for PoC hypothesis.\n\nF2 (MATERIAL sev6): Critic argues C-index-only tuning ignores calibration, risking miscalibrated models for triage. Primary metric is C-index for discrimination/ranking (Section 6, clinical use case: triage), standard in survival analysis; calibration is secondary, evaluated on test set (Brier, slope) with net benefit/decision curves incorporating utility across thresholds. HP tuning on primary metric is conventional (Section 5); val set checks generalization, test locked. No design control forces composite tuning; calibration reported separately detects issues. Uncertain if tuning harms calibration without output, but metric choice aligns with scope/claims.\n\nF3 (MATERIAL sev5): Forward-fill + missing indicators for labs claimed to bias deteriorating patients by propagating stale values. Methodology anticipates informative missingness (Section 1), uses forward-fill within 72h + binary indicators (Section 3), and examines coefficients on indicators (Section 7 Confounds). Model learns from missingness patterns (e.g., sicker patients less monitored), directly countering bias claim. Stratified performance by SOFA detects high-risk issues. Design explicitly controls this; no unresolved uncertainty.\n\nF4 (MATERIAL sev5): Excluding <50% doc-complete unit-year cohorts biases toward lower-acuity. Exclusion is relative (stratified by cohort, Section 1), flags variable availability; performance stratified by note availability quartile/unit/year/SOFA (Sections 6-7), detecting selection effects. Sensitivity analyses isolate note contribution. Scope limits to representable population (Section 8); design controls quantify bias if present. No evidence of systematic removal of high-acuity without checks.\n\nF5 (MATERIAL sev4): No trivial baseline (e.g., age/sex) to validate structured baseline strength. Hypothesis tests marginal note value over structured EHR (SOFA, vitals, labs\u2014known strong predictors), with secondary baseline on summaries (Section 4). Trivial baseline orthogonal to claim; structured is appropriate clinical comparator. Scope (Section 8) is structured vs. notes+structured, not absolute/chance. Unnecessary for PoC.\n\nF6 (MINOR sev3): 60/20/20 split underpowers training (~450-1500 positives). Volume sufficient for Cox/XGBoost (common in ICU ML with similar N); temporal split preserves shift (Section 2). Stratifications ensure robustness; learning curves not required but variance controlled via CV. Minor concern, no impact on conclusions.\n\nF7 (MINOR sev2): Mean pooling suboptimal vs. attention/etc. Simple, standard pooling (Section 3); summaries control volume. Ablation suggested but not core to validity; optimization below threshold for PoC discrimination test.\n\nAll findings rebutted by explicit design choices (leakage prevention, indicators, stratifications, metric alignment, scope) or immateriality. No genuine flaws crossing design-change threshold; methodology sound for hypothesis.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -6,
+        "adjusted_severity": 3,
+        "justification": "Screening is explicitly 'Leakage prevention' (Section 3) to isolate contemporaneous predictive signal, disadvantaging notes (no inflation); consistent across splits ensures fair comparison for PoC hypothesis of marginal discrimination."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "C-index is primary metric for ranking/discrimination (Section 6); calibration secondary, evaluated on test (Brier/slope/net benefit); tuning on primary standard, with val/test separation."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Forward-fill + missing indicators explicitly for informative missingness (Sections 1,3); coefficients examined (Section 7), allowing model to learn patterns in deteriorating patients."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Exclusion relative to unit-year cohort (Section 1); performance stratified by note quartile/unit/year/SOFA (Sections 6-7) detects/quantifies any selection bias."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Scope claims marginal value over structured EHR (SOFA/vitals/labs, Section 4/8); trivial baseline outside hypothesis of notes vs. clinical structured comparator."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Sufficient N for Cox/XGBoost (450-1500 positives common); temporal split/CV control variance; below impact threshold for PoC conclusions."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Standard mean pooling with volume summaries (Section 3); minor optimization, does not invalidate discrimination test."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings rebutted to adjusted severity \u22643 via design controls, scope alignment, and immateriality; EXONERATE applies as no material flaws survive scrutiny. Methodology sound for PoC hypothesis."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The defender argues screening is 'leakage prevention' to isolate contemporaneous signal. This reframes but does NOT resolve the failure mechanism. The core issue is that in real deployment, clinical notes WILL contain prognostic language ('poor prognosis', 'comfort care'). By removing this content, the experiment trains and tests on a sanitized input that doesn't exist in production. The model will encounter this language in deployment but was never trained on it, creating a systematic deployment gap. The argument that it 'disadvantages notes' doesn't address the fundamental problem: the evaluation doesn't reflect real-world conditions. Calling it 'fair comparison' is irrelevant when the comparison is to an artificial baseline. The defender has not explained HOW the model would handle this language in deployment."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The defender argues C-index is the primary metric for ranking (which is true), and calibration is evaluated secondarily on the test set. However, the failure mechanism is that hyperparameter selection based ONLY on C-index may yield miscalibrated models. The defender notes calibration is evaluated on the test set, but this happens AFTER the model is already selected based on C-index. If the tuning process selects a miscalibrated model, the test set evaluation documents the problem but doesn't prevent it. The defender has not explained how selecting hyperparameters based solely on discrimination addresses the calibration concern - they've simply confirmed that calibration is evaluated, not that it's incorporated into model selection. The mechanism remains: models with excellent discrimination but poor calibration can be selected."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The defender argues that forward-fill plus missing indicators explicitly handles informative missingness, and examining coefficients allows the model to learn patterns. However, the failure mechanism is that forward-fill propagates stale normal values for deteriorating patients who have fewer labs drawn. The defender's response does not explain HOW the model learns to correct for this - examining coefficients is a diagnostic, not a mitigation. If deteriorating patients have last-known normal values forward-filled while sicker patients get new values, the model sees systematically different signal quality across risk levels. The defender has not explained the mechanism by which the model overcomes this systematic bias - merely that they will look at coefficients afterward. This describes detection, not prevention."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 3,
+        "reasoning": "The defender argues that stratified performance (by note quartile, unit, year, SOFA) can detect and quantify selection bias. However, this is an EVALUATION strategy, not a MITIGATION. The failure mechanism is that the model is trained on a selected subset that may not represent the full deployment population. Stratified performance can MEASURE performance differences, but it cannot UNDO the fact that the model was trained on excluded admissions. If excluded patients (below 50% documentation completeness) have systematically different outcomes or patterns, the model has not learned to handle them - stratifying test performance doesn't fix this. The defender is correct that stratification detects the issue, but this doesn't resolve the fundamental training set selection bias. The finding remains that the model may not represent the full ICU population."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender correctly invokes scope - the experiment is specifically scoped to test the marginal value of notes over structured EHR data (SOFA, vitals, labs, medications). This is a valid scientific framing: comparing a new approach to the current best practice (structured EHR), rather than to a trivial baseline. The defender is not required to include baselines outside their hypothesis scope. This is a legitimate scope limitation, not a flaw."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The defender argues that 450-1,500 positive cases is sufficient for Cox/XGBoost models, with temporal split and CV controlling variance. This is a reasonable statistical argument - these sample sizes are within common ranges for survival analysis. The learning curve concern is valid but speculative without evidence. The defender has provided sufficient justification that the split is not clearly underpowered for this proof-of-concept."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender correctly notes that mean pooling is a standard approach and that volume summaries are retained as features. This is a reasonable technical choice that doesn't invalidate the core discrimination test. Alternative pooling could improve performance but is a minor optimization concern, not a fundamental flaw."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "Deferring F1 due to genuine ambiguity on whether screening creates a material deployment gap (resolvable empirically); strengthening REBUT-DESIGN arguments for F2-F4 to explicitly detail how design mechanisms mitigate the raised failure modes; maintaining unchanged positions for ACCEPTed F5-F7.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "Critic correctly notes potential deployment gap, but design uniformly screens train/val/test to isolate descriptive clinical signal from clinician prognostic judgments (potentially redundant with structured features like SOFA/meds), providing conservative estimate of semantic content value. Genuine ambiguity on generalization: 1. Settling experiment: Split test set into screened/unscreened subsets (or use full unscreened test); evaluate screened note model C-index on both, and train/train unscreened note model for comparison vs structured baseline. 2. Vindicates design: Screened model shows <0.02 C-index drop on unscreened test (robust to language via embedding generalization or redundancy). 3. Validates critique: >0.05 drop indicates gap; conclusion changes to qualify claims as 'under screened conditions' or recommend unscreened retraining.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "Addresses challenge: Hyperparameter selection prioritizes primary clinical need (discrimination/ranking for triage via C-index, standard for Cox models); post-selection test evaluation of calibration (Brier score, slope) and net benefit explicitly balances discrimination with calibration in clinical utility assessment (Section 6). If C-tuned model miscalibrates (poor net benefit), utility claim rejected despite high C\u2014no selection of flawed model goes unchecked.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Addresses challenge: Forward-fill provides stable trajectory baseline; binary missingness indicators + time-since-last (implicit via timestamps) enable model to learn informative patterns (e.g., prolonged missing lactate post-hour-24 flags deterioration despite stale value, positive coefficient on indicator boosts risk). Post-hoc coefficient exam (Section 7) verifies mechanism; systematic bias prevented as model downweights/penalizes stale imputation for high-risk cases.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Addresses challenge: Exclusion mitigates unreliable/noisy note features from low-doc cohorts (data quality control, Section 1); train/test drawn from same high-quality pool prevents bias in comparison. Stratification by note quartile/unit/year/SOFA (Sections 6-7) + flagging enables pre-report comparison of excluded vs included mortality/SOFA (quantifies representativeness); variation triggers scoped claims/limits, undoing training concern via detection+transparency.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Scope claims marginal value over structured EHR (SOFA/vitals/labs, Section 4/8); trivial baseline outside hypothesis of notes vs. clinical structured comparator.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Sufficient N for Cox/XGBoost (450-1500 positives common); temporal split/CV control variance; below impact threshold for PoC conclusions.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Standard mean pooling with volume summaries (Section 3); minor optimization, does not invalidate discrimination test.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "One DEFER on F1 reflects genuine unresolved ambiguity about screening's deployment impact, resolvable by targeted empirical test; all other findings rebutted to low/zero severity via design/scope controls. This surfaces a real uncertainty for the experiment to address without conceding the core methodology."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Free-text notes are screened to exclude outcome-predictive language (e.g., 'poor prognosis', 'comfort care') before being used for model training and evaluation.",
+        "failure_mechanism": "This is a form of TARGET LEAKAGE applied to the input features. In real deployment, clinical notes WILL contain prognostic language that clinicians have written. By removing this information, the experiment tests a sanitized version of the input that does not reflect production conditions. The model will appear to perform worse on deployment data containing this language, because it was never trained on such cases. This systematically inflates the apparent utility of the note embeddings while creating a deployment gap.",
+        "evidence_test": "Compare model performance on (a) original unscreened notes vs (b) screened notes on a held-out subset. If performance drops significantly on unscreened data, the screening is creating artificial inflation. Alternatively, audit what percentage of notes in each set contain screened terms.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The C-index is used as the sole hyperparameter selection criterion during cross-validation.",
+        "failure_mechanism": "C-index measures ranking discrimination only, not calibration. A model can have excellent discrimination (high C-index) but poorly calibrated probability estimates (e.g., predicting 10% risk when true risk is 50%). In clinical deployment, miscalibrated risks lead to over- or under-triage. Selecting hyperparameters based only on C-index may yield models that rank patients correctly but provide unreliable absolute risk estimates for clinical decision-making.",
+        "evidence_test": "Include calibration metrics (expected calibration error, reliability diagrams) in the cross-validation selection criterion, or use a composite objective (e.g., C-index + Brier score). Compare calibration curves between the selected model and alternatives.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Laboratory values are handled via forward-fill within 72 hours plus binary missingness indicators.",
+        "failure_mechanism": "Forward-fill assumes patient stability between measurements. In ICU settings, deteriorating patients may have labs drawn less frequently (informative missingness), while stable patients have regular monitoring. Forward-filling last-known values for deteriorating patients propagates stale normal values, masking acute changes. This creates a systematic bias where deteriorating patients appear more stable than they are, potentially degrading model discrimination on the highest-risk cases.",
+        "evidence_test": "Analyze the correlation between time-since-last-lab and mortality outcome. If patients who die have longer intervals between lab draws, forward-fill is systematically biasing toward normal values for sicker patients. Compare model performance with alternative imputation (e.g., last-observation-carried-backward, or using only same-day values).",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Admissions with documentation completeness below 50% in their unit-year cohort are excluded.",
+        "failure_mechanism": "This exclusion threshold may systematically remove higher-acuity patients (who may be too unstable for thorough documentation), patients in understaffed periods, or admissions from units with workflow disruptions. If excluded patients have different mortality rates or different note patterns than included patients, the model is trained on a selected subset that does not represent the full ICU population it will encounter in deployment.",
+        "evidence_test": "Compare mortality rates, SOFA scores, and length of stay between excluded and included admissions. If excluded patients have meaningfully different outcomes, report performance on the full cohort including exclusions, or quantify the selection bias.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline models (structured-only) provide sufficient comparison to establish the marginal value of notes.",
+        "failure_mechanism": "Without a trivial baseline (e.g., mean predictor, or model using only age/sex), it's impossible to assess whether the structured-only model provides any meaningful predictive value. If the structured baseline performs at near-random levels, any 'improvement' from adding notes is relative to a weak baseline, inflating the apparent importance of notes. The experiment compares note-augmented to structured-only but doesn't establish that structured-only is above chance.",
+        "evidence_test": "Add a trivial baseline (mean predictor, or logistic regression on age/sex only) and report its C-index. If structured-only baseline is near-trivial (C-index < 0.55), the comparison framework is weak.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 60/20/20 temporal split provides sufficient training data while maintaining robust test evaluation.",
+        "failure_mechanism": "With 15,000-25,000 total admissions and 5-10% mortality (750-2,500 positive cases), a 60% training split yields 450-1,500 positive training examples. While statistically workable, this is at the lower end for training a complex model with 768-dimensional embeddings plus structured features. Smaller training sets increase variance in hyperparameter selection and may lead to overfitting, particularly for the high-dimensional note embedding space.",
+        "evidence_test": "Perform learning curve analysis: plot training and validation C-index as a function of training set size. If performance continues to improve with more data, the current split is underpowered. Consider a 70/15/15 split or acquiring more data.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Note embeddings are created via mean pooling across all notes for each admission.",
+        "failure_mechanism": "Mean pooling treats all notes as equally informative regardless of content, timing, or author. A brief nursing note at hour 70 with minimal information carries equal weight to a detailed critical care attending note at hour 2. This dilutes the signal from high-information notes with noise from routine documentation. More sophisticated pooling (attention-weighted, or using the most informative note) might improve performance.",
+        "evidence_test": "Compare mean pooling to alternative pooling strategies (max pooling, attention-weighted, or using only the first note) on the validation set. If meaningful differences exist, mean pooling is suboptimal.",
+        "flaw_category": "below_threshold"
+      }
+    ],
+    "summary": "The experiment design has a FATAL signal leakage flaw: screening outcome-predictive language from clinical notes creates a mismatch between experimental and deployment conditions, inflating apparent performance. Additional material concerns include using C-index alone as the selection criterion (ignoring calibration), forward-filling lab values (potentially masking deterioration), and excluding low-documentation admissions (potential selection bias). The most critical fix is removing the text screening or applying it identically across all splits to reflect real-world note content.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "Deferring F1 due to genuine ambiguity on whether screening creates a material deployment gap (resolvable empirically); strengthening REBUT-DESIGN arguments for F2-F4 to explicitly detail how design mechanisms mitigate the raised failure modes; maintaining unchanged positions for ACCEPTed F5-F7.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "Critic correctly notes potential deployment gap, but design uniformly screens train/val/test to isolate descriptive clinical signal from clinician prognostic judgments (potentially redundant with structured features like SOFA/meds), providing conservative estimate of semantic content value. Genuine ambiguity on generalization: 1. Settling experiment: Split test set into screened/unscreened subsets (or use full unscreened test); evaluate screened note model C-index on both, and train/train unscreened note model for comparison vs structured baseline. 2. Vindicates design: Screened model shows <0.02 C-index drop on unscreened test (robust to language via embedding generalization or redundancy). 3. Validates critique: >0.05 drop indicates gap; conclusion changes to qualify claims as 'under screened conditions' or recommend unscreened retraining.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "Addresses challenge: Hyperparameter selection prioritizes primary clinical need (discrimination/ranking for triage via C-index, standard for Cox models); post-selection test evaluation of calibration (Brier score, slope) and net benefit explicitly balances discrimination with calibration in clinical utility assessment (Section 6). If C-tuned model miscalibrates (poor net benefit), utility claim rejected despite high C\u2014no selection of flawed model goes unchecked.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Addresses challenge: Forward-fill provides stable trajectory baseline; binary missingness indicators + time-since-last (implicit via timestamps) enable model to learn informative patterns (e.g., prolonged missing lactate post-hour-24 flags deterioration despite stale value, positive coefficient on indicator boosts risk). Post-hoc coefficient exam (Section 7) verifies mechanism; systematic bias prevented as model downweights/penalizes stale imputation for high-risk cases.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Addresses challenge: Exclusion mitigates unreliable/noisy note features from low-doc cohorts (data quality control, Section 1); train/test drawn from same high-quality pool prevents bias in comparison. Stratification by note quartile/unit/year/SOFA (Sections 6-7) + flagging enables pre-report comparison of excluded vs included mortality/SOFA (quantifies representativeness); variation triggers scoped claims/limits, undoing training concern via detection+transparency.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Scope claims marginal value over structured EHR (SOFA/vitals/labs, Section 4/8); trivial baseline outside hypothesis of notes vs. clinical structured comparator.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Sufficient N for Cox/XGBoost (450-1500 positives common); temporal split/CV control variance; below impact threshold for PoC conclusions.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Standard mean pooling with volume summaries (Section 3); minor optimization, does not invalidate discrimination test.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "One DEFER on F1 reflects genuine unresolved ambiguity about screening's deployment impact, resolvable by targeted empirical test; all other findings rebutted to low/zero severity via design/scope controls. This surfaces a real uncertainty for the experiment to address without conceding the core methodology."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=9, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

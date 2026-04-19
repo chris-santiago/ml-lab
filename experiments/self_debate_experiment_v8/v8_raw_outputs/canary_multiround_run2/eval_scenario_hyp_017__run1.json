@@ -1,0 +1,470 @@
+{
+  "case_id": "eval_scenario_hyp_017",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 120-day chargeback window is sufficient to label all fraud in the dataset, and excluding transactions within this window at study end eliminates censored labels.",
+        "failure_mechanism": "The claim assumes all chargebacks are filed and sustained within 120 days. In reality, chargeback filing can be delayed by customers, and investigation/adjudication by the bank or card network can extend beyond 120 days, especially for complex cases. Furthermore, some fraud (e.g., account takeover leading to future transactions) may not manifest as a chargeback on the initial transaction but on later ones, creating a label lag longer than the window. Transactions labeled 'legitimate' in the training/validation sets (months 1-16) could have chargebacks filed after the 120-day cutoff used for labeling, causing mislabeled negative examples. This creates a systematic label noise bias that the model may learn, and performance metrics on the test set (which uses the same flawed labeling) become unreliable.",
+        "evidence_test": "Analyze the distribution of chargeback filing delays from a historical dataset where the final outcome is known (e.g., data older than 120 days + maximum observed adjudication time). Plot the cumulative proportion of sustained chargebacks over time. If the curve does not plateau near 100% by 120 days, the window is insufficient. Also, track label changes for a sample of transactions labeled 'legitimate' at 120 days after a longer period (e.g., 180 days).",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The primary evaluation metric (Precision-Recall AUC at a fixed FPR of 2\u20135%) directly answers the business question of fraud catch at a fixed review budget.",
+        "failure_mechanism": "Precision-Recall AUC (Area Under the Curve) is calculated across all thresholds, not at a single operational point. Optimizing for PR-AUC does not guarantee optimal recall at the specific FPR threshold of 2-5%. A model could have a superior PR-AUC but inferior recall at the target FPR if its score distribution is poorly calibrated in that region. The business objective is recall@FPR, not area under a curve. Using PR-AUC as the primary metric for model selection could lead to choosing a model that is suboptimal for the actual operational constraint.",
+        "evidence_test": "For the final selected models, plot recall as a function of FPR (a segment of the ROC curve) and directly compare recall at FPR=0.02 and FPR=0.05. If the model with the higher PR-AUC has lower recall at these points, the metric is misaligned.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (Train: 1-12, Val: 13-16, Test: 17-24) with verified fraud rates and feature distributions is sufficient to prevent leakage and simulate deployment.",
+        "failure_mechanism": "While the split prevents direct chronological leakage, it creates a potential for 'concept leakage' if fraud patterns evolve slowly. The validation set (months 13-16) is immediately after the training set and before the test set. Hyperparameters tuned on this validation period may overfit to short-term patterns that persist into the validation window but decay or change by the test window (months 17-24). This is a form of temporal overfitting. The 4-month validation window may not be long enough to capture seasonal or longer-cycle variations, leading to selection of a model that performs well on the near-future validation set but degrades on the farther-future test set, inflating the perceived out-of-time degradation.",
+        "evidence_test": "Perform a time-based cross-validation (e.g., rolling origin validation) where the validation period is always immediately prior to the test period being evaluated. Compare the model selected by the proposed single validation set to one selected by this more rigorous temporal CV. A significant performance difference indicates overfitting to the specific Val period.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer model ingests 'raw transaction sequences per account (last 10\u201330 transactions, chronologically ordered, padded uniformly)' using only information available at authorization time.",
+        "failure_mechanism": "Constructing the sequence of the last N transactions for a given transaction requires knowing the future order of transactions up to N steps ahead at the time of model inference. At authorization time for transaction T, the sequence of transactions T-1, T-2, ... T-N is known, but transaction T+1 does not exist yet. Therefore, using a fixed lookback window (e.g., last 30) is feasible. However, the document states sequences are 'padded uniformly.' If an account has fewer than the minimum sequence length (e.g., 10), the standard practice is to pad at the beginning. This padding uses a special token, but the model's positional embeddings may treat these padded positions as meaningful context. More critically, if the sequence construction for training uses the *full* history available in the training period, but at inference for a transaction early in an account's life, the sequence is short and heavily padded, creating a train-test distribution shift for the sequence length feature. The model's performance on new or low-activity accounts may degrade silently.",
+        "evidence_test": "Analyze model performance (recall@FPR) stratified by account transaction count or sequence length (e.g., accounts with <10 transactions vs. >=30). A significant drop in performance for short sequences would indicate this distribution shift problem. Also, audit the sequence construction logic to ensure it only uses past transactions and does not inadvertently include future ones during training.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (XGBoost on hand-engineered aggregates) and transformer (on raw sequences) comparison isolates the value of the transformer architecture/sequence modeling.",
+        "failure_mechanism": "The two models use entirely different feature sets (Set B vs. Set A). Any performance difference could be attributable to the informational content of the features themselves, not the model architecture. The transformer has access to raw, high-cardinality identifiers (hashed device IDs, IPs) and exact timestamps, which may allow it to memorize rare but predictive patterns (e.g., 'this specific device seen once before with fraud'). The baseline's aggregates (like 'device diversity') lose this specific signal. The experiment confounds feature representation with model architecture. The claimed hypothesis is about the transformer architecture, but the test is actually 'raw sequence features + transformer' vs. 'aggregate features + GBM'.",
+        "evidence_test": "Run an ablation: train the GBM baseline on a featurized version of the raw sequence data (e.g., embeddings or statistical summaries of the sequence not designed by a human). Alternatively, train the transformer on the hand-engineered aggregate features (Set B). This would help disentangle the source of improvement.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Preprocessing (scaling, encoding, imputation) is fit on the training set only and applied identically to validation and test sets, preventing leakage.",
+        "failure_mechanism": "For the transformer model, standard practice includes learning embeddings for categorical variables (like merchant category) during training. The 'fitting' of these embeddings inherently uses the training set's categorical distribution. If new, unseen categories appear in the validation or test sets (e.g., a new merchant category code), the model must handle them via an 'unknown' token. The document does not specify how out-of-vocabulary (OOV) categories are handled. A misconfiguration could be to ignore them or map them to a random embedding, silently degrading performance on transactions with novel categories that may be correlated with emerging fraud patterns.",
+        "evidence_test": "Check the frequency of OOV categorical values in the validation and test sets. Evaluate performance specifically on transactions containing OOV values. A significant performance drop would indicate a problem.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The experiment's conclusions generalize to the 24-month period studied.",
+        "failure_mechanism": "The test set covers months 17-24. If there is a gradual concept drift within this 8-month period, the model's performance in month 24 may be significantly worse than in month 17, but the aggregate metric over the entire period masks this degradation. The business deployment would be a continuously running model, so degradation at the end of the test period is a strong indicator of near-future performance drop.",
+        "evidence_test": "Plot the primary metric (recall at fixed FPR) calculated on a rolling monthly basis across the test period (months 17-24). A downward trend would indicate that the conclusion of 'outperformance' may not hold for the immediate future.",
+        "flaw_category": "context_dependent"
+      }
+    ],
+    "summary": "The PoC has a strong temporal design but contains a potentially fatal flaw in its ground truth labeling assumption and a misaligned primary metric. Several material concerns exist regarding temporal overfitting, feature-architecture confounding, and sequence construction.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 claims the 120-day chargeback window is insufficient and creates label noise. However, the design explicitly states this window 'aligns with card network chargeback periods and reflects true operational ground truth.' In the payments industry, the 120-day window is the standard regulatory/network cutoff for most CNP disputes. While some outliers exist, the design's exclusion of transactions within the final 120 days of the study period specifically prevents censored labels. The claim of 'systematic label noise' is a general risk in fraud detection, but the methodology follows industry-standard ground-truth definitions.\n\nF2 claims PR-AUC is the wrong metric for a fixed FPR goal. The critic is technically correct that PR-AUC is an aggregate, but the design explicitly lists 'Recall and precision at fixed FPR' as secondary metrics and states the threshold is 'operationally defined.' The PR-AUC is used as a general performance indicator, but the success measure is specifically 'higher fraud recall at the same review budget.' The design uses the AUC for model selection stability and the fixed-point recall for the final business conclusion.\n\nF3 argues that a single validation window (months 13-16) leads to temporal overfitting. This is a common critique of any non-rolling split. However, the design includes 'out-of-time degradation' analysis (months 17-20 vs 21-24) as a secondary metric. This specific analysis is designed to detect exactly what the critic is worried about: whether the model's performance decays over the test period.\n\nF4 suggests a distribution shift due to padding and sequence length. The critic misunderstands the 'raw transaction sequences' intent; padding is a standard transformer requirement and does not imply future-leakage. The concern about low-activity accounts is a valid performance observation, but not a design flaw that invalidates the hypothesis test, as both the transformer and the baseline (which uses rolling windows) must handle new accounts.\n\nF5 claims the experiment confounds architecture with features. The design explicitly acknowledges this in Section 9 ('Scope of Conclusions'), stating it does not establish whether the gain is due to sequence modeling or feature learning and that ablations would be needed for that. Since the objective is to see if the *system* (Transformer + Raw) outperforms the *system* (GBM + Aggregates), this is a scope definition, not a flaw.\n\nF6 and F7 are minor. F6 (OOV handling) is a standard implementation detail; F7 (monthly drift) is already addressed by the 'out-of-time degradation' secondary metric in Section 6.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The 120-day window is not an arbitrary choice but is explicitly aligned with card network chargeback periods (Section 2). The design further mitigates censoring by excluding transactions within the final 120 days of the study. This is the industry standard for establishing operational ground truth in CNP fraud."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "While PR-AUC is used for general model selection, the design explicitly defines the success measure as 'higher fraud recall at the same review budget' and lists 'Recall and precision at fixed FPR' as key metrics (Section 6). The operational decision is based on the fixed-point recall, not the AUC alone."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The risk of temporal overfitting is explicitly monitored via the 'out-of-time degradation' analysis (comparing months 17-20 vs 21-24) described in Section 6, which serves as the safeguard against the specific failure mechanism described."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The use of padding is a technical requirement for transformer architectures and does not introduce leakage. Performance variance on low-activity accounts is a model performance characteristic, not a methodology flaw that invalidates the comparison against the baseline."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The design explicitly defines the scope in Section 9, stating that the experiment tests the overall approach and does not claim to isolate the specific mechanism (architecture vs. features). The hypothesis is whether the transformer-based pipeline outperforms the GBM-based pipeline."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "OOV handling is an implementation detail. Given the scale of the training set (25M transactions), the categorical coverage is expected to be comprehensive for the primary fraud drivers."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "This is already addressed by the out-of-time degradation analysis mentioned in Section 6."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been rebutted using design controls or scope definitions. Every finding's adjusted severity is \u2264 3, meaning the methodology is sound for the stated objectives."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The rebuttal does not address the core failure mechanism: that some chargebacks may be filed or sustained after 120 days, creating systematic label noise. Citing 'industry standard' and 'card network periods' does not prove that 100% of sustained chargebacks occur within this window. The mechanism of delayed customer filing, extended adjudication, and fraud patterns with longer lag (e.g., account takeover) remains unaddressed. A design that assumes sufficiency without empirical validation is flawed. Severity adjustment from FATAL (8) to 3 is disproportionate."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 5,
+        "reasoning": "The rebuttal correctly notes that recall at fixed FPR is listed as a key metric. However, the failure mechanism is that PR-AUC is used as the primary metric for model selection, which could lead to selecting a suboptimal model for the operational point. The design does not specify that model selection uses recall@FPR rather than PR-AUC. If hyperparameter tuning optimizes PR-AUC, the concern remains. The severity adjustment is too large; residual risk exists."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The rebuttal correctly points to the out-of-time degradation analysis (months 17-20 vs 21-24) as a safeguard. This directly addresses the concern about temporal overfitting by monitoring performance decay within the test period. While not as rigorous as temporal CV, it provides a reasonable detection mechanism for the specific failure mode. The severity adjustment is appropriate."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The rebuttal mischaracterizes the concern as 'performance variance' rather than a distribution shift flaw. The failure mechanism is that heavy padding for short sequences creates a train-test distribution mismatch that could systematically degrade performance on new/low-activity accounts. Calling this 'not a methodology flaw' ignores that it biases the comparison if one model is more sensitive to this shift. The scope rebuttal is invalid\u2014this is a methodological issue affecting internal validity. Severity should remain MATERIAL."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal correctly cites Section 9, which explicitly states the experiment does not isolate the mechanism. The hypothesis as stated in Section 1 is about the 'transformer-based model' vs 'gradient-boosted baseline'\u2014a pipeline comparison, not an architecture isolation test. The finding correctly identifies a confound, but the design acknowledges this limitation in scope. Severity adjustment to 0 is appropriate."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 2,
+        "reasoning": "The rebuttal argues OOV handling is an 'implementation detail' and expects comprehensive coverage. This does not address the failure mechanism: that unseen categories in validation/test could degrade performance silently. Scale does not guarantee coverage\u2014new merchant categories, IP ranges, or device IDs emerge constantly. The design's silence on OOV handling leaves a concrete risk unmitigated. Severity should remain MINOR."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal correctly notes that out-of-time degradation analysis addresses this concern. The failure mechanism (masked degradation within test period) is detectable via the planned rolling analysis. The design already includes this safeguard, making the finding immaterial. Severity adjustment to 0 is appropriate."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I am maintaining my position on F1 and F4, as the critic's challenges mischaracterize the operational reality of fraud labeling and the nature of sequence padding. I am switching F2 to DEFER because the design is ambiguous on whether the hyperparameter tuning objective is PR-AUC or Recall@FPR, and this requires empirical clarification. I am conceding F6 as the design is indeed silent on OOV handling, which is a valid (though minor) omission. F3, F5, and F7 were accepted by the critic.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic argues that 120 days is an assumption. In the context of CNP fraud, the 120-day window is a hard constraint imposed by card network rules (Visa/Mastercard) for the majority of chargeback types. While 'some' cases may exceed this, the design's use of this window is not an 'assumption' but an alignment with the operational ground truth used by the bank's actual systems. Labeling fraud based on a window longer than the network's adjudication period would introduce a different bias: including non-operational labels that the bank cannot actually act upon. The exclusion of the final 120 days of the study ensures that every transaction in the test set has passed the network's primary window, minimizing censoring to the absolute minimum possible while remaining operationally relevant.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic correctly identifies an ambiguity: Section 6 lists PR-AUC as the primary metric but also emphasizes Recall@FPR. It is unclear if the 50-trial hyperparameter search optimizes for the AUC or the specific operational point. To settle this: 1) We will report the specific objective function used in the grid search. 2) If PR-AUC was used, we will re-run the selection using Recall@FPR (2-5%) as the objective. 3) If the resulting model selection differs, the critic's point is validated and the primary metric will be updated to Recall@FPR. If the selection remains the same, the design is vindicated.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic accepted the R1 rebuttal regarding out-of-time degradation analysis as a sufficient safeguard against temporal overfitting.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic's concern regarding distribution shift for short sequences is a valid observation of model behavior, but it is not a methodology flaw. Both the Transformer and the GBM baseline must handle 'new' accounts. The GBM handles this via aggregate features (e.g., 'account age' or 'count=0'), and the Transformer handles it via padding. If the Transformer performs worse on short sequences, that is a finding of the experiment (a weakness of the architecture), not a failure of the experimental design. The comparison remains fair because both models are evaluated on the same distribution of account histories in the test set.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The critic accepted the R1 rebuttal that the experiment is a pipeline comparison, as explicitly stated in the scope (Section 9).",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "The critic is correct that the design is silent on the specific mechanism for handling out-of-vocabulary (OOV) categories. While likely a minor impact, the lack of an explicit OOV strategy in the documentation is a gap in the design controls.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The critic accepted the R1 rebuttal that rolling monthly analysis in the test period addresses this concern.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The defense successfully rebutted most material concerns, but a genuine ambiguity regarding the model selection objective (PR-AUC vs Recall@FPR) was identified in F2, which has been deferred to an empirical check. No fatal flaws remain that would invalidate the overall comparison."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 120-day chargeback window is sufficient to label all fraud in the dataset, and excluding transactions within this window at study end eliminates censored labels.",
+        "failure_mechanism": "The claim assumes all chargebacks are filed and sustained within 120 days. In reality, chargeback filing can be delayed by customers, and investigation/adjudication by the bank or card network can extend beyond 120 days, especially for complex cases. Furthermore, some fraud (e.g., account takeover leading to future transactions) may not manifest as a chargeback on the initial transaction but on later ones, creating a label lag longer than the window. Transactions labeled 'legitimate' in the training/validation sets (months 1-16) could have chargebacks filed after the 120-day cutoff used for labeling, causing mislabeled negative examples. This creates a systematic label noise bias that the model may learn, and performance metrics on the test set (which uses the same flawed labeling) become unreliable.",
+        "evidence_test": "Analyze the distribution of chargeback filing delays from a historical dataset where the final outcome is known (e.g., data older than 120 days + maximum observed adjudication time). Plot the cumulative proportion of sustained chargebacks over time. If the curve does not plateau near 100% by 120 days, the window is insufficient. Also, track label changes for a sample of transactions labeled 'legitimate' at 120 days after a longer period (e.g., 180 days).",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The primary evaluation metric (Precision-Recall AUC at a fixed FPR of 2\u20135%) directly answers the business question of fraud catch at a fixed review budget.",
+        "failure_mechanism": "Precision-Recall AUC (Area Under the Curve) is calculated across all thresholds, not at a single operational point. Optimizing for PR-AUC does not guarantee optimal recall at the specific FPR threshold of 2-5%. A model could have a superior PR-AUC but inferior recall at the target FPR if its score distribution is poorly calibrated in that region. The business objective is recall@FPR, not area under a curve. Using PR-AUC as the primary metric for model selection could lead to choosing a model that is suboptimal for the actual operational constraint.",
+        "evidence_test": "For the final selected models, plot recall as a function of FPR (a segment of the ROC curve) and directly compare recall at FPR=0.02 and FPR=0.05. If the model with the higher PR-AUC has lower recall at these points, the metric is misaligned.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (Train: 1-12, Val: 13-16, Test: 17-24) with verified fraud rates and feature distributions is sufficient to prevent leakage and simulate deployment.",
+        "failure_mechanism": "While the split prevents direct chronological leakage, it creates a potential for 'concept leakage' if fraud patterns evolve slowly. The validation set (months 13-16) is immediately after the training set and before the test set. Hyperparameters tuned on this validation period may overfit to short-term patterns that persist into the validation window but decay or change by the test window (months 17-24). This is a form of temporal overfitting. The 4-month validation window may not be long enough to capture seasonal or longer-cycle variations, leading to selection of a model that performs well on the near-future validation set but degrades on the farther-future test set, inflating the perceived out-of-time degradation.",
+        "evidence_test": "Perform a time-based cross-validation (e.g., rolling origin validation) where the validation period is always immediately prior to the test period being evaluated. Compare the model selected by the proposed single validation set to one selected by this more rigorous temporal CV. A significant performance difference indicates overfitting to the specific Val period.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer model ingests 'raw transaction sequences per account (last 10\u201330 transactions, chronologically ordered, padded uniformly)' using only information available at authorization time.",
+        "failure_mechanism": "Constructing the sequence of the last N transactions for a given transaction requires knowing the future order of transactions up to N steps ahead at the time of model inference. At authorization time for transaction T, the sequence of transactions T-1, T-2, ... T-N is known, but transaction T+1 does not exist yet. Therefore, using a fixed lookback window (e.g., last 30) is feasible. However, the document states sequences are 'padded uniformly.' If an account has fewer than the minimum sequence length (e.g., 10), the standard practice is to pad at the beginning. This padding uses a special token, but the model's positional embeddings may treat these padded positions as meaningful context. More critically, if the sequence construction for training uses the *full* history available in the training period, but at inference for a transaction early in an account's life, the sequence is short and heavily padded, creating a train-test distribution shift for the sequence length feature. The model's performance on new or low-activity accounts may degrade silently.",
+        "evidence_test": "Analyze model performance (recall@FPR) stratified by account transaction count or sequence length (e.g., accounts with <10 transactions vs. >=30). A significant drop in performance for short sequences would indicate this distribution shift problem. Also, audit the sequence construction logic to ensure it only uses past transactions and does not inadvertently include future ones during training.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (XGBoost on hand-engineered aggregates) and transformer (on raw sequences) comparison isolates the value of the transformer architecture/sequence modeling.",
+        "failure_mechanism": "The two models use entirely different feature sets (Set B vs. Set A). Any performance difference could be attributable to the informational content of the features themselves, not the model architecture. The transformer has access to raw, high-cardinality identifiers (hashed device IDs, IPs) and exact timestamps, which may allow it to memorize rare but predictive patterns (e.g., 'this specific device seen once before with fraud'). The baseline's aggregates (like 'device diversity') lose this specific signal. The experiment confounds feature representation with model architecture. The claimed hypothesis is about the transformer architecture, but the test is actually 'raw sequence features + transformer' vs. 'aggregate features + GBM'.",
+        "evidence_test": "Run an ablation: train the GBM baseline on a featurized version of the raw sequence data (e.g., embeddings or statistical summaries of the sequence not designed by a human). Alternatively, train the transformer on the hand-engineered aggregate features (Set B). This would help disentangle the source of improvement.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Preprocessing (scaling, encoding, imputation) is fit on the training set only and applied identically to validation and test sets, preventing leakage.",
+        "failure_mechanism": "For the transformer model, standard practice includes learning embeddings for categorical variables (like merchant category) during training. The 'fitting' of these embeddings inherently uses the training set's categorical distribution. If new, unseen categories appear in the validation or test sets (e.g., a new merchant category code), the model must handle them via an 'unknown' token. The document does not specify how out-of-vocabulary (OOV) categories are handled. A misconfiguration could be to ignore them or map them to a random embedding, silently degrading performance on transactions with novel categories that may be correlated with emerging fraud patterns.",
+        "evidence_test": "Check the frequency of OOV categorical values in the validation and test sets. Evaluate performance specifically on transactions containing OOV values. A significant performance drop would indicate a problem.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The experiment's conclusions generalize to the 24-month period studied.",
+        "failure_mechanism": "The test set covers months 17-24. If there is a gradual concept drift within this 8-month period, the model's performance in month 24 may be significantly worse than in month 17, but the aggregate metric over the entire period masks this degradation. The business deployment would be a continuously running model, so degradation at the end of the test period is a strong indicator of near-future performance drop.",
+        "evidence_test": "Plot the primary metric (recall at fixed FPR) calculated on a rolling monthly basis across the test period (months 17-24). A downward trend would indicate that the conclusion of 'outperformance' may not hold for the immediate future.",
+        "flaw_category": "context_dependent"
+      }
+    ],
+    "summary": "The PoC has a strong temporal design but contains a potentially fatal flaw in its ground truth labeling assumption and a misaligned primary metric. Several material concerns exist regarding temporal overfitting, feature-architecture confounding, and sequence construction.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I am maintaining my position on F1 and F4, as the critic's challenges mischaracterize the operational reality of fraud labeling and the nature of sequence padding. I am switching F2 to DEFER because the design is ambiguous on whether the hyperparameter tuning objective is PR-AUC or Recall@FPR, and this requires empirical clarification. I am conceding F6 as the design is indeed silent on OOV handling, which is a valid (though minor) omission. F3, F5, and F7 were accepted by the critic.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic argues that 120 days is an assumption. In the context of CNP fraud, the 120-day window is a hard constraint imposed by card network rules (Visa/Mastercard) for the majority of chargeback types. While 'some' cases may exceed this, the design's use of this window is not an 'assumption' but an alignment with the operational ground truth used by the bank's actual systems. Labeling fraud based on a window longer than the network's adjudication period would introduce a different bias: including non-operational labels that the bank cannot actually act upon. The exclusion of the final 120 days of the study ensures that every transaction in the test set has passed the network's primary window, minimizing censoring to the absolute minimum possible while remaining operationally relevant.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic correctly identifies an ambiguity: Section 6 lists PR-AUC as the primary metric but also emphasizes Recall@FPR. It is unclear if the 50-trial hyperparameter search optimizes for the AUC or the specific operational point. To settle this: 1) We will report the specific objective function used in the grid search. 2) If PR-AUC was used, we will re-run the selection using Recall@FPR (2-5%) as the objective. 3) If the resulting model selection differs, the critic's point is validated and the primary metric will be updated to Recall@FPR. If the selection remains the same, the design is vindicated.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic accepted the R1 rebuttal regarding out-of-time degradation analysis as a sufficient safeguard against temporal overfitting.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic's concern regarding distribution shift for short sequences is a valid observation of model behavior, but it is not a methodology flaw. Both the Transformer and the GBM baseline must handle 'new' accounts. The GBM handles this via aggregate features (e.g., 'account age' or 'count=0'), and the Transformer handles it via padding. If the Transformer performs worse on short sequences, that is a finding of the experiment (a weakness of the architecture), not a failure of the experimental design. The comparison remains fair because both models are evaluated on the same distribution of account histories in the test set.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The critic accepted the R1 rebuttal that the experiment is a pipeline comparison, as explicitly stated in the scope (Section 9).",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "The critic is correct that the design is silent on the specific mechanism for handling out-of-vocabulary (OOV) categories. While likely a minor impact, the lack of an explicit OOV strategy in the documentation is a gap in the design controls.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The critic accepted the R1 rebuttal that rolling monthly analysis in the test period addresses this concern.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The defense successfully rebutted most material concerns, but a genuine ambiguity regarding the model selection objective (PR-AUC vs Recall@FPR) was identified in F2, which has been deferred to an empirical check. No fatal flaws remain that would invalidate the overall comparison."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 7,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

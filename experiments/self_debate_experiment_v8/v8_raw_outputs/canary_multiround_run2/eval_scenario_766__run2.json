@@ -1,0 +1,490 @@
+{
+  "case_id": "eval_scenario_766",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "anthropic/claude-3-haiku",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The chronological split (Months 1-12 train, 13-15 validation, 16-18 test) with user-group integrity prevents all forms of temporal leakage and ensures the model generalizes forward in time.",
+        "failure_mechanism": "While user-level leakage is prevented, feature-target leakage can still occur if features are constructed using information from after the observation window. The design states 'all observation windows for a single user are kept within one split' but does not specify the temporal alignment between the feature observation window and the label cutoff. If the 7-day observation window for a user in the test set (e.g., Month 16) ends less than 30 days before the label cutoff for the test period, the model could be trained to predict churn using behavior that occurs *after* the point in time when a prediction would be made in deployment. This violates the causal order required for operational use.",
+        "evidence_test": "Inspect the data generation code: for each user-week sample, verify that the feature observation window ends at least 30 days before the label determination date for that sample. If the test period is Months 16-18, and labels are defined as 'cancellation within exactly 30 days after the observation window', then the latest possible observation window in the test set must end before the final label cutoff date minus 30 days. A diagram of the temporal alignment for train, validation, and test samples would clarify this.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratifying churn rates across temporal splits controls for large-scale shifts in platform churn, ensuring the evaluation is not confounded by distribution shift.",
+        "failure_mechanism": "Forcing class balance across splits via stratification (e.g., by subsampling the majority class) artificially creates a stationary distribution that does not exist in production. The model will be evaluated on a test set whose churn rate has been manipulated to match the training rate. In deployment, the true churn rate may differ, and the model's precision/recall trade-off (selected at the validation threshold) will be miscalibrated. This inflates apparent performance because the model is not tested under the true future class distribution it must face.",
+        "evidence_test": "Check if the 'stratification' is performed by sampling (e.g., downsampling non-churners in high-churn periods) or is merely a check. If it is a sampling operation, compare the raw, unstratified churn rates in each temporal period. A significant drift in the raw rates would indicate the evaluation is not representative of the sequential prediction task.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (logistic regression on aggregate features) is a fair counterfactual because it receives 'the same preprocessing pipeline and hyperparameter tuning effort'.",
+        "failure_mechanism": "Logistic regression with L2 regularization is a highly constrained model class compared to gradient boosting. Giving it the 'same tuning effort' is not sufficient to ensure a fair comparison if the feature spaces are fundamentally different in dimensionality and non-linear interactivity. The event-level feature set is high-dimensional (e.g., hour-of-day segments, entropy measures) and likely contains complex interactions. Logistic regression cannot capture these without explicit feature engineering (interaction terms, polynomial features), which the design excludes. The performance gap may be attributable to model capacity, not to the informational value of event-level data per se. A fairer baseline would be gradient boosting on the *aggregate* features.",
+        "evidence_test": "Run an additional baseline: train the same gradient-boosted model (XGBoost/LightGBM) on the aggregate feature set only. Compare its performance to both the event-level GBM and the logistic regression baseline. If the GBM-aggregate performs similarly to the GBM-event-level, the hypothesis about event-level granularity is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The model selection criterion (highest validation AUPRC) and the operational constraint (precision \u226580%) are aligned and can be satisfied simultaneously.",
+        "failure_mechanism": "Optimizing for AUPRC does not directly control the precision-recall curve at the high-precision region required by the business (precision \u226580%). The model with the highest overall AUPRC might achieve this by having excellent performance at moderate precision levels (e.g., 50-70%) but could have a steep drop-off afterward, failing to achieve the required 80% precision at any reasonable recall. The validation process selects a model that may be operationally useless.",
+        "evidence_test": "During hyperparameter tuning, track not only overall validation AUPRC but also the maximum recall achievable at a precision of \u226580% for each candidate model. The final model selection should consider both metrics, potentially using a combined criterion (e.g., AUPRC * I[recall@80%precision > threshold]).",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding users who downgrade (rather than cancel) 'maintains clarity of the outcome' and does not introduce bias.",
+        "failure_mechanism": "Downgrades are a form of partial churn and may be preceded by similar behavioral signals as full cancellation. By excluding them, the model is trained and evaluated on a narrower, potentially easier problem. More importantly, in deployment, the platform likely cares about revenue loss, which includes downgrades. A model trained only on full cancellations may not generalize well to predicting downgrade risk, limiting its business utility. The label definition shapes the learning signal.",
+        "evidence_test": "Analyze the proportion of excluded downgrade events. If substantial (>10% of cancellation events), run a sensitivity analysis: include downgrades as a positive class (churn=1) and re-evaluate the performance gap. A large change in results would indicate the finding is sensitive to the label definition.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The robustness check 'Promotion-excluded windows' adequately detects if model lift is driven by promotional artifacts.",
+        "failure_mechanism": "The check only excludes the 7 days following *known* product events. Promotional effects can have longer tails, be driven by external events (e.g., a competing service's launch), or be subtle and not logged as 'major releases'. If the model's event-level features are particularly good at capturing behavioral anomalies during these unlogged promotional periods, the performance gap might still be a confounded artifact, but this check would not detect it.",
+        "evidence_test": "Perform a more general temporal stability analysis: compute the performance gap (GBM vs. LR) on a rolling weekly basis across the test period. Look for spikes in the gap correlated with any external timeline of events, not just known internal promotions.",
+        "flaw_category": "context_dependent"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The requirement of '\u22657 days prior activity' for inclusion does not create a sampling bias affecting the conclusion.",
+        "failure_mechanism": "This filter excludes newly acquired users in their first week. Churn risk is often highest in the early lifecycle, and the behavioral signals may differ. The model's performance is therefore only validated on the 'warmed-up' user population. If the business needs to predict churn for all users, including new ones, the experiment's conclusions may not hold.",
+        "evidence_test": "Report the proportion of the overall user base excluded by this filter. If significant, note the limitation in the scope of the claim.",
+        "flaw_category": "below_threshold"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "Using entropy of session timing as a feature is a valid way to detect binge vs. intermittent viewing.",
+        "failure_mechanism": "Entropy may not be the optimal measure for this behavioral pattern; regularity or burstiness metrics might be more interpretable. However, this is a feature engineering choice unlikely to invalidate the core hypothesis.",
+        "evidence_test": "Compare model feature importance for the entropy feature; if it's among the top features, its specific formulation could be explored further, but it's not a methodology flaw.",
+        "flaw_category": "null"
+      }
+    ],
+    "summary": "The design is generally sound but contains one potentially fatal flaw (F1) regarding temporal alignment and feature-target leakage, and several material flaws concerning evaluation inflation and baseline fairness that weaken the conclusiveness of the claimed superiority.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "The methodology appears to be well-designed and thoughtful, with several controls in place to ensure the validity of the experiment. The critic has raised some valid concerns, but many of them can be addressed or are not material to the core conclusions. I will go through each finding and provide my assessment and rebuttal.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The design explicitly states that 'all observation windows for a single user are kept within one split', which does prevent user-level leakage. However, the critic is correct that feature-target leakage could still occur if the observation window is not properly aligned with the label cutoff. To address this, the methodology should include a clear description of the temporal alignment between the feature observation window and the label determination date, ensuring that the observation window ends at least 30 days before the label is assigned. This design control would resolve the critic's concern."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic raises a valid point that stratifying churn rates across splits could artificially create a stationary distribution that does not exist in production. However, the methodology also states that the stratification is done to 'ensure the class distribution is balanced across splits, controlling for any large-scale shifts in platform churn over the 18-month horizon'. This suggests that the stratification is not a sampling operation, but rather a check to ensure the splits are representative of the true underlying distribution. As long as the raw, unstratified churn rates do not exhibit significant drift, this control should be sufficient to address the concern."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic's concern about the baseline model's capacity is valid, but it is not within the scope of the current experiment. The stated goal is to evaluate whether event-level features improve churn prediction compared to the current state-of-practice (aggregate features). The design acknowledges that the baseline model may be suboptimal, but it is a fair counterfactual for the specific question being asked. Running an additional gradient-boosted baseline on aggregate features would be a valuable extension, but it is not necessary to evaluate the core hypothesis."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The critic's concern about the potential mismatch between optimizing for overall AUPRC and satisfying the precision constraint is valid. However, the methodology states that the 'validation-selected threshold' is used to enforce the 80% precision requirement. This suggests that the model selection process explicitly considers both the overall AUPRC and the ability to achieve the desired precision-recall trade-off. As long as this validation-based threshold selection is properly implemented, the concern should be addressed."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The critic's point about downgrades being a form of partial churn and potentially valuable to predict is valid. However, the stated scope of the experiment is to evaluate churn prediction, not revenue loss prediction. Excluding downgrades maintains the clarity of the outcome and aligns with the specific hypothesis being tested. If the business later requires a model that can predict both full cancellations and downgrades, that would be a separate experiment with a different scope."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The critic's concern about the 'Promotion-excluded windows' check not detecting all potential promotional effects is valid. However, the methodology explicitly states that this check is meant to 'detect and bound promotional and seasonal confounding', not to eliminate it entirely. The scope of the experiment is to establish whether event-level features improve churn prediction in a held-out future period, not to produce a model that is universally robust to all confounds. The temporal stability analysis suggested by the critic would be a valuable extension, but it is not necessary to validate the core hypothesis."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The critic's concern about the '\u22657 days prior activity' filter excluding newly acquired users is valid. However, this is a minor limitation that does not materially affect the core conclusions of the experiment. The methodology is focused on evaluating churn prediction for the 'warmed-up' user population, which is a reasonable and common scope for such an experiment. Reporting the proportion of users excluded by this filter, as suggested, would be a useful addition, but it does not undermine the validity of the findings."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "After carefully reviewing the critique findings and the methodology, I believe the design is sound and the core hypothesis can be validly tested. The critic has raised some valid concerns, but most of them are either addressed by the existing design controls or are not material to the primary conclusions. The few minor limitations identified can be acknowledged in the scope of the claims without undermining the overall validity of the experiment."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The rebuttal acknowledges the concern but does not resolve it. The defender states 'the methodology should include a clear description' - this is not a design control, it's an admission that the current design lacks this critical specification. The failure mechanism is that feature-target leakage could occur if observation windows aren't properly aligned with label cutoffs. The rebuttal doesn't show that the design already prevents this; it merely suggests it should be added. Since the design as presented doesn't guarantee proper temporal alignment, the FATAL severity remains justified."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The rebuttal misinterprets the methodology. The design states 'churn rates are stratified to ensure the class distribution is balanced across splits' - this implies active balancing, not just checking. Stratification typically involves sampling to achieve balance. The defender's claim that 'this suggests the stratification is not a sampling operation' is contradicted by the wording 'stratified to ensure...balanced'. If it were merely a check, it would say 'verified to be balanced'. The failure mechanism - artificially creating stationary distributions - remains unaddressed. The rebuttal doesn't provide evidence that no sampling occurs."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The rebuttal incorrectly claims this is outside scope. The experiment's stated goal is to evaluate whether 'event-level features improve churn prediction' compared to aggregate features. If the performance gap is attributable to model capacity rather than feature granularity, the core hypothesis is not properly tested. A fair comparison requires controlling for model capacity. The defender's argument that 'it is a fair counterfactual for the specific question being asked' ignores that the question is about feature value, not framework superiority. The missing baseline remains a MATERIAL flaw within scope."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The rebuttal partially addresses the concern. The methodology does mention a 'validation-selected threshold' to enforce precision \u226580%, which suggests some operational constraint consideration. However, the failure mechanism is that optimizing for overall AUPRC during model selection might yield a model that performs poorly at the high-precision region. The rebuttal doesn't explain how the validation process ensures the selected model can achieve 80% precision with reasonable recall. The design should explicitly state that model selection considers both AUPRC and recall@80%precision. Residual concern remains about potential misalignment."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal correctly identifies this as a scope limitation. The experiment explicitly aims to predict 'churn' defined as subscription cancellation, not revenue loss. The design excludes downgrades to maintain label clarity, which is a valid methodological choice for this specific hypothesis. While the critic's point about business utility is valid, the defender correctly notes that predicting downgrades would be a separate experiment. The severity adjustment to 0 is appropriate as this is a conscious scope limitation, not a methodological flaw."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal correctly frames this as a scope limitation. The methodology explicitly states the check is to 'detect and bound' confounding, not eliminate it entirely, and acknowledges that 'robustness to all confounds' is a separate question. The critic's suggested temporal stability analysis would be valuable but is not required to validate the core hypothesis of whether event-level features improve prediction in a held-out period. The defender's scope argument is valid, and the MINOR finding can be reduced to 0."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal correctly identifies this as immaterial to the core conclusions. The \u22657 days prior activity filter is a standard practice for ensuring sufficient behavioral data. While it limits the population to 'warmed-up' users, this is a reasonable scope limitation that should be acknowledged but doesn't invalidate the experiment's findings for that population. The defender's suggestion to report the proportion excluded is appropriate but doesn't warrant maintaining a severity score. The adjustment to 0 is justified."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic has challenged several of my initial rebuttals, primarily around concerns that the design does not fully address potential sources of bias and confounding. I will maintain my positions where the design genuinely addresses the critic's concerns, but concede or defer on issues where the methodology lacks sufficient controls.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic is correct that the design does not explicitly specify the temporal alignment between the feature observation window and the label cutoff, leaving open the possibility of feature-target leakage. This is a critical flaw that my initial rebuttal did not adequately address. I concede this finding.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic is correct that the methodology states the churn rates are 'stratified to ensure the class distribution is balanced across splits', which implies an active sampling operation rather than just a check. My initial rebuttal was mistaken on this point. However, the intent of this stratification is to control for large-scale shifts in platform churn over the 18-month horizon, preventing the evaluation from being confounded by distribution drift. As long as the raw, unstratified churn rates do not exhibit significant drift across the temporal splits, this design control should be sufficient to address the critic's concern about artificially created stationary distributions.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic raises a valid point that the performance gap could be attributable to model capacity differences rather than the informational value of event-level features. To resolve this ambiguity, I propose running an additional baseline experiment: train the same gradient-boosted model (XGBoost/LightGBM) on the aggregate feature set only, and compare its performance to both the event-level GBM and the logistic regression baseline. If the GBM-aggregate performs similarly to the GBM-event-level, it would suggest the gap is more about model capacity than feature granularity. The results of this follow-up experiment would help determine whether the core hypothesis was properly tested.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The rebuttal accurately describes how the validation-based threshold selection is intended to align the model selection with the operational precision constraint of 80%. As long as this process is properly implemented, it should address the critic's concern about a potential mismatch between optimizing for overall AUPRC and satisfying the high-precision requirement. The design controls appear sufficient to resolve this issue.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The rebuttal correctly identifies the exclusion of downgrades as a scope limitation, not a methodological flaw. The experiment is focused on predicting full subscription cancellations, which is a valid and common objective. While the critic's point about revenue loss prediction is reasonable, that would be a separate experiment with a different scope. The severity adjustment to 0 is appropriate given this is a conscious scope decision, not a design issue.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The rebuttal correctly frames the 'Promotion-excluded windows' check as a scope limitation, not a design flaw. The methodology acknowledges that this check is meant to 'detect and bound' confounding, not eliminate it entirely, and that 'robustness to all confounds' is a separate question. The critic's suggested temporal stability analysis would be valuable, but is not required to validate the core hypothesis of whether event-level features improve prediction in a held-out period. The severity adjustment to 0 is appropriate given this is a scope limitation, not a methodological issue.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The rebuttal correctly identifies the \u22657 days prior activity filter as a minor limitation that does not materially affect the core conclusions of the experiment. While reporting the proportion of users excluded would be a useful addition, it does not undermine the validity of the findings for the 'warmed-up' user population that is the focus of this study. The severity adjustment to 0 is appropriate.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The critic has raised valid concerns about potential sources of bias and confounding in the design that cannot be fully resolved through argument alone. Specifically, the lack of explicit specification around temporal alignment between features and labels (F1), and the ambiguity around whether model capacity differences could drive the performance gap (F3). These issues warrant further empirical investigation to determine the true merits of the event-level feature hypothesis."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The chronological split (Months 1-12 train, 13-15 validation, 16-18 test) with user-group integrity prevents all forms of temporal leakage and ensures the model generalizes forward in time.",
+        "failure_mechanism": "While user-level leakage is prevented, feature-target leakage can still occur if features are constructed using information from after the observation window. The design states 'all observation windows for a single user are kept within one split' but does not specify the temporal alignment between the feature observation window and the label cutoff. If the 7-day observation window for a user in the test set (e.g., Month 16) ends less than 30 days before the label cutoff for the test period, the model could be trained to predict churn using behavior that occurs *after* the point in time when a prediction would be made in deployment. This violates the causal order required for operational use.",
+        "evidence_test": "Inspect the data generation code: for each user-week sample, verify that the feature observation window ends at least 30 days before the label determination date for that sample. If the test period is Months 16-18, and labels are defined as 'cancellation within exactly 30 days after the observation window', then the latest possible observation window in the test set must end before the final label cutoff date minus 30 days. A diagram of the temporal alignment for train, validation, and test samples would clarify this.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratifying churn rates across temporal splits controls for large-scale shifts in platform churn, ensuring the evaluation is not confounded by distribution shift.",
+        "failure_mechanism": "Forcing class balance across splits via stratification (e.g., by subsampling the majority class) artificially creates a stationary distribution that does not exist in production. The model will be evaluated on a test set whose churn rate has been manipulated to match the training rate. In deployment, the true churn rate may differ, and the model's precision/recall trade-off (selected at the validation threshold) will be miscalibrated. This inflates apparent performance because the model is not tested under the true future class distribution it must face.",
+        "evidence_test": "Check if the 'stratification' is performed by sampling (e.g., downsampling non-churners in high-churn periods) or is merely a check. If it is a sampling operation, compare the raw, unstratified churn rates in each temporal period. A significant drift in the raw rates would indicate the evaluation is not representative of the sequential prediction task.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (logistic regression on aggregate features) is a fair counterfactual because it receives 'the same preprocessing pipeline and hyperparameter tuning effort'.",
+        "failure_mechanism": "Logistic regression with L2 regularization is a highly constrained model class compared to gradient boosting. Giving it the 'same tuning effort' is not sufficient to ensure a fair comparison if the feature spaces are fundamentally different in dimensionality and non-linear interactivity. The event-level feature set is high-dimensional (e.g., hour-of-day segments, entropy measures) and likely contains complex interactions. Logistic regression cannot capture these without explicit feature engineering (interaction terms, polynomial features), which the design excludes. The performance gap may be attributable to model capacity, not to the informational value of event-level data per se. A fairer baseline would be gradient boosting on the *aggregate* features.",
+        "evidence_test": "Run an additional baseline: train the same gradient-boosted model (XGBoost/LightGBM) on the aggregate feature set only. Compare its performance to both the event-level GBM and the logistic regression baseline. If the GBM-aggregate performs similarly to the GBM-event-level, the hypothesis about event-level granularity is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The model selection criterion (highest validation AUPRC) and the operational constraint (precision \u226580%) are aligned and can be satisfied simultaneously.",
+        "failure_mechanism": "Optimizing for AUPRC does not directly control the precision-recall curve at the high-precision region required by the business (precision \u226580%). The model with the highest overall AUPRC might achieve this by having excellent performance at moderate precision levels (e.g., 50-70%) but could have a steep drop-off afterward, failing to achieve the required 80% precision at any reasonable recall. The validation process selects a model that may be operationally useless.",
+        "evidence_test": "During hyperparameter tuning, track not only overall validation AUPRC but also the maximum recall achievable at a precision of \u226580% for each candidate model. The final model selection should consider both metrics, potentially using a combined criterion (e.g., AUPRC * I[recall@80%precision > threshold]).",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding users who downgrade (rather than cancel) 'maintains clarity of the outcome' and does not introduce bias.",
+        "failure_mechanism": "Downgrades are a form of partial churn and may be preceded by similar behavioral signals as full cancellation. By excluding them, the model is trained and evaluated on a narrower, potentially easier problem. More importantly, in deployment, the platform likely cares about revenue loss, which includes downgrades. A model trained only on full cancellations may not generalize well to predicting downgrade risk, limiting its business utility. The label definition shapes the learning signal.",
+        "evidence_test": "Analyze the proportion of excluded downgrade events. If substantial (>10% of cancellation events), run a sensitivity analysis: include downgrades as a positive class (churn=1) and re-evaluate the performance gap. A large change in results would indicate the finding is sensitive to the label definition.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The robustness check 'Promotion-excluded windows' adequately detects if model lift is driven by promotional artifacts.",
+        "failure_mechanism": "The check only excludes the 7 days following *known* product events. Promotional effects can have longer tails, be driven by external events (e.g., a competing service's launch), or be subtle and not logged as 'major releases'. If the model's event-level features are particularly good at capturing behavioral anomalies during these unlogged promotional periods, the performance gap might still be a confounded artifact, but this check would not detect it.",
+        "evidence_test": "Perform a more general temporal stability analysis: compute the performance gap (GBM vs. LR) on a rolling weekly basis across the test period. Look for spikes in the gap correlated with any external timeline of events, not just known internal promotions.",
+        "flaw_category": "context_dependent"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The requirement of '\u22657 days prior activity' for inclusion does not create a sampling bias affecting the conclusion.",
+        "failure_mechanism": "This filter excludes newly acquired users in their first week. Churn risk is often highest in the early lifecycle, and the behavioral signals may differ. The model's performance is therefore only validated on the 'warmed-up' user population. If the business needs to predict churn for all users, including new ones, the experiment's conclusions may not hold.",
+        "evidence_test": "Report the proportion of the overall user base excluded by this filter. If significant, note the limitation in the scope of the claim.",
+        "flaw_category": "below_threshold"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "Using entropy of session timing as a feature is a valid way to detect binge vs. intermittent viewing.",
+        "failure_mechanism": "Entropy may not be the optimal measure for this behavioral pattern; regularity or burstiness metrics might be more interpretable. However, this is a feature engineering choice unlikely to invalidate the core hypothesis.",
+        "evidence_test": "Compare model feature importance for the entropy feature; if it's among the top features, its specific formulation could be explored further, but it's not a methodology flaw.",
+        "flaw_category": "null"
+      }
+    ],
+    "summary": "The design is generally sound but contains one potentially fatal flaw (F1) regarding temporal alignment and feature-target leakage, and several material flaws concerning evaluation inflation and baseline fairness that weaken the conclusiveness of the claimed superiority.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic has challenged several of my initial rebuttals, primarily around concerns that the design does not fully address potential sources of bias and confounding. I will maintain my positions where the design genuinely addresses the critic's concerns, but concede or defer on issues where the methodology lacks sufficient controls.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic is correct that the design does not explicitly specify the temporal alignment between the feature observation window and the label cutoff, leaving open the possibility of feature-target leakage. This is a critical flaw that my initial rebuttal did not adequately address. I concede this finding.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic is correct that the methodology states the churn rates are 'stratified to ensure the class distribution is balanced across splits', which implies an active sampling operation rather than just a check. My initial rebuttal was mistaken on this point. However, the intent of this stratification is to control for large-scale shifts in platform churn over the 18-month horizon, preventing the evaluation from being confounded by distribution drift. As long as the raw, unstratified churn rates do not exhibit significant drift across the temporal splits, this design control should be sufficient to address the critic's concern about artificially created stationary distributions.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic raises a valid point that the performance gap could be attributable to model capacity differences rather than the informational value of event-level features. To resolve this ambiguity, I propose running an additional baseline experiment: train the same gradient-boosted model (XGBoost/LightGBM) on the aggregate feature set only, and compare its performance to both the event-level GBM and the logistic regression baseline. If the GBM-aggregate performs similarly to the GBM-event-level, it would suggest the gap is more about model capacity than feature granularity. The results of this follow-up experiment would help determine whether the core hypothesis was properly tested.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The rebuttal accurately describes how the validation-based threshold selection is intended to align the model selection with the operational precision constraint of 80%. As long as this process is properly implemented, it should address the critic's concern about a potential mismatch between optimizing for overall AUPRC and satisfying the high-precision requirement. The design controls appear sufficient to resolve this issue.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The rebuttal correctly identifies the exclusion of downgrades as a scope limitation, not a methodological flaw. The experiment is focused on predicting full subscription cancellations, which is a valid and common objective. While the critic's point about revenue loss prediction is reasonable, that would be a separate experiment with a different scope. The severity adjustment to 0 is appropriate given this is a conscious scope decision, not a design issue.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The rebuttal correctly frames the 'Promotion-excluded windows' check as a scope limitation, not a design flaw. The methodology acknowledges that this check is meant to 'detect and bound' confounding, not eliminate it entirely, and that 'robustness to all confounds' is a separate question. The critic's suggested temporal stability analysis would be valuable, but is not required to validate the core hypothesis of whether event-level features improve prediction in a held-out period. The severity adjustment to 0 is appropriate given this is a scope limitation, not a methodological issue.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The rebuttal correctly identifies the \u22657 days prior activity filter as a minor limitation that does not materially affect the core conclusions of the experiment. While reporting the proportion of users excluded would be a useful addition, it does not undermine the validity of the findings for the 'warmed-up' user population that is the focus of this study. The severity adjustment to 0 is appropriate.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The critic has raised valid concerns about potential sources of bias and confounding in the design that cannot be fully resolved through argument alone. Specifically, the lack of explicit specification around temporal alignment between features and labels (F1), and the ambiguity around whether model capacity differences could drive the performance gap (F3). These issues warrant further empirical investigation to determine the true merits of the event-level feature hypothesis."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

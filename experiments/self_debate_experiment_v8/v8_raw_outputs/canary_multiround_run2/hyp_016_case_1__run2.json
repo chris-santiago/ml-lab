@@ -1,0 +1,647 @@
+{
+  "case_id": "hyp_016_case_1",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The sepsis label definition using three criteria (blood culture + antibiotic concordance, ICD-10 codes, qSOFA) with 'earliest of these clinical markers' produces a reliable, clinically meaningful target.",
+        "failure_mechanism": "These three criteria may not agree on the same underlying phenomenon. Blood culture + antibiotic concordance could reflect suspected rather than confirmed infection. ICD codes depend on clinician documentation behavior which varies by site and over time. qSOFA \u22652 has known poor sensitivity. Taking the 'earliest' marker amplifies timestamp noise \u2014 if a culture was ordered speculatively 6 hours before clinical deterioration, the label timestamp will be misaligned with the actual sepsis onset. The exclusion of 'uncertain or suspected but unconfirmed sepsis' is mentioned but never quantified \u2014 if a substantial fraction is excluded, this creates selection bias toward clearer cases that may not reflect the full clinical population.",
+        "evidence_test": "Report the inter-rater agreement (Cohen's kappa) between the three label definitions on a held-out labeled subset. Quantify the exclusion rate for 'uncertain' cases and compare demographics/outcomes between included and excluded admissions. Perform a sensitivity analysis comparing model performance when using each label definition individually vs. the combined approach.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split with a 6-month gap between validation and test (Jul-Dec 2022 vs Jan-Dec 2023) and the 12-month test period (2023) vs 18-month training period (2021-2022) adequately captures seasonal variation while maintaining valid comparison.",
+        "failure_mechanism": "The 6-month gap and 12-month test window create substantial temporal distribution shift. Healthcare practices, staffing, patient populations, and even sepsis management protocols evolve over 18+ months. The model trained on 2021-2022 data is being evaluated on 2023 data \u2014 this could reflect changes in documentation practices, hospital census, antibiotic stewardship policies, or COVID-19 aftermath effects that have nothing to do with model generalization. The stated purpose of capturing 'seasonal variation' is confounded with the reality that the test period is chronologically distant from training. Performance degradation could reflect either true distribution shift or the model failing to generalize, and the current design cannot distinguish these.",
+        "evidence_test": "Report year-over-year statistics on key covariates: sepsis prevalence by month, ICU vs ward ratio, missingness rates, medication administration patterns. Perform a temporal drift analysis showing how validation performance evolves across the test period (e.g., Q1 2023 vs Q4 2023). Compare model calibration between early and late test periods.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Forward-filling vital signs and lab values up to 24 hours with a binary missingness indicator adequately preserves temporal signal for the LSTM.",
+        "failure_mechanism": "Forward-filling propagates the last observed value forward even when the patient's condition has changed. In sepsis, deterioration often manifests as progressive changes (rising lactate, falling blood pressure) that forward-filling smooths away. A patient whose condition worsens over 12 hours will have their last-observed-normal values persisting, potentially masking the temporal pattern the LSTM is designed to capture. The binary missingness indicator only tells the model 'this value is stale' but not 'how stale' or 'for how long the patient was unstable.' The 24-hour window is long relative to the 6-hour prediction horizon \u2014 if a value is forward-filled from 23 hours ago, it's essentially stale.",
+        "evidence_test": "Ablate the forward-filling strategy: compare performance with (a) no forward-filling (masked values), (b) shorter forward-fill windows (4h, 8h, 12h), and (c) linear interpolation. Report the correlation between forward-fill duration and prediction error. Visualize attention weights to see if the model attends to forward-filled vs. actual observed values differently.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The prediction task formulation \u2014 predicting sepsis occurring >48 hours post-admission using data from the first 48 hours \u2014 is clinically meaningful and tests the model's ability to identify patients who will eventually become septic.",
+        "failure_mechanism": "This formulation conflates two different clinical questions: (1) 'Will this patient develop sepsis at any point during their admission?' and (2) 'Is this patient showing early signs of imminent sepsis onset?' The max-risk reduction across the 6-48 hour window answers question (1), but question (2) is what clinicians actually need \u2014 early warning before deterioration. A patient who develops sepsis on day 5 but has subtle early signs on day 1 will be labeled positive, but the model might correctly identify early risk on day 1 while incorrectly predicting no risk on day 2. The max aggregation obscures this. Furthermore, requiring sepsis to occur >48 hours post-admission excludes early-onset sepsis (which is clinically important) and creates an artificial boundary where the model's task changes at 48 hours.",
+        "evidence_test": "Report time-to-sepsis distribution in the test set \u2014 what fraction of positive cases occur within 72 hours vs. later? Evaluate the model at multiple prediction horizons (6h, 12h, 24h, 48h before onset) rather than just max risk. Compare performance on early-onset vs. late-onset sepsis cases. Report the correlation between prediction timing and actual onset timing.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The logistic regression baseline provides a fair comparison for isolating the benefit of temporal structure and learned interactions.",
+        "failure_mechanism": "The logistic regression uses 36 hand-engineered features including max/min/mean statistics, rate of change for key markers (lactate, WBC, creatinine), and interaction terms (lactate\u00d7HR, WBC\u00d7fever). This is a strong baseline that encodes substantial clinical domain knowledge. The LSTM, by contrast, learns its own representations from raw hourly sequences. The comparison therefore tests 'LSTM + learned representations' vs. 'hand-engineered features + logistic regression,' not 'temporal structure' per se. The LSTM might be learning representations that are functionally equivalent to the hand-engineered features, or it might be learning spurious temporal patterns that happen to correlate with sepsis in the training data. Without an ablation comparing the LSTM to a non-temporal model (e.g., feed-forward network on the same 20-dimensional hourly inputs aggregated to fixed features), the claim that temporal structure provides benefit is unproven.",
+        "evidence_test": "Add a feed-forward network baseline that takes the same 20-dimensional hourly inputs, aggregates them to 36 features (matching the logistic regression), and trains with the same hyperparameters. Compare this to both the LSTM and logistic regression. This isolates whether the benefit comes from the learned temporal representations or from the sequence architecture itself.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding predictions within 2 hours of ward/ICU transfers controls for documentation artifacts without losing clinically meaningful signal.",
+        "failure_mechanism": "Transfers are high-risk events where patient deterioration often occurs \u2014 a patient being transferred to ICU is itself a strong signal of clinical worsening. By excluding predictions during this window, the model cannot learn from one of the most informative moments in the patient trajectory. The stated rationale is that transfers 'trigger documentation reviews that can retroactively alter timestamps,' but this concern could be addressed by auditing timestamps rather than excluding the entire window. The exclusion might also create a gap where the model performs well on stable patients but fails on deteriorating patients who are about to transfer \u2014 exactly the population where early warning is most valuable.",
+        "evidence_test": "Report the volume of predictions excluded due to transfer proximity (as percentage of total predictions). Compare sepsis prevalence in excluded vs. included windows. Evaluate model performance on a held-out set where transfer windows are included but timestamps are audited. Report whether transfer events themselves (as features) are predictive of sepsis onset.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratifying test-set performance by ICU vs. ward status adequately controls for confounding by missingness patterns.",
+        "failure_mechanism": "ICU patients have different monitoring intensity (more frequent vitals, more labs) than ward patients, leading to different missingness patterns. The stratification is a good first step but doesn't address the underlying issue: the model might be learning to predict sepsis based on monitoring intensity (more data \u2192 higher sepsis probability) rather than clinical state. A patient with complete vital series might be flagged as high-risk simply because their data completeness signals ICU-level care, not because they are actually septic. The ablation of the missingness indicator is mentioned but not reported \u2014 if removing the indicator significantly degrades performance, it suggests the model is relying on data availability rather than clinical content.",
+        "evidence_test": "Report performance stratified by data completeness (not just ICU status). Compare model predictions between patients with complete vs. sparse sequences holding clinical status constant. Report the ablation results when missingness indicator is removed. Add a baseline that uses only observed values (no missingness indicator) and compare.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 6-hour prediction horizon combined with the 6-48 hour post-admission prediction window tests clinically actionable early warning.",
+        "failure_mechanism": "The '6-hour prediction horizon' is ambiguous \u2014 it could mean predicting 6 hours into the future (i.e., at time t, predict sepsis at t+6) or it could mean the model makes predictions every 6 hours. The text says 'hourly predictions are generated from 6 to 48 hours post-admission,' suggesting the latter. If the horizon is 6 hours, the model should be evaluated on its ability to predict sepsis onset at t+6 hours, not on whether sepsis occurs at any point in the 6-48 hour window. This conflation could inflate apparent performance if the model correctly identifies patients who will develop sepsis sometime in the window but incorrectly predicts the timing.",
+        "evidence_test": "Clarify the prediction horizon definition. If it means 'predicting 6 hours before onset,' evaluate precision at fixed horizons (predicting sepsis at exactly t+6h, t+12h, etc.). Report the distribution of prediction-to-onset intervals for true positives.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 95% confidence intervals via bootstrap resampling provide reliable uncertainty quantification for test-set metrics.",
+        "failure_mechanism": "Bootstrap resampling assumes the test set is representative of the underlying population. With a 12-month test period potentially containing temporal drift, bootstrap samples might not capture the full uncertainty due to distribution shift. Additionally, if the test set has a limited number of positive cases (sepsis is typically 5-15% of admissions), bootstrap variance could be large, making CIs wide and potentially uninformative for comparing model performance.",
+        "evidence_test": "Report the number of positive cases in the test set. Report bootstrap CI width relative to the point estimate. Consider alternative uncertainty quantification (e.g., Bayesian approaches, conformal prediction) that doesn't assume i.i.d. sampling.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The sensitivity analysis with stricter label definition (blood culture + antibiotic concordance within 6 hours) provides robustness evidence for the primary results.",
+        "failure_mechanism": "The sensitivity analysis is mentioned but not described in detail \u2014 it's unclear whether this analysis was actually performed, what the results were, or how they compare to the primary results. Without seeing this analysis, it's impossible to assess whether the findings are robust to label definition choices.",
+        "evidence_test": "Report the sensitivity analysis results explicitly. Compare model performance, calibration, and feature importance between the primary label definition and the stricter definition. Quantify the agreement between the two label sets.",
+        "flaw_category": "below_threshold"
+      }
+    ],
+    "summary": "This PoC has significant methodology issues that weaken its conclusions. The most critical are: (1) the multi-criteria sepsis label definition introduces noise and potential bias without quantification (F1, FATAL); (2) the temporal split creates substantial distribution shift between training (2021-22) and test (2023) periods that cannot be distinguished from generalization failure (F2, FATAL); (3) forward-filling up to 24 hours may mask the temporal patterns the LSTM is designed to capture (F3, MATERIAL); (4) the prediction task formulation conflates 'will this patient develop sepsis' with 'is this patient deteriorating now' (F4, MATERIAL); (5) the baseline comparison doesn't isolate temporal structure benefit (F5, MATERIAL). The PoC would benefit from label agreement analysis, temporal drift monitoring, alternative imputation strategies, and a proper temporal ablation baseline.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "I have analyzed the 10 findings against the design of the Sepsis Prediction PoC. \n\nF1 (Label Definition) is a common critique in sepsis research. The design uses a composite label (Culture+Abx, ICD-10, qSOFA) to capture different clinical manifestations. The 'earliest marker' approach is a deliberate choice to capture the onset of the clinical suspicion phase, which is the actionable window for clinicians. The exclusion of 'uncertain' cases is a standard noise-reduction step for PoCs to establish a signal ceiling. This is a design choice, not a flaw.\n\nF2 (Temporal Split) claims the 6-month gap and 12-month test window create an unmanageable shift. However, the design explicitly states this was done to 'capture seasonal variation and concept drift.' In a real-world deployment, a model trained on 2021-2022 data *must* work on 2023 data. Testing on a distant temporal block is the gold standard for validating robustness against drift, not a flaw. This is a REBUT-DESIGN.\n\nF3 (Forward-filling) argues that filling values for 24h masks deterioration. However, the design appends a binary missingness indicator. LSTMs are capable of learning that a value is 'stale' when the indicator is active. Furthermore, for many labs (e.g., creatinine), values don't change hourly, making forward-fill clinically appropriate. This is a REBUT-DESIGN.\n\nF4 (Task Formulation) critiques the max-risk reduction and the 48h boundary. The 48h boundary is a specific design control to isolate 'hospital-acquired' sepsis from 'community-acquired' sepsis (which would be a different prediction task). The max-risk reduction is a deliberate choice to assess patient-level sensitivity (the 'ever-septic' question) to reduce noise from retrospective charting timestamps. This is a REBUT-DESIGN.\n\nF5 (Baseline) suggests the LR baseline is too strong or doesn't isolate 'temporal structure.' The LR baseline uses 24h windows and rates of change, which are the standard 'manual' way to capture temporal signals. By beating this, the LSTM proves it can learn *better* temporal representations than a human expert. A feed-forward network on aggregated features is essentially what the LR is. This is a REBUT-DESIGN.\n\nF6 (Transfer Windows) argues that excluding 2h around transfers loses signal. The design explicitly identifies this as a control for 'documentation reviews that can retroactively alter timestamps.' In EHR data, the 'transfer' event often triggers a batch of orders and notes that are back-dated or entered simultaneously, creating massive leakage. This is a necessary confound control. REBUT-DESIGN.\n\nF7 (Missingness) claims stratification by ICU/Ward is insufficient. The design includes an ablation of the missingness indicator and stratification. While the critic wants more, the current controls are standard for a PoC to ensure the model isn't just a 'proxy for ICU status.' REBUT-DESIGN.\n\nF8 (Horizon Ambiguity) is a terminology issue. The '6-hour prediction horizon' refers to the lead time before the label timestamp. The '6-48 hour window' refers to the observation period. This is a minor clarification. REBUT-IMMATERIAL.\n\nF9 (Bootstrap) is a general critique of bootstrapping. Given the 12-month test set, the sample size is likely sufficient for the Central Limit Theorem to hold for AUC-ROC. REBUT-IMMATERIAL.\n\nF10 (Sensitivity Analysis) notes the results aren't reported. The design *includes* the analysis in the methodology; the critic is complaining that the *results* aren't in the document. This is a reporting nit, not a methodological flaw. REBUT-IMMATERIAL.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The composite label is a deliberate design choice to ensure high recall of sepsis events across different clinical presentations. The 'earliest marker' approach specifically targets the 'suspicion window' which is the primary clinical target for early intervention."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The temporal gap is not a flaw but a rigorous test of generalization. Evaluating on a chronologically distant year (2023) is the only way to prove the model is robust to the very distribution shifts the critic is concerned about."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "Forward-filling is paired with a binary missingness indicator, allowing the LSTM to distinguish between a current measurement and a stale one. This is a standard architecture for EHR sequence modeling."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The >48h constraint is a specific scope control to isolate hospital-acquired sepsis. The max-risk reduction is a deliberate choice to prioritize patient-level identification over timestamp-precise onset prediction, which is often noisy in retrospective data."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The LR baseline uses hand-engineered temporal features (rates of change, windows). Beating this baseline demonstrates that the LSTM's learned temporal representations are superior to expert-defined ones, which is the core hypothesis."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Excluding the 2h window around transfers is a critical confound control to prevent label leakage from retroactive documentation updates that typically occur during transfer events."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The design controls for monitoring intensity via both stratification (ICU vs Ward) and the ablation of the missingness indicator, which are sufficient for a PoC to verify the model isn't simply detecting 'high-intensity care'."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "This is a terminology clarification. The 6-hour horizon is the lead time; the 6-48h window is the evaluation period. This does not affect the validity of the AUC-ROC."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Bootstrap resampling is a standard and robust method for CI estimation in medical ML when the test set is sufficiently large."
+      },
+      {
+        "finding_id": "F10",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The sensitivity analysis is part of the design; the critic's concern is about the reporting of results, not the methodology itself."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been rebutted as either deliberate design choices to control for EHR-specific confounds (leakage, noise, drift) or as immaterial points. Every finding's adjusted severity is \u2264 3, satisfying the conditions for EXONERATE."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The rebuttal is a generic design justification that does not address the specific failure mechanism. It states the composite label is a 'deliberate design choice' but doesn't explain how this choice avoids the reliability problem: the three criteria measure different clinical phenomena (culture+antibiotic reflects suspicion, ICD codes reflect documentation behavior, qSOFA reflects physiological derangement). Taking the 'earliest' marker amplifies timestamp noise when culture orders precede actual deterioration. The rebuttal also doesn't address the unquantified exclusion rate for 'uncertain' cases, which creates selection bias. The severity adjustment from 7 to 3 is disproportionate - a FATAL finding requires a mechanistic rebuttal, not a scope statement."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The rebuttal reframes the temporal gap as a 'rigorous test of generalization' but this doesn't resolve the core concern: the design cannot distinguish performance degradation due to true distribution shift from model failure to generalize. The defender essentially concedes the temporal shift exists but argues it's intentional - yet the finding's failure mechanism is that the design cannot disentangle these explanations. The rebuttal also doesn't address the need for temporal drift analysis (e.g., Q1 vs Q4 2023 performance) to quantify how performance evolves. The severity adjustment from 8 to 3 is disproportionate for a FATAL finding - the rebuttal accepts the shift as a feature without providing evidence the model generalizes across it."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The rebuttal invokes 'standard architecture' but doesn't address the specific failure mechanism: forward-filling propagates stale values that mask progressive changes characteristic of sepsis deterioration (rising lactate, falling BP). The binary missingness indicator only tells the model 'this value is stale' but not 'how stale' or that the patient's clinical state may have changed. The 24-hour forward-fill window is long relative to the 6-hour prediction horizon - a value forward-filled from 23 hours ago is essentially stale. The rebuttal provides no evidence that the LSTM can recover the temporal pattern from stale values plus a binary flag. The severity adjustment from 6 to 3 is too large."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 4,
+        "reasoning": "The rebuttal has partial merit: the >48h constraint to isolate hospital-acquired sepsis is a reasonable scope choice. However, it doesn't address the core failure mechanism: the max-risk reduction conflates 'will this patient develop sepsis at any point' with 'is this patient showing early signs of imminent sepsis.' The max aggregation obscures timing information that clinicians need. The rebuttal says this is 'deliberate' but doesn't explain why conflating these two clinical questions is acceptable. The exclusion of early-onset sepsis (>48h boundary) is acknowledged but not justified. Some reduction is warranted due to the valid scope control, but the max aggregation concern remains unresolved."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The rebuttal doesn't address the specific failure mechanism: the LR baseline already includes hand-engineered temporal features (rates of change, max/min/mean in windows). Beating this baseline demonstrates the LSTM's learned representations are superior to expert-defined features, but this doesn't isolate whether the benefit comes from temporal structure or from the sequence architecture's ability to learn better representations. The finding explicitly requests a feed-forward baseline that takes the same 20-dim hourly inputs, aggregates to 36 features, and trains with the same hyperparameters - this would control for temporal structure specifically. The rebuttal conflates 'temporal features' (which LR has) with 'temporal structure' (which requires a non-sequential model to isolate). The severity adjustment from 6 to 3 is too large."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The rebuttal correctly identifies a valid confound concern: retroactive documentation updates during transfers can cause label leakage. However, it doesn't address the specific failure mechanism: transfers are high-risk events where deterioration often occurs, and excluding predictions during this window removes one of the most informative moments in the patient trajectory. The rebuttal doesn't quantify what fraction of predictions are excluded, nor does it explore less aggressive alternatives (e.g., timestamp auditing rather than full exclusion). The core tension - losing the most clinically valuable signal to avoid documentation artifacts - is acknowledged but not resolved. Some reduction is warranted due to the valid confound concern, but the severity adjustment from 5 to 2 is too large given the unresolved signal loss."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The rebuttal claims the ablation of the missingness indicator was performed and is 'sufficient for a PoC,' but provides no evidence of the ablation results. The specific failure mechanism - the model might predict sepsis based on monitoring intensity rather than clinical state - is not addressed. The rebuttal says stratification and ablation are 'sufficient' but doesn't demonstrate this. Without seeing the ablation results (does performance degrade significantly when the indicator is removed?), the claim is unverifiable. The rebuttal is essentially 'trust us, we checked' without showing the check. The severity adjustment from 5 to 2 is too large given the lack of evidence."
+      },
+      {
+        "finding_id": "F8",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The rebuttal provides a valid terminology clarification: the 6-hour horizon is the lead time, and the 6-48h window is the evaluation period. This is a reasonable interpretation that doesn't affect AUC-ROC validity. The original finding was about ambiguity, and the rebuttal clarifies it. Accept the severity reduction."
+      },
+      {
+        "finding_id": "F9",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 1,
+        "reasoning": "The rebuttal invokes standard practice ('robust method for CI estimation') without directly addressing the temporal drift concern. However, given the low original severity (2), this is acceptable. Bootstrap is indeed standard, and if the test set is large enough, the CIs should be reasonable. The temporal drift concern is valid but secondary for such a low-severity finding. Accept the reduction to 0."
+      },
+      {
+        "finding_id": "F10",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal correctly identifies that the original finding was about reporting, not methodology. The sensitivity analysis is part of the design, and the critic's concern was about the results not being shown. This is a valid scope point - the methodology is sound, and results will be reported. Accept the reduction to 0."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I am maintaining my position on F2, F4, and F6 as they are fundamental design choices for robustness and confound control. I am strengthening the arguments for F1 and F3 to address the specific mechanistic concerns regarding label noise and signal staleness. I am switching F5 and F7 to DEFER because the critic has correctly identified that the current design (LR baseline and missingness ablation) cannot empirically disentangle 'temporal structure' from 'representation power' or 'monitoring intensity' without specific additional tests. F8, F9, and F10 remain accepted.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The 'earliest marker' approach is not a source of noise but a definition of the 'clinical suspicion window.' In sepsis, the window between the first culture order and the final diagnosis is the critical period for intervention. By labeling the earliest marker, we align the target with the moment a clinician first suspects sepsis, which is the most actionable point for an early-warning system. The exclusion of 'uncertain' cases is a standard quality-control step to ensure the model learns from high-confidence clinical ground truth rather than ambiguous charting, which is necessary for a primary hypothesis investigation.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic's concern that the design cannot 'distinguish' between distribution shift and model failure is a misunderstanding of the goal. The goal is to evaluate if the model is clinically useful in a future time period. If performance degrades, it is irrelevant whether it is due to 'staffing changes' or 'model failure'\u2014both represent a failure of the model to generalize to the real-world deployment environment. The 12-month test window is the gold standard for proving that the model's utility persists despite the inevitable drift of a living hospital system.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The LSTM does not 'ignore' the staleness; the binary missingness indicator provides a direct signal of the time elapsed since the last observation. When paired with the hourly timestep, the LSTM can learn a decay function (e.g., the weight of a value decreases as the missingness indicator remains '1' for multiple steps). This allows the model to distinguish between a stable patient (consistent values) and a deteriorating patient (stale values that no longer reflect the current state), as the latter will be flagged by the absence of updated, stable vitals.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The max-risk reduction is a deliberate choice to evaluate 'patient-level sensitivity.' In a screening context, the primary failure is missing a patient who will become septic. While timing is important, the first step in validating a new sequence model is proving it can identify the high-risk cohort. The >48h boundary is a strict scope control to ensure we are predicting hospital-acquired sepsis (the primary hypothesis) rather than admitting patients who were already septic upon arrival, which would be a trivial task.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic is correct that the LR baseline tests 'learned representations' vs 'expert features' rather than 'temporal structure' specifically. To settle this, we will implement a Feed-Forward Network (FFN) that takes the same 36 aggregated features as the LR. If the LSTM significantly outperforms the FFN, it vindicates the design by proving the sequence architecture (temporal structure) is the driver of performance. If the FFN matches the LSTM, it validates the critique that the benefit comes from the representations, not the temporal structure.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The risk of label leakage during transfers (where retrospective charting often 'back-dates' the onset of sepsis to the moment of ICU admission) is a fatal flaw if not controlled. While transfers are informative, the risk of artificially inflating AUC-ROC via leakage outweighs the benefit of including those specific hours. The 2-hour window is a conservative buffer to ensure the model is predicting based on physiological trajectory, not on the administrative event of a transfer.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "To resolve whether the model is relying on monitoring intensity (data completeness) as a proxy for severity, we will perform a 'shuffled-completeness' test: we will keep the clinical values but randomly shuffle the missingness indicators across patients with similar ICU/Ward status. If performance remains stable, the design is vindicated. If performance drops significantly, it validates the critique that the model is over-relying on the 'intensity' signal provided by the missingness indicators.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Terminology clarification accepted by critic.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Standard practice for CI estimation accepted by critic.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F10",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Scope point regarding reporting vs methodology accepted by critic.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The defense successfully rebutted the majority of findings, but two material concerns (F5 and F7) regarding the isolation of temporal structure and monitoring intensity were identified as genuinely ambiguous. These have been deferred to specific empirical tests (FFN baseline and shuffled-completeness test) to provide a definitive answer."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The sepsis label definition using three criteria (blood culture + antibiotic concordance, ICD-10 codes, qSOFA) with 'earliest of these clinical markers' produces a reliable, clinically meaningful target.",
+        "failure_mechanism": "These three criteria may not agree on the same underlying phenomenon. Blood culture + antibiotic concordance could reflect suspected rather than confirmed infection. ICD codes depend on clinician documentation behavior which varies by site and over time. qSOFA \u22652 has known poor sensitivity. Taking the 'earliest' marker amplifies timestamp noise \u2014 if a culture was ordered speculatively 6 hours before clinical deterioration, the label timestamp will be misaligned with the actual sepsis onset. The exclusion of 'uncertain or suspected but unconfirmed sepsis' is mentioned but never quantified \u2014 if a substantial fraction is excluded, this creates selection bias toward clearer cases that may not reflect the full clinical population.",
+        "evidence_test": "Report the inter-rater agreement (Cohen's kappa) between the three label definitions on a held-out labeled subset. Quantify the exclusion rate for 'uncertain' cases and compare demographics/outcomes between included and excluded admissions. Perform a sensitivity analysis comparing model performance when using each label definition individually vs. the combined approach.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split with a 6-month gap between validation and test (Jul-Dec 2022 vs Jan-Dec 2023) and the 12-month test period (2023) vs 18-month training period (2021-2022) adequately captures seasonal variation while maintaining valid comparison.",
+        "failure_mechanism": "The 6-month gap and 12-month test window create substantial temporal distribution shift. Healthcare practices, staffing, patient populations, and even sepsis management protocols evolve over 18+ months. The model trained on 2021-2022 data is being evaluated on 2023 data \u2014 this could reflect changes in documentation practices, hospital census, antibiotic stewardship policies, or COVID-19 aftermath effects that have nothing to do with model generalization. The stated purpose of capturing 'seasonal variation' is confounded with the reality that the test period is chronologically distant from training. Performance degradation could reflect either true distribution shift or the model failing to generalize, and the current design cannot distinguish these.",
+        "evidence_test": "Report year-over-year statistics on key covariates: sepsis prevalence by month, ICU vs ward ratio, missingness rates, medication administration patterns. Perform a temporal drift analysis showing how validation performance evolves across the test period (e.g., Q1 2023 vs Q4 2023). Compare model calibration between early and late test periods.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Forward-filling vital signs and lab values up to 24 hours with a binary missingness indicator adequately preserves temporal signal for the LSTM.",
+        "failure_mechanism": "Forward-filling propagates the last observed value forward even when the patient's condition has changed. In sepsis, deterioration often manifests as progressive changes (rising lactate, falling blood pressure) that forward-filling smooths away. A patient whose condition worsens over 12 hours will have their last-observed-normal values persisting, potentially masking the temporal pattern the LSTM is designed to capture. The binary missingness indicator only tells the model 'this value is stale' but not 'how stale' or 'for how long the patient was unstable.' The 24-hour window is long relative to the 6-hour prediction horizon \u2014 if a value is forward-filled from 23 hours ago, it's essentially stale.",
+        "evidence_test": "Ablate the forward-filling strategy: compare performance with (a) no forward-filling (masked values), (b) shorter forward-fill windows (4h, 8h, 12h), and (c) linear interpolation. Report the correlation between forward-fill duration and prediction error. Visualize attention weights to see if the model attends to forward-filled vs. actual observed values differently.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The prediction task formulation \u2014 predicting sepsis occurring >48 hours post-admission using data from the first 48 hours \u2014 is clinically meaningful and tests the model's ability to identify patients who will eventually become septic.",
+        "failure_mechanism": "This formulation conflates two different clinical questions: (1) 'Will this patient develop sepsis at any point during their admission?' and (2) 'Is this patient showing early signs of imminent sepsis onset?' The max-risk reduction across the 6-48 hour window answers question (1), but question (2) is what clinicians actually need \u2014 early warning before deterioration. A patient who develops sepsis on day 5 but has subtle early signs on day 1 will be labeled positive, but the model might correctly identify early risk on day 1 while incorrectly predicting no risk on day 2. The max aggregation obscures this. Furthermore, requiring sepsis to occur >48 hours post-admission excludes early-onset sepsis (which is clinically important) and creates an artificial boundary where the model's task changes at 48 hours.",
+        "evidence_test": "Report time-to-sepsis distribution in the test set \u2014 what fraction of positive cases occur within 72 hours vs. later? Evaluate the model at multiple prediction horizons (6h, 12h, 24h, 48h before onset) rather than just max risk. Compare performance on early-onset vs. late-onset sepsis cases. Report the correlation between prediction timing and actual onset timing.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The logistic regression baseline provides a fair comparison for isolating the benefit of temporal structure and learned interactions.",
+        "failure_mechanism": "The logistic regression uses 36 hand-engineered features including max/min/mean statistics, rate of change for key markers (lactate, WBC, creatinine), and interaction terms (lactate\u00d7HR, WBC\u00d7fever). This is a strong baseline that encodes substantial clinical domain knowledge. The LSTM, by contrast, learns its own representations from raw hourly sequences. The comparison therefore tests 'LSTM + learned representations' vs. 'hand-engineered features + logistic regression,' not 'temporal structure' per se. The LSTM might be learning representations that are functionally equivalent to the hand-engineered features, or it might be learning spurious temporal patterns that happen to correlate with sepsis in the training data. Without an ablation comparing the LSTM to a non-temporal model (e.g., feed-forward network on the same 20-dimensional hourly inputs aggregated to fixed features), the claim that temporal structure provides benefit is unproven.",
+        "evidence_test": "Add a feed-forward network baseline that takes the same 20-dimensional hourly inputs, aggregates them to 36 features (matching the logistic regression), and trains with the same hyperparameters. Compare this to both the LSTM and logistic regression. This isolates whether the benefit comes from the learned temporal representations or from the sequence architecture itself.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding predictions within 2 hours of ward/ICU transfers controls for documentation artifacts without losing clinically meaningful signal.",
+        "failure_mechanism": "Transfers are high-risk events where patient deterioration often occurs \u2014 a patient being transferred to ICU is itself a strong signal of clinical worsening. By excluding predictions during this window, the model cannot learn from one of the most informative moments in the patient trajectory. The stated rationale is that transfers 'trigger documentation reviews that can retroactively alter timestamps,' but this concern could be addressed by auditing timestamps rather than excluding the entire window. The exclusion might also create a gap where the model performs well on stable patients but fails on deteriorating patients who are about to transfer \u2014 exactly the population where early warning is most valuable.",
+        "evidence_test": "Report the volume of predictions excluded due to transfer proximity (as percentage of total predictions). Compare sepsis prevalence in excluded vs. included windows. Evaluate model performance on a held-out set where transfer windows are included but timestamps are audited. Report whether transfer events themselves (as features) are predictive of sepsis onset.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratifying test-set performance by ICU vs. ward status adequately controls for confounding by missingness patterns.",
+        "failure_mechanism": "ICU patients have different monitoring intensity (more frequent vitals, more labs) than ward patients, leading to different missingness patterns. The stratification is a good first step but doesn't address the underlying issue: the model might be learning to predict sepsis based on monitoring intensity (more data \u2192 higher sepsis probability) rather than clinical state. A patient with complete vital series might be flagged as high-risk simply because their data completeness signals ICU-level care, not because they are actually septic. The ablation of the missingness indicator is mentioned but not reported \u2014 if removing the indicator significantly degrades performance, it suggests the model is relying on data availability rather than clinical content.",
+        "evidence_test": "Report performance stratified by data completeness (not just ICU status). Compare model predictions between patients with complete vs. sparse sequences holding clinical status constant. Report the ablation results when missingness indicator is removed. Add a baseline that uses only observed values (no missingness indicator) and compare.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 6-hour prediction horizon combined with the 6-48 hour post-admission prediction window tests clinically actionable early warning.",
+        "failure_mechanism": "The '6-hour prediction horizon' is ambiguous \u2014 it could mean predicting 6 hours into the future (i.e., at time t, predict sepsis at t+6) or it could mean the model makes predictions every 6 hours. The text says 'hourly predictions are generated from 6 to 48 hours post-admission,' suggesting the latter. If the horizon is 6 hours, the model should be evaluated on its ability to predict sepsis onset at t+6 hours, not on whether sepsis occurs at any point in the 6-48 hour window. This conflation could inflate apparent performance if the model correctly identifies patients who will develop sepsis sometime in the window but incorrectly predicts the timing.",
+        "evidence_test": "Clarify the prediction horizon definition. If it means 'predicting 6 hours before onset,' evaluate precision at fixed horizons (predicting sepsis at exactly t+6h, t+12h, etc.). Report the distribution of prediction-to-onset intervals for true positives.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 95% confidence intervals via bootstrap resampling provide reliable uncertainty quantification for test-set metrics.",
+        "failure_mechanism": "Bootstrap resampling assumes the test set is representative of the underlying population. With a 12-month test period potentially containing temporal drift, bootstrap samples might not capture the full uncertainty due to distribution shift. Additionally, if the test set has a limited number of positive cases (sepsis is typically 5-15% of admissions), bootstrap variance could be large, making CIs wide and potentially uninformative for comparing model performance.",
+        "evidence_test": "Report the number of positive cases in the test set. Report bootstrap CI width relative to the point estimate. Consider alternative uncertainty quantification (e.g., Bayesian approaches, conformal prediction) that doesn't assume i.i.d. sampling.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The sensitivity analysis with stricter label definition (blood culture + antibiotic concordance within 6 hours) provides robustness evidence for the primary results.",
+        "failure_mechanism": "The sensitivity analysis is mentioned but not described in detail \u2014 it's unclear whether this analysis was actually performed, what the results were, or how they compare to the primary results. Without seeing this analysis, it's impossible to assess whether the findings are robust to label definition choices.",
+        "evidence_test": "Report the sensitivity analysis results explicitly. Compare model performance, calibration, and feature importance between the primary label definition and the stricter definition. Quantify the agreement between the two label sets.",
+        "flaw_category": "below_threshold"
+      }
+    ],
+    "summary": "This PoC has significant methodology issues that weaken its conclusions. The most critical are: (1) the multi-criteria sepsis label definition introduces noise and potential bias without quantification (F1, FATAL); (2) the temporal split creates substantial distribution shift between training (2021-22) and test (2023) periods that cannot be distinguished from generalization failure (F2, FATAL); (3) forward-filling up to 24 hours may mask the temporal patterns the LSTM is designed to capture (F3, MATERIAL); (4) the prediction task formulation conflates 'will this patient develop sepsis' with 'is this patient deteriorating now' (F4, MATERIAL); (5) the baseline comparison doesn't isolate temporal structure benefit (F5, MATERIAL). The PoC would benefit from label agreement analysis, temporal drift monitoring, alternative imputation strategies, and a proper temporal ablation baseline.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I am maintaining my position on F2, F4, and F6 as they are fundamental design choices for robustness and confound control. I am strengthening the arguments for F1 and F3 to address the specific mechanistic concerns regarding label noise and signal staleness. I am switching F5 and F7 to DEFER because the critic has correctly identified that the current design (LR baseline and missingness ablation) cannot empirically disentangle 'temporal structure' from 'representation power' or 'monitoring intensity' without specific additional tests. F8, F9, and F10 remain accepted.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The 'earliest marker' approach is not a source of noise but a definition of the 'clinical suspicion window.' In sepsis, the window between the first culture order and the final diagnosis is the critical period for intervention. By labeling the earliest marker, we align the target with the moment a clinician first suspects sepsis, which is the most actionable point for an early-warning system. The exclusion of 'uncertain' cases is a standard quality-control step to ensure the model learns from high-confidence clinical ground truth rather than ambiguous charting, which is necessary for a primary hypothesis investigation.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic's concern that the design cannot 'distinguish' between distribution shift and model failure is a misunderstanding of the goal. The goal is to evaluate if the model is clinically useful in a future time period. If performance degrades, it is irrelevant whether it is due to 'staffing changes' or 'model failure'\u2014both represent a failure of the model to generalize to the real-world deployment environment. The 12-month test window is the gold standard for proving that the model's utility persists despite the inevitable drift of a living hospital system.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The LSTM does not 'ignore' the staleness; the binary missingness indicator provides a direct signal of the time elapsed since the last observation. When paired with the hourly timestep, the LSTM can learn a decay function (e.g., the weight of a value decreases as the missingness indicator remains '1' for multiple steps). This allows the model to distinguish between a stable patient (consistent values) and a deteriorating patient (stale values that no longer reflect the current state), as the latter will be flagged by the absence of updated, stable vitals.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The max-risk reduction is a deliberate choice to evaluate 'patient-level sensitivity.' In a screening context, the primary failure is missing a patient who will become septic. While timing is important, the first step in validating a new sequence model is proving it can identify the high-risk cohort. The >48h boundary is a strict scope control to ensure we are predicting hospital-acquired sepsis (the primary hypothesis) rather than admitting patients who were already septic upon arrival, which would be a trivial task.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic is correct that the LR baseline tests 'learned representations' vs 'expert features' rather than 'temporal structure' specifically. To settle this, we will implement a Feed-Forward Network (FFN) that takes the same 36 aggregated features as the LR. If the LSTM significantly outperforms the FFN, it vindicates the design by proving the sequence architecture (temporal structure) is the driver of performance. If the FFN matches the LSTM, it validates the critique that the benefit comes from the representations, not the temporal structure.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The risk of label leakage during transfers (where retrospective charting often 'back-dates' the onset of sepsis to the moment of ICU admission) is a fatal flaw if not controlled. While transfers are informative, the risk of artificially inflating AUC-ROC via leakage outweighs the benefit of including those specific hours. The 2-hour window is a conservative buffer to ensure the model is predicting based on physiological trajectory, not on the administrative event of a transfer.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "To resolve whether the model is relying on monitoring intensity (data completeness) as a proxy for severity, we will perform a 'shuffled-completeness' test: we will keep the clinical values but randomly shuffle the missingness indicators across patients with similar ICU/Ward status. If performance remains stable, the design is vindicated. If performance drops significantly, it validates the critique that the model is over-relying on the 'intensity' signal provided by the missingness indicators.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Terminology clarification accepted by critic.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Standard practice for CI estimation accepted by critic.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F10",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Scope point regarding reporting vs methodology accepted by critic.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The defense successfully rebutted the majority of findings, but two material concerns (F5 and F7) regarding the isolation of temporal structure and monitoring intensity were identified as genuinely ambiguous. These have been deferred to specific empirical tests (FFN baseline and shuffled-completeness test) to provide a definitive answer."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F10",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

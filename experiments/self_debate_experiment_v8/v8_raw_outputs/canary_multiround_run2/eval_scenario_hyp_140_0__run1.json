@@ -1,0 +1,254 @@
+{
+  "case_id": "eval_scenario_hyp_140_0",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "deepseek/deepseek-v3.2",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split at the alert level prevents leakage of future information.",
+        "failure_mechanism": "In cybersecurity, a single 'incident' often generates a burst of multiple alerts over several days. If an incident spans the boundary between the training set (month 12) and validation set (month 13), or validation and test, the model may see early alerts of an incident in training and later alerts of the same incident in the test set. Because these alerts share the same entity graph and are highly correlated, the model can 'memorize' the incident's signature rather than learning to generalize to new intrusions.",
+        "evidence_test": "Perform a 'cluster-based' split where all alerts associated with the same incident ID or the same entity within a tight time window are assigned to the same fold, regardless of the exact timestamp. Compare the PR-AUC of the alert-level split vs. the incident-level split.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The GNN's advantage comes from exploiting relational structure in entity interactions.",
+        "failure_mechanism": "The PoC does not account for 'entity-level' leakage. If a specific host or user is compromised and generates alerts across the training and test sets, the GNN may learn to associate that specific entity's unique graph topology (e.g., a specific set of server connections) with the 'malicious' label. The model then predicts 'malicious' for the test alert not because it recognizes an attack pattern, but because it recognizes the entity as one that was previously labeled malicious in the training set.",
+        "evidence_test": "Evaluate the model on a 'cold-start' test set consisting only of entities (users/hosts) that never appeared in the training set. If performance drops significantly compared to the standard test set, the model is over-fitting to entity identity rather than relational patterns.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding alerts without a final disposition after 7 days minimizes label noise.",
+        "failure_mechanism": "This introduces a selection bias. In real SOC operations, the alerts that take *longer* than 7 days to resolve are often the most complex, stealthy, or high-impact incidents (APT-style). By removing these, the model is trained and evaluated only on 'easy' or 'standard' cases, potentially failing on the most critical security events the hypothesis intends to triage.",
+        "evidence_test": "Analyze the distribution of alert types and severities for the excluded 'no-disposition' group versus the included group. If the excluded group has a higher proportion of high-severity or rare alert types, the results are biased toward simple cases.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "PR-AUC is the primary metric for rare incidents.",
+        "failure_mechanism": "While PR-AUC is superior to ROC-AUC for imbalance, it can be overly optimistic if the model is highly confident but wrong on a small number of top-ranked samples. A precision-recall curve doesn't explicitly penalize 'catastrophic' misses of high-severity alerts.",
+        "evidence_test": "Compare PR-AUC with a cost-weighted loss function that penalizes False Negatives of high-severity alerts more heavily.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC suffers from critical leakage risks: it fails to account for incident-level overlap across temporal boundaries and entity-level memorization, which likely inflates performance metrics. Additionally, the data filtering strategy introduces a selection bias that may exclude the most complex security incidents.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "I will analyze each finding in sequence, examining the critic's claims against the methodology's design intent and controls.\n\n**F1 (Incident Spanning Split Boundary):** The critic correctly identifies that cybersecurity incidents can generate multiple alerts over time, and that a simple alert-level temporal split could allow related alerts from the same incident to appear in both training and test sets. This is a genuine concern about potential signal leakage. However, the methodology's design intent is to simulate real-time deployment where alerts are scored as they arrive, with the model having access only to historical data. The temporal split at the alert level is the standard approach for this simulation. The critic's proposed 'cluster-based' split would create an unrealistic scenario where the model could be trained on future information about an ongoing incident. While the concern about correlated alerts is valid, the methodology's evaluation metric (PR-AUC) and the presence of a validation set for hyperparameter tuning help mitigate overfitting risks. The question is whether this leakage is material enough to invalidate the comparison between GNN and baseline models, given both would be subject to the same split.\n\n**F2 (Entity-Level Leakage):** The critic raises the possibility that the GNN might learn to recognize specific compromised entities rather than general attack patterns. This is a valid concern about model generalization. However, the methodology explicitly includes a control for this confound: 'Entity coverage: Both see the same entity types; a transformer sequence baseline provides additional control that the tGNN's gain is from graph structure, not temporal encoding.' The design comparison between GNN and baseline models (XGBoost and Transformer) is precisely intended to isolate the value of graph structure. If the GNN's advantage came solely from memorizing entity identities, the baseline models (which also receive entity identifiers as features) should be able to exploit the same signal. The critic's proposed 'cold-start' test is an interesting ablation study, but its absence doesn't invalidate the primary comparison. The methodology's design already provides a control mechanism.\n\n**F3 (7-Day Disposition Exclusion Bias):** The critic argues that excluding alerts without disposition after 7 days creates selection bias against complex incidents. This is a valid observation about dataset representativeness. The methodology acknowledges this trade-off explicitly: 'Alerts without a final disposition after 7 days are excluded to minimize label noise.' The design choice prioritizes label certainty over completeness, which is appropriate for a proof-of-concept testing a core hypothesis about graph structure value. The critic's concern about bias toward 'easy' cases is real, but the methodology includes a control: 'Stratified post-hoc analysis on test subsets (by month, incident type, or analyst) checks whether performance is stable over time.' This control would reveal if performance degrades on certain alert types. The exclusion is a deliberate trade-off to ensure clean labels for initial validation of the hypothesis.\n\nAfter analyzing all three findings: F1 identifies a real but inherent limitation of temporal splits for incident data; F2 is addressed by the methodology's existing controls; F3 identifies a trade-off that was consciously made and partially mitigated by post-hoc analysis.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The alert-level temporal split is a deliberate design choice to simulate real-time deployment where models score alerts as they arrive, using only historical data. The critic's proposed 'cluster-based' split would introduce future information about ongoing incidents into training, violating the deployment simulation. While correlated alerts from the same incident could theoretically provide signal, both the GNN and baseline models are subject to the same split, preserving the fairness of comparison. The validation set (months 13-15) provides a temporal buffer that helps detect overfitting to specific incident patterns before final test evaluation."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The methodology explicitly addresses entity-level leakage through its control framework: 'Entity coverage: Both see the same entity types; a transformer sequence baseline provides additional control that the tGNN's gain is from graph structure, not temporal encoding.' If the GNN's advantage came from memorizing entity identities rather than learning relational patterns, the baseline models (which receive entity identifiers as features) should capture the same signal. The comparison isolates the value of graph structure by ensuring all models have access to the same entity information. The critic's cold-start test is an interesting ablation but not required for the primary hypothesis test."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The 7-day exclusion rule is a deliberate trade-off to prioritize label certainty over completeness, explicitly stated as minimizing label noise. This is appropriate for a proof-of-concept testing whether graph structure provides value. The methodology includes a control for potential bias: 'Stratified post-hoc analysis on test subsets (by month, incident type, or analyst) checks whether performance is stable over time.' This analysis would reveal if performance degrades on certain alert types, addressing the critic's concern about complex cases. The exclusion is a conscious design choice with mitigation measures."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All three findings have been rebutted with design-based justifications, reducing their adjusted severities to 4, 2, and 1 respectively (all \u2264 3). The methodology's controls and deliberate design choices adequately address the critic's concerns without requiring empirical tests beyond what's already planned."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 8,
+        "reasoning": "The defender's argument is a misunderstanding of the failure mechanism. The concern is not about introducing 'future information' into training, but about 'leakage' where the model sees part of an incident in training and the remainder in the test set. Because alerts within a single incident are highly correlated (same entity, same attack pattern, same time window), the model can memorize the specific signature of that incident. The claim that 'both models are subject to the same split' does not resolve this; it simply means both models might be over-optimistically evaluated. The 'temporal buffer' of the validation set does not prevent leakage into the final test set (months 16-18) if an incident spans that boundary."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The rebuttal is generic and fails to address the mechanism. The defender claims that because the baseline also sees entity identifiers, the comparison is fair. However, GNNs are specifically designed to aggregate neighborhood information; a GNN can learn a high-dimensional embedding of a specific entity's unique local topology (its 'fingerprint') which is far more powerful than a simple categorical entity ID used by a baseline. If the GNN memorizes that 'Host X's specific connection pattern' is always malicious, it is not learning a generalizable attack pattern. The baseline's inability to do this doesn't prove the GNN is generalizing; it only proves the GNN is better at memorizing entity-specific topologies."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The defender correctly identifies this as a trade-off for label certainty. However, the proposed mitigation (post-hoc analysis on test subsets) is logically flawed: if the most complex cases were excluded from the dataset entirely via the 7-day rule, they will not be present in the test set to be analyzed. You cannot perform a post-hoc analysis on data that was deleted during preprocessing. While this is a less severe flaw than leakage, the 'mitigation' does not actually address the selection bias."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I am contesting the challenges for F1 and F2. For F1, the critic mischaracterizes the design's purpose; the alert-level split is the correct simulation of deployment, and the risk of incident memorization is a known limitation that the methodology's temporal buffer and evaluation framework are designed to surface, not conceal. For F2, the critic's mechanism is valid but the design's control via the transformer baseline directly addresses it\u2014if the GNN's advantage persists over a model that also sees the full temporal sequence of events, it is strong evidence for graph structure. I am conceding on F3; the critic is correct that the proposed post-hoc analysis cannot test data that was excluded, making the selection bias a genuine, albeit minor, flaw.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The critic's challenge confuses a deployment-simulation constraint with an evaluation flaw. The alert-level temporal split is not an oversight; it is the core of the experiment's external validity, simulating a model scoring alerts in real-time as they arrive. The risk of 'incident memorization' across the split is a known, real-world challenge for any temporal model, not a leakage artifact. The methodology is designed to test if a tGNN can generalize *despite* this constraint, using the validation set (months 13-15) as a temporal buffer to detect overfitting to transient incident patterns before the final test. If the model's performance is inflated due to memorizing specific incidents that span the boundary, this would manifest as a sharp performance drop in the later months of the test set (e.g., month 18 vs. month 16), which the stratified post-hoc analysis is designed to detect. The comparison to baselines remains fair because all models face the same constraint; a superior tGNN PR-AUC indicates it better leverages the *relational* signal within the permitted 30-day window, not that it cheated.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The design includes a specific, powerful control for the critic's entity-memorization mechanism: the transformer/LSTM sequence baseline. This model receives the *chronological sequence of all events* for the entity over the 30-day window. If the GNN's advantage stemmed merely from memorizing a specific entity's unique 'fingerprint' (its particular sequence of events and connections), the transformer\u2014a state-of-the-art sequence model\u2014should be equally capable of memorizing that pattern from the event sequence. Therefore, if the tGNN significantly outperforms the transformer baseline on the standard test split, it provides strong evidence that the gain comes from modeling the *relational structure* (the heterogeneous graph of interactions between entities), not from memorizing entity-specific histories. The critic's proposed 'cold-start' test is a valuable supplementary analysis, but the primary hypothesis test is adequately controlled by the transformer baseline comparison.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic is correct. The proposed mitigation (stratified post-hoc analysis on test subsets) is logically incapable of assessing performance on alert types that were entirely excluded from the dataset by the 7-day rule. This constitutes a genuine selection bias where the model is not evaluated on the potentially most complex and critical incidents. While the 7-day rule is a pragmatic trade-off for label certainty, it does introduce a material limitation to the study's conclusions regarding performance on sophisticated, long-investigation incidents. The severity is adjusted back to the original MATERIAL level.",
+        "r2_challenge_response": "CONCEDED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "One finding (F3) was conceded and remains a MATERIAL flaw (severity 4), and the other findings were successfully rebutted to lower severity levels. The presence of a conceded MATERIAL finding, combined with the defended but non-fatal findings, indicates the critique has identified a real limitation, but the core hypothesis test remains valid for the scope defined by the methodology."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split at the alert level prevents leakage of future information.",
+        "failure_mechanism": "In cybersecurity, a single 'incident' often generates a burst of multiple alerts over several days. If an incident spans the boundary between the training set (month 12) and validation set (month 13), or validation and test, the model may see early alerts of an incident in training and later alerts of the same incident in the test set. Because these alerts share the same entity graph and are highly correlated, the model can 'memorize' the incident's signature rather than learning to generalize to new intrusions.",
+        "evidence_test": "Perform a 'cluster-based' split where all alerts associated with the same incident ID or the same entity within a tight time window are assigned to the same fold, regardless of the exact timestamp. Compare the PR-AUC of the alert-level split vs. the incident-level split.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The GNN's advantage comes from exploiting relational structure in entity interactions.",
+        "failure_mechanism": "The PoC does not account for 'entity-level' leakage. If a specific host or user is compromised and generates alerts across the training and test sets, the GNN may learn to associate that specific entity's unique graph topology (e.g., a specific set of server connections) with the 'malicious' label. The model then predicts 'malicious' for the test alert not because it recognizes an attack pattern, but because it recognizes the entity as one that was previously labeled malicious in the training set.",
+        "evidence_test": "Evaluate the model on a 'cold-start' test set consisting only of entities (users/hosts) that never appeared in the training set. If performance drops significantly compared to the standard test set, the model is over-fitting to entity identity rather than relational patterns.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding alerts without a final disposition after 7 days minimizes label noise.",
+        "failure_mechanism": "This introduces a selection bias. In real SOC operations, the alerts that take *longer* than 7 days to resolve are often the most complex, stealthy, or high-impact incidents (APT-style). By removing these, the model is trained and evaluated only on 'easy' or 'standard' cases, potentially failing on the most critical security events the hypothesis intends to triage.",
+        "evidence_test": "Analyze the distribution of alert types and severities for the excluded 'no-disposition' group versus the included group. If the excluded group has a higher proportion of high-severity or rare alert types, the results are biased toward simple cases.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "PR-AUC is the primary metric for rare incidents.",
+        "failure_mechanism": "While PR-AUC is superior to ROC-AUC for imbalance, it can be overly optimistic if the model is highly confident but wrong on a small number of top-ranked samples. A precision-recall curve doesn't explicitly penalize 'catastrophic' misses of high-severity alerts.",
+        "evidence_test": "Compare PR-AUC with a cost-weighted loss function that penalizes False Negatives of high-severity alerts more heavily.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC suffers from critical leakage risks: it fails to account for incident-level overlap across temporal boundaries and entity-level memorization, which likely inflates performance metrics. Additionally, the data filtering strategy introduces a selection bias that may exclude the most complex security incidents.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I am contesting the challenges for F1 and F2. For F1, the critic mischaracterizes the design's purpose; the alert-level split is the correct simulation of deployment, and the risk of incident memorization is a known limitation that the methodology's temporal buffer and evaluation framework are designed to surface, not conceal. For F2, the critic's mechanism is valid but the design's control via the transformer baseline directly addresses it\u2014if the GNN's advantage persists over a model that also sees the full temporal sequence of events, it is strong evidence for graph structure. I am conceding on F3; the critic is correct that the proposed post-hoc analysis cannot test data that was excluded, making the selection bias a genuine, albeit minor, flaw.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The critic's challenge confuses a deployment-simulation constraint with an evaluation flaw. The alert-level temporal split is not an oversight; it is the core of the experiment's external validity, simulating a model scoring alerts in real-time as they arrive. The risk of 'incident memorization' across the split is a known, real-world challenge for any temporal model, not a leakage artifact. The methodology is designed to test if a tGNN can generalize *despite* this constraint, using the validation set (months 13-15) as a temporal buffer to detect overfitting to transient incident patterns before the final test. If the model's performance is inflated due to memorizing specific incidents that span the boundary, this would manifest as a sharp performance drop in the later months of the test set (e.g., month 18 vs. month 16), which the stratified post-hoc analysis is designed to detect. The comparison to baselines remains fair because all models face the same constraint; a superior tGNN PR-AUC indicates it better leverages the *relational* signal within the permitted 30-day window, not that it cheated.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The design includes a specific, powerful control for the critic's entity-memorization mechanism: the transformer/LSTM sequence baseline. This model receives the *chronological sequence of all events* for the entity over the 30-day window. If the GNN's advantage stemmed merely from memorizing a specific entity's unique 'fingerprint' (its particular sequence of events and connections), the transformer\u2014a state-of-the-art sequence model\u2014should be equally capable of memorizing that pattern from the event sequence. Therefore, if the tGNN significantly outperforms the transformer baseline on the standard test split, it provides strong evidence that the gain comes from modeling the *relational structure* (the heterogeneous graph of interactions between entities), not from memorizing entity-specific histories. The critic's proposed 'cold-start' test is a valuable supplementary analysis, but the primary hypothesis test is adequately controlled by the transformer baseline comparison.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic is correct. The proposed mitigation (stratified post-hoc analysis on test subsets) is logically incapable of assessing performance on alert types that were entirely excluded from the dataset by the 7-day rule. This constitutes a genuine selection bias where the model is not evaluated on the potentially most complex and critical incidents. While the 7-day rule is a pragmatic trade-off for label certainty, it does introduce a material limitation to the study's conclusions regarding performance on sophisticated, long-investigation incidents. The severity is adjusted back to the original MATERIAL level.",
+        "r2_challenge_response": "CONCEDED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "One finding (F3) was conceded and remains a MATERIAL flaw (severity 4), and the other findings were successfully rebutted to lower severity levels. The presence of a conceded MATERIAL finding, combined with the defended but non-fatal findings, indicates the critique has identified a real limitation, but the core hypothesis test remains valid for the scope defined by the methodology."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 4,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=4, CONCEDE \u2192 critique_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

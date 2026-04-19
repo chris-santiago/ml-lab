@@ -1,0 +1,234 @@
+{
+  "case_id": "eval_scenario_801",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The preprocessing and vocabulary are established from the complete corpus before model fitting to ensure consistency.",
+        "failure_mechanism": "The PoC states that feature standardization, imputation parameters, and the event-token vocabulary are established 'once from the complete corpus of observed interactions before model fitting'. This is a classic case of data leakage. By calculating the mean/std for standardization and building the vocabulary using the entire dataset (including the test set), information about the distribution and the presence of specific rare tokens in the test set leaks into the training process. This can artificially inflate performance, especially for rare events that might be highly predictive of failure.",
+        "evidence_test": "Re-run the experiment where the vocabulary and standardization parameters are derived strictly from the training split and then applied to the validation/test splits. A significant drop in test performance would confirm the leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Stratified sampling at the student-course instance level ensures comparable composition across splits.",
+        "failure_mechanism": "The data is partitioned at the 'student-course instance level'. However, the dataset contains multiple terms of data for the same students. If a student appears in multiple courses across different terms, and those instances are split between train and test, the model may memorize student-specific behavioral signatures (identity leakage) rather than learning generalizable patterns of failure. The model is essentially predicting 'will this specific student fail' based on their history in the training set, rather than 'will a student with these patterns fail'.",
+        "evidence_test": "Implement a 'student-level' split where all instances for a single student are assigned to only one split. If performance drops significantly, the current results are driven by identity leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer's improvement is attributable to sequence modeling, not to differences in feature access.",
+        "failure_mechanism": "The transformer receives the raw sequence of events, while the baseline receives aggregated statistics. The transformer can implicitly calculate any aggregate the baseline has (e.g., total interaction count is just the sequence length), but the baseline cannot recover the sequence. However, the PoC does not verify if the transformer is actually utilizing the *order* of events or simply acting as a more powerful aggregator of the same signals. Without a 'shuffled sequence' baseline, the claim that 'sequence structure' (temporal order) is the driver is unverified.",
+        "evidence_test": "Introduce a baseline where the transformer is trained on the same event tokens but with the chronological order randomly shuffled. If the performance remains similar, the 'sequence modeling' hypothesis is refuted in favor of 'better aggregation'.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "The PoC contains two fatal flaws related to signal leakage: global preprocessing (leakage of test distribution into training) and instance-level splitting (leakage of student identity across splits). These flaws likely invalidate the current performance claims.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "## Analysis of Findings\n\n### F1: Preprocessing Leakage Claim\nThe critic claims that establishing vocabulary and standardization parameters from the complete corpus before model fitting constitutes data leakage. This mischaracterizes what leakage means in ML methodology. The vocabulary is built from event tokens (event types, content IDs, grades) \u2014 not from outcome labels. Standardization parameters are computed from feature distributions, not from targets. This is standard practice in NLP/ML pipelines and does not constitute target leakage. The critic conflates \"using full dataset for preprocessing\" with \"leaking labels\" \u2014 these are distinct concepts. The evidence_test proposed would actually show no meaningful difference because the parameters don't involve outcome information.\n\n### F2: Student Identity Leakage\nThe critic argues that splitting at student-course instance level allows the model to memorize student-specific patterns. However, the methodology explicitly states the population is \"students with at least one prior term of enrollment history\" \u2014 the experiment is designed for early-warning prediction WITHIN a student's academic career, using their prior history to predict future outcomes. This is the intended use case. The critic's proposed remedy (student-level split) would test a different hypothesis: generalization to entirely new students. The methodology is sound for its stated scope. This is REBUT-SCOPE.\n\n### F3: Missing Shuffled Sequence Baseline\nThe critic correctly notes that without a shuffled-sequence control, we cannot definitively attribute improvement to temporal order vs. better aggregation. This is a valid ablation concern. However, the primary hypothesis being tested is whether sequence features improve prediction over aggregated features \u2014 not the specific mechanism (order vs. content). The experiment still answers its primary question. This is a MINOR methodological enhancement, not a fatal flaw. The critic's evidence_test would be informative but is not required for the core conclusion.\n\n## Pass 1 Summary\n- F1: REBUT-EVIDENCE (critic's premise about leakage is incorrect)\n- F2: REBUT-SCOPE (valid concern but applies to different use case than experiment design)\n- F3: REBUT-IMMATERIAL (valid ablation but not required for primary hypothesis)",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The critic claims preprocessing from the full corpus constitutes data leakage. This is a mischaracterization. The vocabulary is built from event tokens (event types, content IDs, grades) \u2014 not from outcome labels. Standardization parameters are computed from feature distributions, not from targets. This is standard ML practice. The critic conflates 'using full dataset for preprocessing' with 'target leakage' \u2014 these are distinct concepts. No outcome information leaks into preprocessing. The proposed evidence_test would show no meaningful difference because the parameters don't involve label information."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The critic argues that splitting at student-course instance level allows identity leakage. However, the methodology explicitly targets 'students with at least one prior term of enrollment history' \u2014 the experiment is designed for early-warning prediction WITHIN a student's academic career, using their prior history to predict future outcomes. This is the intended use case. The critic's proposed student-level split would test generalization to entirely new students, which is a different hypothesis than what the experiment evaluates. The design is sound for its stated scope."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The critic correctly notes that without a shuffled-sequence control, we cannot definitively attribute improvement to temporal order vs. better aggregation. This is a valid ablation concern for understanding mechanism. However, the primary hypothesis is whether sequence features improve prediction over aggregated features \u2014 not the specific mechanism. The experiment still answers its primary question. This is a valuable enhancement but not required for the core conclusion. The finding is real but below significance for the experiment's primary evaluation."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All three findings have been rebutted with adjusted severity \u2264 4. F1 is REBUT-EVIDENCE (preprocessing leakage claim is factually incorrect). F2 is REBUT-SCOPE (valid concern but applies to different use case than experiment design). F3 is REBUT-IMMATERIAL (valid ablation but not required for primary hypothesis). No material finding survives rebuttal \u2014 the methodology is sound for its stated scope and intent."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 9,
+        "reasoning": "The defender fundamentally misunderstands the nature of data leakage. Leakage is not limited to 'target leakage' (labels); it includes 'distributional leakage'. By calculating mean/std and building a vocabulary from the full corpus, the model is exposed to the global distribution and the existence of rare tokens present in the test set. This allows the model to 'know' the range and presence of features in the test set during training, which can lead to over-optimistic performance estimates. The defender's claim that this is 'standard ML practice' is incorrect; the standard practice is to fit transformers/scalers on the training set and apply them to the test set."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The defender's rebuttal is a scope disclaimer that fails to address the mechanism of identity leakage. Even if the goal is early-warning within a career, splitting by 'student-course instance' means the model can see Student A in Course 1 (Train) and then predict Student A in Course 2 (Test). The model can then simply memorize Student A's specific behavioral 'fingerprint' (e.g., 'this student always logs in at 3 AM and fails everything') rather than learning generalizable indicators of failure. This results in a model that predicts the *student* rather than the *risk*, which is a failure of generalization regardless of the intended use case."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The defender concedes that the mechanism (temporal order vs. aggregation) is unverified but argues it is secondary to the primary hypothesis (sequence features vs. aggregated features). While the primary predictive goal may be met, the claim that 'sequence modeling' is the driver remains a mechanistic assumption. However, since the defender accepts the validity of the concern and the primary goal is predictive advantage, the severity is appropriately reduced, though the lack of a shuffled baseline remains a gap in the scientific rigor of the 'sequence' claim."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "For F1, the critic correctly notes that standard practice fits preprocessing on training data only, but the claim of 'distributional leakage' conflates a technical deviation from best practice with actual signal leakage that invalidates results. The vocabulary and scaling parameters contain no label information, and the practical impact on precision/recall is minimal. For F2, the critic identifies a real mechanism (student fingerprint memorization) but the experiment's stated scope is explicitly about within-career prediction using prior history - this is the intended use case, not a flaw. For F3, I accept the partial challenge - the mechanism remains unverified but the primary predictive question is answered.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic correctly notes that standard ML practice fits preprocessing on training data only. This is a valid technical point - computing mean/std and vocabulary from the full corpus does expose the model to global distributional information. However, this is DISTINCT from target leakage: the vocabulary contains event types/contentIDs (features), not outcomes. The practical impact on precision@80%recall would be minimal since the model cannot learn label information from standardization parameters. The proposed evidence_test (re-run with training-only preprocessing) would settle whether this materially affects the primary metric. If performance drops substantially, the original results were inflated; if negligible change, the concern is technical but not consequential. This is a genuine ambiguity where empirical test is the appropriate arbiter.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The critic's mechanism is correct - if Student A appears in both train and test, the model could memorize their behavioral fingerprint. However, this is explicitly the intended scope: the methodology states 'students with at least one prior term of enrollment history' and uses 'prior history to predict future outcomes.' The experiment tests whether sequence features improve early-warning within a student's career. A student-level split (all of Student A's courses in one partition) would test generalization to entirely new students - a different hypothesis. The design controls for the stated scope by ensuring course/term/label balance across splits. The critic identifies a real limitation of the experiment's conclusions (results apply to returning students, not new students), but this is a scope boundary, not a flaw. The severity is reduced because while the mechanism is real, it doesn't invalidate what the experiment actually measures.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The critic's partial acceptance is appropriate. The shuffled-sequence control would definitively distinguish temporal-order benefit from better aggregation. However, the primary hypothesis (sequence features vs. aggregated features) is answered by the experiment - the transformer has access to order, the baseline doesn't, and any improvement is attributable to the transformer's richer representation. Understanding the mechanism is scientifically valuable but not required for the core conclusion. The finding is real but below the threshold for material impact on the experiment's primary evaluation.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 is DEFERRED - the critic correctly notes that preprocessing from full corpus deviates from standard practice, and while no label information is involved, the empirical test (training-only preprocessing) would definitively resolve whether this materially affects precision/recall. F2 and F3 are maintained at adjusted_severity 3 (REBUT-SCOPE and REBUT-IMMATERIAL respectively). The presence of a DEFER finding triggers empirical_test_agreed, which is the correct verdict when reasonable people can disagree on a technical point that only an experiment can settle."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The preprocessing and vocabulary are established from the complete corpus before model fitting to ensure consistency.",
+        "failure_mechanism": "The PoC states that feature standardization, imputation parameters, and the event-token vocabulary are established 'once from the complete corpus of observed interactions before model fitting'. This is a classic case of data leakage. By calculating the mean/std for standardization and building the vocabulary using the entire dataset (including the test set), information about the distribution and the presence of specific rare tokens in the test set leaks into the training process. This can artificially inflate performance, especially for rare events that might be highly predictive of failure.",
+        "evidence_test": "Re-run the experiment where the vocabulary and standardization parameters are derived strictly from the training split and then applied to the validation/test splits. A significant drop in test performance would confirm the leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Stratified sampling at the student-course instance level ensures comparable composition across splits.",
+        "failure_mechanism": "The data is partitioned at the 'student-course instance level'. However, the dataset contains multiple terms of data for the same students. If a student appears in multiple courses across different terms, and those instances are split between train and test, the model may memorize student-specific behavioral signatures (identity leakage) rather than learning generalizable patterns of failure. The model is essentially predicting 'will this specific student fail' based on their history in the training set, rather than 'will a student with these patterns fail'.",
+        "evidence_test": "Implement a 'student-level' split where all instances for a single student are assigned to only one split. If performance drops significantly, the current results are driven by identity leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer's improvement is attributable to sequence modeling, not to differences in feature access.",
+        "failure_mechanism": "The transformer receives the raw sequence of events, while the baseline receives aggregated statistics. The transformer can implicitly calculate any aggregate the baseline has (e.g., total interaction count is just the sequence length), but the baseline cannot recover the sequence. However, the PoC does not verify if the transformer is actually utilizing the *order* of events or simply acting as a more powerful aggregator of the same signals. Without a 'shuffled sequence' baseline, the claim that 'sequence structure' (temporal order) is the driver is unverified.",
+        "evidence_test": "Introduce a baseline where the transformer is trained on the same event tokens but with the chronological order randomly shuffled. If the performance remains similar, the 'sequence modeling' hypothesis is refuted in favor of 'better aggregation'.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "The PoC contains two fatal flaws related to signal leakage: global preprocessing (leakage of test distribution into training) and instance-level splitting (leakage of student identity across splits). These flaws likely invalidate the current performance claims.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "For F1, the critic correctly notes that standard practice fits preprocessing on training data only, but the claim of 'distributional leakage' conflates a technical deviation from best practice with actual signal leakage that invalidates results. The vocabulary and scaling parameters contain no label information, and the practical impact on precision/recall is minimal. For F2, the critic identifies a real mechanism (student fingerprint memorization) but the experiment's stated scope is explicitly about within-career prediction using prior history - this is the intended use case, not a flaw. For F3, I accept the partial challenge - the mechanism remains unverified but the primary predictive question is answered.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic correctly notes that standard ML practice fits preprocessing on training data only. This is a valid technical point - computing mean/std and vocabulary from the full corpus does expose the model to global distributional information. However, this is DISTINCT from target leakage: the vocabulary contains event types/contentIDs (features), not outcomes. The practical impact on precision@80%recall would be minimal since the model cannot learn label information from standardization parameters. The proposed evidence_test (re-run with training-only preprocessing) would settle whether this materially affects the primary metric. If performance drops substantially, the original results were inflated; if negligible change, the concern is technical but not consequential. This is a genuine ambiguity where empirical test is the appropriate arbiter.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The critic's mechanism is correct - if Student A appears in both train and test, the model could memorize their behavioral fingerprint. However, this is explicitly the intended scope: the methodology states 'students with at least one prior term of enrollment history' and uses 'prior history to predict future outcomes.' The experiment tests whether sequence features improve early-warning within a student's career. A student-level split (all of Student A's courses in one partition) would test generalization to entirely new students - a different hypothesis. The design controls for the stated scope by ensuring course/term/label balance across splits. The critic identifies a real limitation of the experiment's conclusions (results apply to returning students, not new students), but this is a scope boundary, not a flaw. The severity is reduced because while the mechanism is real, it doesn't invalidate what the experiment actually measures.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The critic's partial acceptance is appropriate. The shuffled-sequence control would definitively distinguish temporal-order benefit from better aggregation. However, the primary hypothesis (sequence features vs. aggregated features) is answered by the experiment - the transformer has access to order, the baseline doesn't, and any improvement is attributable to the transformer's richer representation. Understanding the mechanism is scientifically valuable but not required for the core conclusion. The finding is real but below the threshold for material impact on the experiment's primary evaluation.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 is DEFERRED - the critic correctly notes that preprocessing from full corpus deviates from standard practice, and while no label information is involved, the empirical test (training-only preprocessing) would definitively resolve whether this materially affects precision/recall. F2 and F3 are maintained at adjusted_severity 3 (REBUT-SCOPE and REBUT-IMMATERIAL respectively). The presence of a DEFER finding triggers empirical_test_agreed, which is the correct verdict when reasonable people can disagree on a technical point that only an experiment can settle."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=9, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

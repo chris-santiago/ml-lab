@@ -1,0 +1,608 @@
+{
+  "case_id": "hyp_155",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Excluding messages with labels arriving >30 days after message date ensures label quality and temporal consistency for a real-time detector.",
+        "failure_mechanism": "This exclusion introduces a severe selection bias against spear-phishing campaigns that are sophisticated, slow-moving, or discovered only after a long investigation. Sophisticated spear-phishing (the target of the hypothesis) often has delayed detection precisely because it evades initial automated and human review. By removing these cases, the model is trained and evaluated only on 'easy' or 'fast-discovered' attacks, which are not the primary threat the hypothesis aims to detect. The hardest, most targeted attacks are systematically excluded from the dataset, invalidating the central claim of detecting spear-phishing.",
+        "evidence_test": "Measure the fraction of confirmed spear-phishing incidents (via incident reports) that are excluded by the 30-day rule. If a significant portion of confirmed spear-phishing (especially high-severity incidents) is excluded, the bias is confirmed. Alternatively, train a model with the rule, then evaluate it on a holdout set that includes the delayed-label cases; if performance drops substantially on those cases, the model is not learning the targeted signal.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The model's performance on the validation set (T0+12m to T0+15m) and test set (T0+15m to T0+18m) is a valid measure of its ability to detect spear-phishing in a real-time deployment.",
+        "failure_mechanism": "The validation and test sets are constructed from the same 18-month data window, using the same 30-day label exclusion rule. This means the model is validated and tested on a biased subset of attacks (fast-discovered). The model's performance on this subset is not indicative of its performance on sophisticated, slow-moving spear-phishing, which is the core threat. The evaluation is not measuring the model's ability to detect the hardest cases, which are the ones that matter.",
+        "evidence_test": "Compare the model's performance on the excluded delayed-label cases (if any are available) to its performance on the included cases. A large discrepancy indicates the evaluation is not measuring the intended capability. Additionally, analyze the temporal distribution of excluded labels; if they cluster in later months (e.g., due to a new campaign discovered late), the test set is not representative of future attacks.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The graph-augmented transformer's mechanism for spear-phishing detection is being tested, as the graph features are derived from historical communication patterns.",
+        "failure_mechanism": "The graph features are constructed from the entire training period (T0 to T0+12m). This means the graph structure is built using data from the entire training window, which includes the future validation and test periods (T0+12m to T0+18m) in terms of the communication history. This is a form of temporal leakage: the graph embedding for a test email at T0+16m is derived from communication patterns that include the test period itself, violating the principle that test data must be unseen. The model may be learning from future information.",
+        "evidence_test": "Re-run the experiment with a strict temporal cutoff: for a test email at time t, the graph must be built using only data from T0 to t (or T0 to t-\u03b5). Compare performance to the original method. A significant drop indicates leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The evaluation metric (precision-recall curve, F1 at fixed recall) is sufficient to assess the model's operational value.",
+        "failure_mechanism": "The metric focuses on classification performance at a fixed recall threshold, but operational value for spear-phishing detection depends on the cost of false positives (analyst time wasted) and the benefit of early detection (before credential theft). The chosen metric does not incorporate the time-to-detection aspect, which is critical for spear-phishing. A model that detects attacks 30 days later is operationally useless, but the metric would not penalize it.",
+        "evidence_test": "Measure the detection delay (time between email arrival and model alert) for true positives. If the delay is large (e.g., >24 hours), the model's operational value is low despite high F1. Also, evaluate the false positive rate in terms of analyst workload (e.g., alerts per day).",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The model's performance on the test set (T0+15m to T0+18m) is a reliable indicator of future performance.",
+        "failure_mechanism": "The test set is drawn from the same 18-month window as the training data. This does not test the model's ability to generalize to new, unseen attack campaigns that emerge after T0+18m. The model may be overfitting to the specific attack patterns present in the 18-month window, and its performance could degrade when faced with novel tactics.",
+        "evidence_test": "Deploy the model in a live environment for a period after T0+18m and compare its performance to the test set results. A significant drop indicates overfitting to historical patterns.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The model's performance on the validation set (T0+12m to T0+15m) is a reliable indicator of performance on the test set (T0+15m to T0+18m).",
+        "failure_mechanism": "The validation set is drawn from the same 18-month window as the training and test data. This does not test the model's ability to generalize to new, unseen attack campaigns that emerge after T0+15m. The model may be overfitting to the specific attack patterns present in the 12-15m window, and its performance could degrade when faced with novel tactics.",
+        "evidence_test": "Compare the model's performance on the validation set to its performance on the test set. A significant drop indicates overfitting to historical patterns.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The model's performance on the test set (T0+15m to T0+18m) is a reliable indicator of performance on the validation set (T0+12m to T0+15m).",
+        "failure_mechanism": "The test set is drawn from the same 18-month window as the training and validation data. This does not test the model's ability to generalize to new, unseen attack campaigns that emerge after T0+15m. The model may be overfitting to the specific attack patterns present in the 15-18m window, and its performance could degrade when faced with novel tactics.",
+        "evidence_test": "Compare the model's performance on the test set to its performance on the validation set. A significant drop indicates overfitting to historical patterns.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The model's performance on the validation set (T0+12m to T0+15m) is a reliable indicator of performance on the training set (T0 to T0+12m).",
+        "failure_mechanism": "The validation set is drawn from the same 18-month window as the training data. This does not test the model's ability to generalize to new, unseen attack campaigns that emerge after T0+12m. The model may be overfitting to the specific attack patterns present in the 0-12m window, and its performance could degrade when faced with novel tactics.",
+        "evidence_test": "Compare the model's performance on the validation set to its performance on the training set. A significant drop indicates overfitting to historical patterns.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The model's performance on the training set (T0 to T0+12m) is a reliable indicator of performance on the validation set (T0+12m to T0+15m).",
+        "failure_mechanism": "The training set is drawn from the same 18-month window as the validation data. This does not test the model's ability to generalize to new, unseen attack campaigns that emerge after T0+12m. The model may be overfitting to the specific attack patterns present in the 0-12m window, and its performance could degrade when faced with novel tactics.",
+        "evidence_test": "Compare the model's performance on the training set to its performance on the validation set. A significant drop indicates overfitting to historical patterns.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The model's performance on the test set (T0+15m to T0+18m) is a reliable indicator of performance on the training set (T0 to T0+12m).",
+        "failure_mechanism": "The test set is drawn from the same 18-month window as the training data. This does not test the model's ability to generalize to new, unseen attack campaigns that emerge after T0+18m. The model may be overfitting to the specific attack patterns present in the 15-18m window, and its performance could degrade when faced with novel tactics.",
+        "evidence_test": "Compare the model's performance on the test set to its performance on the training set. A significant drop indicates overfitting to historical patterns.",
+        "flaw_category": null
+      }
+    ],
+    "summary": "The PoC's central flaw is the systematic exclusion of sophisticated spear-phishing attacks via a 30-day label cutoff, which introduces severe selection bias and invalidates the hypothesis test. Additionally, the graph construction method leaks future information into the training embeddings, and the evaluation metric does not incorporate operational costs.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "Let me analyze each finding systematically:\n\n**F1 (FATAL, sev 9):** The critic claims the 30-day label exclusion rule creates selection bias by excluding sophisticated, slow-moving attacks. However, the methodology explicitly states this design choice ensures \"label quality and temporal consistency for a real-time detector\" \u2014 this is a deliberate design decision, not an oversight. The experiment scope explicitly tests whether graph features improve detection *using signals available at message time*. The critic's concern about \"hardest cases\" is valid in absolute terms, but the design intent is to evaluate a real-time detector. Both models face identical bias, so the relative comparison remains valid. This is REBUT-DESIGN.\n\n**F2 (FATAL, sev 8):** This is essentially a restatement of F1 \u2014 arguing validation/test sets use the same 30-day rule. The rebuttal for F1 applies directly: the bias affects both hypothesis and baseline models equally, preserving the validity of the comparative evaluation. REBUT-DESIGN.\n\n**F3 (FATAL, sev 7):** The critic claims graph features include future information because the graph is built from \"entire training period (T0 to T0+12m)\" which \"includes future validation and test periods.\" This is factually incorrect. The methodology explicitly states: \"the graph is frozen at the training boundary\" and \"During validation and test inference, no new graph edges are added.\" The graph is built from T0 to T0+12m only; test emails at T0+16m use statistics from T0-T0+12m. The critic's premise is wrong. REBUT-EVIDENCE.\n\n**F4 (MATERIAL, sev 6):** The critic argues the metric doesn't incorporate detection delay or analyst workload. The methodology explicitly uses precision at fixed recall (80%) as the primary metric \u2014 this directly measures false-positive cost (analyst time). The detection delay concern is outside the stated experiment scope, which focuses on classification performance, not deployment-stage timing. The scope section explicitly states the experiment doesn't test long-term drift. REBUT-SCOPE.\n\n**F5-F9 (MATERIAL/MINOR):** All five findings argue that performance on one temporal split doesn't predict performance on another or future data. The methodology's Scope section explicitly acknowledges: \"This experiment... does not establish whether the graph model is robust to distribution shift across different organizations or long-term drift beyond 18 months.\" These concerns are explicitly scoped out. For F7-F9 (MINOR), REBUT-IMMATERIAL is appropriate as these are scoped-out concerns at low severity.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The 30-day label exclusion is a deliberate design choice explicitly stated to ensure 'label quality and temporal consistency for a real-time detector.' The experiment tests whether graph features improve detection using signals available at message time. The critic's concern about 'hardest cases' is valid in absolute terms, but the design intent is to evaluate a real-time detector. Both hypothesis and baseline models face identical bias, preserving the validity of the comparative evaluation. The Scope section explicitly limits claims to within-organization performance during the test period."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "This is a restatement of F1. The validation and test sets using the same 30-day rule means both the hypothesis model and baseline are evaluated on identical data distributions. The comparative performance gap (graph vs. text-only) remains a valid measure of graph feature contribution even if both are evaluated on a biased subset. The concern about 'hardest cases' not being measured is addressed by the explicit scope limitation in the methodology."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 1,
+        "justification": "The critic's factual premise is incorrect. The methodology explicitly states: 'the graph is frozen at the training boundary' and 'During validation and test inference, no new graph edges are added; senders are evaluated using only the pre-computed historical statistics from the training window.' The graph is built from T0 to T0+12m only. Test emails at T0+16m use statistics from T0-T0+12m, not from the test period. No temporal leakage exists \u2014 the critic misread the methodology."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The detection delay concern is outside the stated experiment scope. The methodology focuses on classification performance (precision at fixed recall), which directly measures false-positive cost (analyst time per alert). The Scope section explicitly states the experiment doesn't test 'long-term drift beyond 18 months' or deployment-stage timing. The metric choice is appropriate for the stated objective of comparing graph vs. text-only classification."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The methodology's Scope section explicitly acknowledges: 'This experiment establishes whether the graph model outperforms text-only classification on this organization's data during the test period. It does not establish whether the graph model is robust to distribution shift across different organizations or long-term drift beyond 18 months.' This concern is explicitly scoped out of the experiment's claims."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Same as F5 \u2014 the methodology explicitly scopes out generalization to new attack campaigns. The validation set is used for hyperparameter tuning and model selection, not for claiming generalization ability. The test set is the held-out evaluation. The concern is addressed by the explicit scope statement."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "This is a restatement of the distribution shift concern at MINOR severity. The methodology explicitly scopes out generalization claims beyond the test period. The experiment tests relative performance (graph vs. text) on the test window, not predictive power across temporal windows. This is below significance for the experiment's conclusions."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "Same distribution shift concern applied to training\u2192validation. The experiment design intentionally uses chronological splits to avoid training on future data. The concern about overfitting to specific patterns is addressed by the temporal split design and is below significance for the comparative evaluation."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Same distribution shift concern at lowest severity. The experiment explicitly uses chronological splits to prevent data leakage. This is a theoretical concern about generalization that is explicitly scoped out and below significance for the experiment's comparative conclusions."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All FATAL and MATERIAL findings have been rebutted with sufficient severity adjustments (F1\u21924, F2\u21924, F3\u21921, F4\u21922, F5\u21922, F6\u21921). No finding has adjusted severity above 3. The key rebuttals: F1/F2 are deliberate design choices for real-time detector evaluation with explicit scope limitations; F3 is factually incorrect (no temporal leakage \u2014 graph is frozen at training boundary); F4-F6 are explicitly scoped out. The MINOR findings (F7-F9) are addressed with REBUT-IMMATERIAL. EXONERATE applies \u2014 all advancing findings have adjusted severity \u2264 3."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 8,
+        "reasoning": "The rebuttal acknowledges the bias but argues it affects both models equally, preserving comparative validity. However, this does not address the core failure mechanism: the experiment's central claim is about detecting 'spear-phishing,' but the 30-day exclusion systematically removes the most sophisticated spear-phishing cases (precisely what the graph model should help detect). While both models face identical bias, the comparative evaluation becomes meaningless if neither model is tested on the hardest cases. The scope limitation doesn't resolve this\u2014it merely acknowledges the limitation without addressing whether the remaining data still represents spear-phishing detection rather than just 'fast-discovered phishing' detection."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The rebuttal incorrectly treats this as identical to F1. F2 specifically addresses whether validation/test performance measures real-time detection capability. Even if both models face identical bias, the performance estimates are inflated relative to real-world deployment where delayed-detection attacks exist. The scope limitation acknowledges the limitation but doesn't address whether the evaluation is measuring the intended capability. The comparative gap may be preserved, but the absolute performance numbers (precision at recall=80%) become misleading indicators of operational value."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The defender correctly identifies my factual error. The methodology explicitly states the graph is frozen at the training boundary (T0 to T0+12m) and test emails use only pre-computed statistics from that window. There is no temporal leakage as I incorrectly assumed. The rebuttal directly addresses the failure mechanism by citing the precise methodological safeguards."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The rebuttal incorrectly claims detection delay is 'outside the stated experiment scope.' The methodology's stated objective is 'spear-phishing detection' for 'real-time detector' evaluation. Time-to-detection is fundamental to operational value for spear-phishing\u2014attacks detected after credential theft are useless. While precision at fixed recall measures false-positive cost, it doesn't capture whether detection occurs early enough to prevent harm. The scope section mentions long-term drift but not detection timing. This remains a material flaw in assessing operational value."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 2,
+        "reasoning": "The defender correctly cites the Scope section which explicitly states the experiment does not claim robustness to distribution shift beyond 18 months. The failure mechanism I identified\u2014lack of generalization testing\u2014is acknowledged as out of scope. While this limits the claims that can be made, the rebuttal is valid given the explicitly bounded scope."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "Same as F5\u2014the scope explicitly limits claims to performance during the test period. The validation set is used for hyperparameter tuning, not for generalization claims. The rebuttal correctly identifies this as scoped out."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The rebuttal correctly notes this is a restatement of distribution shift concerns at minor severity. The experiment makes no claims about generalization across temporal windows beyond comparing performance on the held-out test set. This concern is immaterial to the comparative evaluation."
+      },
+      {
+        "finding_id": "F8",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The temporal split design intentionally prevents training on future data. The concern about overfitting to specific patterns is addressed by the chronological validation split. This is indeed a minor concern for the comparative evaluation."
+      },
+      {
+        "finding_id": "F9",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "Lowest severity concern about distribution shift, explicitly scoped out and immaterial to the comparative evaluation. The rebuttal is valid."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic ACCEPTed my rebuttals for F3, F5-F9, which I maintain. For F1, F2, and F4, the critic issued CHALLENGE. After analysis: F1/F2 present a genuine ambiguity about whether the 30-day exclusion biases the evaluation toward 'fast-discovered phishing' rather than true spear-phishing \u2014 both the design rationale (real-time detector) and the critic's concern (excluding sophisticated attacks) are valid. F4 presents a similar ambiguity about whether detection timing is in scope. Since these are genuinely unresolved questions requiring empirical evidence, I will DEFER rather than manufacture a defense or concede.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic correctly identifies that the 30-day exclusion may systematically remove sophisticated spear-phishing cases \u2014 precisely the attacks graph features should help detect. While both models face identical bias (preserving comparative validity), the question of whether we're testing 'spear-phishing detection' or 'fast-discovered phishing detection' is genuinely ambiguous. The design rationale (real-time detector using signals at message time) is valid, but the critic's concern about excluding the hardest cases is also valid. This requires empirical evidence: measure what fraction of confirmed high-severity incidents are excluded by the 30-day rule. If a significant portion of sophisticated attacks are excluded, the evaluation is biased toward easy cases regardless of comparative validity.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "F2 is distinct from F1: it questions whether validation/test performance on the biased subset measures real-time detection capability. The critic correctly notes that even with comparative validity preserved, absolute performance numbers (precision at recall=80%) may be inflated relative to real-world deployment where delayed-detection attacks exist. This is a valid concern about operational interpretation of results. The settling experiment: evaluate both models on a holdout set that includes delayed-label cases (if available) and compare performance. If performance drops substantially on those cases, the evaluation is not measuring the intended capability. If performance is similar, the concern is resolved.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 1,
+        "justification": "The critic ACCEPTed this rebuttal. The methodology explicitly states the graph is frozen at the training boundary (T0 to T0+12m) and test emails use only pre-computed statistics from that window. No temporal leakage exists.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic correctly points out that 'real-time detector' implies timing matters \u2014 attacks detected after credential theft are operationally useless regardless of classification precision. While precision at fixed recall measures false-positive cost (analyst time), it doesn't capture whether detection occurs early enough to prevent harm. The settling experiment: measure detection delay (time between email arrival and model alert) for true positives. If average delay is >24 hours, the model's operational value is limited even with high precision. If delays are low, the concern is resolved. This is a legitimate ambiguity about what the metric should capture.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic ACCEPTed this rebuttal. The Scope section explicitly states the experiment does not claim robustness to distribution shift beyond 18 months. This is acknowledged as out of scope.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The critic ACCEPTed this rebuttal. The validation set is used for hyperparameter tuning, not for generalization claims. The scope explicitly limits claims to performance during the test period.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The critic ACCEPTed this rebuttal. This is a restatement of distribution shift concerns at minor severity, explicitly scoped out of the experiment's claims.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The critic ACCEPTed this rebuttal. The temporal split design intentionally prevents training on future data. This is a minor concern for the comparative evaluation.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The critic ACCEPTed this rebuttal. Lowest severity concern about distribution shift, explicitly scoped out and immaterial to the comparative evaluation.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Three findings (F1, F2, F4) are DEFERred to empirical testing. F1/F2 require measuring what fraction of confirmed spear-phishing is excluded by the 30-day rule and evaluating on delayed-label holdout. F4 requires measuring detection delay. These are genuine ambiguities where both the design rationale and critic's concerns are valid \u2014 empirical evidence is the appropriate arbiter. The remaining findings are either ACCEPTed (F3, F5-F9) or have adjusted severity \u22642, making this a valid empirical_test_agreed outcome."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Excluding messages with labels arriving >30 days after message date ensures label quality and temporal consistency for a real-time detector.",
+        "failure_mechanism": "This exclusion introduces a severe selection bias against spear-phishing campaigns that are sophisticated, slow-moving, or discovered only after a long investigation. Sophisticated spear-phishing (the target of the hypothesis) often has delayed detection precisely because it evades initial automated and human review. By removing these cases, the model is trained and evaluated only on 'easy' or 'fast-discovered' attacks, which are not the primary threat the hypothesis aims to detect. The hardest, most targeted attacks are systematically excluded from the dataset, invalidating the central claim of detecting spear-phishing.",
+        "evidence_test": "Measure the fraction of confirmed spear-phishing incidents (via incident reports) that are excluded by the 30-day rule. If a significant portion of confirmed spear-phishing (especially high-severity incidents) is excluded, the bias is confirmed. Alternatively, train a model with the rule, then evaluate it on a holdout set that includes the delayed-label cases; if performance drops substantially on those cases, the model is not learning the targeted signal.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The model's performance on the validation set (T0+12m to T0+15m) and test set (T0+15m to T0+18m) is a valid measure of its ability to detect spear-phishing in a real-time deployment.",
+        "failure_mechanism": "The validation and test sets are constructed from the same 18-month data window, using the same 30-day label exclusion rule. This means the model is validated and tested on a biased subset of attacks (fast-discovered). The model's performance on this subset is not indicative of its performance on sophisticated, slow-moving spear-phishing, which is the core threat. The evaluation is not measuring the model's ability to detect the hardest cases, which are the ones that matter.",
+        "evidence_test": "Compare the model's performance on the excluded delayed-label cases (if any are available) to its performance on the included cases. A large discrepancy indicates the evaluation is not measuring the intended capability. Additionally, analyze the temporal distribution of excluded labels; if they cluster in later months (e.g., due to a new campaign discovered late), the test set is not representative of future attacks.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The graph-augmented transformer's mechanism for spear-phishing detection is being tested, as the graph features are derived from historical communication patterns.",
+        "failure_mechanism": "The graph features are constructed from the entire training period (T0 to T0+12m). This means the graph structure is built using data from the entire training window, which includes the future validation and test periods (T0+12m to T0+18m) in terms of the communication history. This is a form of temporal leakage: the graph embedding for a test email at T0+16m is derived from communication patterns that include the test period itself, violating the principle that test data must be unseen. The model may be learning from future information.",
+        "evidence_test": "Re-run the experiment with a strict temporal cutoff: for a test email at time t, the graph must be built using only data from T0 to t (or T0 to t-\u03b5). Compare performance to the original method. A significant drop indicates leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The evaluation metric (precision-recall curve, F1 at fixed recall) is sufficient to assess the model's operational value.",
+        "failure_mechanism": "The metric focuses on classification performance at a fixed recall threshold, but operational value for spear-phishing detection depends on the cost of false positives (analyst time wasted) and the benefit of early detection (before credential theft). The chosen metric does not incorporate the time-to-detection aspect, which is critical for spear-phishing. A model that detects attacks 30 days later is operationally useless, but the metric would not penalize it.",
+        "evidence_test": "Measure the detection delay (time between email arrival and model alert) for true positives. If the delay is large (e.g., >24 hours), the model's operational value is low despite high F1. Also, evaluate the false positive rate in terms of analyst workload (e.g., alerts per day).",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The model's performance on the test set (T0+15m to T0+18m) is a reliable indicator of future performance.",
+        "failure_mechanism": "The test set is drawn from the same 18-month window as the training data. This does not test the model's ability to generalize to new, unseen attack campaigns that emerge after T0+18m. The model may be overfitting to the specific attack patterns present in the 18-month window, and its performance could degrade when faced with novel tactics.",
+        "evidence_test": "Deploy the model in a live environment for a period after T0+18m and compare its performance to the test set results. A significant drop indicates overfitting to historical patterns.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The model's performance on the validation set (T0+12m to T0+15m) is a reliable indicator of performance on the test set (T0+15m to T0+18m).",
+        "failure_mechanism": "The validation set is drawn from the same 18-month window as the training and test data. This does not test the model's ability to generalize to new, unseen attack campaigns that emerge after T0+15m. The model may be overfitting to the specific attack patterns present in the 12-15m window, and its performance could degrade when faced with novel tactics.",
+        "evidence_test": "Compare the model's performance on the validation set to its performance on the test set. A significant drop indicates overfitting to historical patterns.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The model's performance on the test set (T0+15m to T0+18m) is a reliable indicator of performance on the validation set (T0+12m to T0+15m).",
+        "failure_mechanism": "The test set is drawn from the same 18-month window as the training and validation data. This does not test the model's ability to generalize to new, unseen attack campaigns that emerge after T0+15m. The model may be overfitting to the specific attack patterns present in the 15-18m window, and its performance could degrade when faced with novel tactics.",
+        "evidence_test": "Compare the model's performance on the test set to its performance on the validation set. A significant drop indicates overfitting to historical patterns.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The model's performance on the validation set (T0+12m to T0+15m) is a reliable indicator of performance on the training set (T0 to T0+12m).",
+        "failure_mechanism": "The validation set is drawn from the same 18-month window as the training data. This does not test the model's ability to generalize to new, unseen attack campaigns that emerge after T0+12m. The model may be overfitting to the specific attack patterns present in the 0-12m window, and its performance could degrade when faced with novel tactics.",
+        "evidence_test": "Compare the model's performance on the validation set to its performance on the training set. A significant drop indicates overfitting to historical patterns.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The model's performance on the training set (T0 to T0+12m) is a reliable indicator of performance on the validation set (T0+12m to T0+15m).",
+        "failure_mechanism": "The training set is drawn from the same 18-month window as the validation data. This does not test the model's ability to generalize to new, unseen attack campaigns that emerge after T0+12m. The model may be overfitting to the specific attack patterns present in the 0-12m window, and its performance could degrade when faced with novel tactics.",
+        "evidence_test": "Compare the model's performance on the training set to its performance on the validation set. A significant drop indicates overfitting to historical patterns.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The model's performance on the test set (T0+15m to T0+18m) is a reliable indicator of performance on the training set (T0 to T0+12m).",
+        "failure_mechanism": "The test set is drawn from the same 18-month window as the training data. This does not test the model's ability to generalize to new, unseen attack campaigns that emerge after T0+18m. The model may be overfitting to the specific attack patterns present in the 15-18m window, and its performance could degrade when faced with novel tactics.",
+        "evidence_test": "Compare the model's performance on the test set to its performance on the training set. A significant drop indicates overfitting to historical patterns.",
+        "flaw_category": null
+      }
+    ],
+    "summary": "The PoC's central flaw is the systematic exclusion of sophisticated spear-phishing attacks via a 30-day label cutoff, which introduces severe selection bias and invalidates the hypothesis test. Additionally, the graph construction method leaks future information into the training embeddings, and the evaluation metric does not incorporate operational costs.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic ACCEPTed my rebuttals for F3, F5-F9, which I maintain. For F1, F2, and F4, the critic issued CHALLENGE. After analysis: F1/F2 present a genuine ambiguity about whether the 30-day exclusion biases the evaluation toward 'fast-discovered phishing' rather than true spear-phishing \u2014 both the design rationale (real-time detector) and the critic's concern (excluding sophisticated attacks) are valid. F4 presents a similar ambiguity about whether detection timing is in scope. Since these are genuinely unresolved questions requiring empirical evidence, I will DEFER rather than manufacture a defense or concede.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic correctly identifies that the 30-day exclusion may systematically remove sophisticated spear-phishing cases \u2014 precisely the attacks graph features should help detect. While both models face identical bias (preserving comparative validity), the question of whether we're testing 'spear-phishing detection' or 'fast-discovered phishing detection' is genuinely ambiguous. The design rationale (real-time detector using signals at message time) is valid, but the critic's concern about excluding the hardest cases is also valid. This requires empirical evidence: measure what fraction of confirmed high-severity incidents are excluded by the 30-day rule. If a significant portion of sophisticated attacks are excluded, the evaluation is biased toward easy cases regardless of comparative validity.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "F2 is distinct from F1: it questions whether validation/test performance on the biased subset measures real-time detection capability. The critic correctly notes that even with comparative validity preserved, absolute performance numbers (precision at recall=80%) may be inflated relative to real-world deployment where delayed-detection attacks exist. This is a valid concern about operational interpretation of results. The settling experiment: evaluate both models on a holdout set that includes delayed-label cases (if available) and compare performance. If performance drops substantially on those cases, the evaluation is not measuring the intended capability. If performance is similar, the concern is resolved.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 1,
+        "justification": "The critic ACCEPTed this rebuttal. The methodology explicitly states the graph is frozen at the training boundary (T0 to T0+12m) and test emails use only pre-computed statistics from that window. No temporal leakage exists.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic correctly points out that 'real-time detector' implies timing matters \u2014 attacks detected after credential theft are operationally useless regardless of classification precision. While precision at fixed recall measures false-positive cost (analyst time), it doesn't capture whether detection occurs early enough to prevent harm. The settling experiment: measure detection delay (time between email arrival and model alert) for true positives. If average delay is >24 hours, the model's operational value is limited even with high precision. If delays are low, the concern is resolved. This is a legitimate ambiguity about what the metric should capture.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic ACCEPTed this rebuttal. The Scope section explicitly states the experiment does not claim robustness to distribution shift beyond 18 months. This is acknowledged as out of scope.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The critic ACCEPTed this rebuttal. The validation set is used for hyperparameter tuning, not for generalization claims. The scope explicitly limits claims to performance during the test period.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The critic ACCEPTed this rebuttal. This is a restatement of distribution shift concerns at minor severity, explicitly scoped out of the experiment's claims.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The critic ACCEPTed this rebuttal. The temporal split design intentionally prevents training on future data. This is a minor concern for the comparative evaluation.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The critic ACCEPTed this rebuttal. Lowest severity concern about distribution shift, explicitly scoped out and immaterial to the comparative evaluation.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Three findings (F1, F2, F4) are DEFERred to empirical testing. F1/F2 require measuring what fraction of confirmed spear-phishing is excluded by the 30-day rule and evaluating on delayed-label holdout. F4 requires measuring detection delay. These are genuine ambiguities where both the design rationale and critic's concerns are valid \u2014 empirical evidence is the appropriate arbiter. The remaining findings are either ACCEPTed (F3, F5-F9) or have adjusted severity \u22642, making this a valid empirical_test_agreed outcome."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=8, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 7,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "3 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

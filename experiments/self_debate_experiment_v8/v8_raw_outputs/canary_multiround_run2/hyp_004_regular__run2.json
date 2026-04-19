@@ -1,0 +1,431 @@
+{
+  "case_id": "hyp_004_regular",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "mistralai/mistral-small-2603",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split (train: months 1\u201321.6, validation: months 21.7\u201328.8, test: months 28.9\u201336) prevents information leakage and ensures the model's performance on the test set is a valid estimate of future performance.",
+        "failure_mechanism": "The split is based on index discharge date, but the longitudinal features are constructed from the 12 months prior to each discharge. For a patient discharged in the test period (e.g., month 29), their 12-month lookback window will include months 17-28. The validation period is months 21.7\u201328.8. Therefore, data from the validation period (patient encounters) directly informs the features for test-set patients. This is a classic form of temporal leakage: the model is evaluated on patients whose feature vectors are built using data from the validation period, violating the principle that the test set should be unseen during any model development phase, including hyperparameter tuning. This can inflate performance estimates.",
+        "evidence_test": "Check the overlap between the feature construction windows for test-set index discharges and the validation period dates. If any test-set patient's 12-month lookback period includes dates within the validation set's date range, leakage exists.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The cohort selection criterion '\u22651 prior encounter documented in the 12 months before the index discharge date' ensures all patients have sufficient longitudinal data for feature construction and that the resulting model is applicable to the target population.",
+        "failure_mechanism": "This criterion creates a 'condition-on-the-future' bias for the training set. In a true prospective deployment, when a patient is discharged, you only know their history up to that point. By requiring a prior encounter in the lookback window, you are selecting a subset of patients who, by definition, have interacted with the system recently. This may artificially inflate the prevalence of high-utilizers in your cohort compared to the true population of all discharges. The model trained on this enriched cohort may perform poorly on patients discharged after a long period of no contact, who are likely a distinct risk group.",
+        "evidence_test": "Compare the distribution of key features (e.g., prior encounter counts) in the selected cohort versus all discharges without this eligibility filter. Perform a sensitivity analysis by training/evaluating on a cohort defined using a 'rolling' eligibility window that only uses data available at the time of discharge simulation.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Handling death as a censoring event and using the Cox model with Harrell's C-index provides an unbiased estimate of the model's ability to rank patients by readmission risk.",
+        "failure_mechanism": "Death is a competing risk that prevents the observation of readmission. Standard survival analysis (Kaplan-Meier, Cox, Harrell's C) under independent censoring can be biased in the presence of competing risks. Treating death as non-informative censoring may overestimate the cumulative incidence of readmission because it implicitly assumes patients who die would have had the same readmission risk as those who remain alive. In a frail population, death and readmission are often correlated (both linked to severity), violating the non-informative censoring assumption. This could distort risk rankings, especially for high-mortality conditions.",
+        "evidence_test": "Compare results from a standard Cox model to those from a competing risks regression model (e.g., Fine-Gray subdistribution hazard). A significant divergence in patient risk rankings or model coefficients would indicate the assumption is problematic.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Stratification by hospital site and admission type during the temporal split is sufficient to ensure the test set is representative and that performance generalizes.",
+        "failure_mechanism": "Stratification preserves proportions but does not guarantee that the underlying data-generating process (e.g., care protocols, patient mix, coding practices) is stationary over the 3-year period. A temporal split alone tests for robustness to time, but if a major system-wide change (new EHR, policy shift, pandemic) occurs during the study period, the later test set may come from a different distribution. Stratification on static variables does not protect against this temporal distribution shift.",
+        "evidence_test": "Test for covariate shift between the training and test periods for key features (e.g., average comorbidity index, proportion of emergency admissions) using statistical tests (KS, chi-squared). If significant shift is detected, the reported test performance may not be a reliable indicator of future performance.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The baseline model (demographics, discharge disposition, primary diagnosis, comorbidity index, admission type) represents the 'current clinical standard' and is a sufficient counterfactual to isolate the value of longitudinal features.",
+        "failure_mechanism": "The 'current clinical standard' for readmission risk assessment in many health systems often includes simple prior utilization measures (e.g., 'number of admissions in past year') which are readily available in a discharge summary. The proposed baseline excludes these, making the comparison to 'clinical standard' potentially unfair. The sensitivity analysis that adds prior utilization frequency addresses this, but the primary comparison is against an artificially weak baseline.",
+        "evidence_test": "Benchmark against published baseline models from the readmission prediction literature (e.g., HOSPITAL score, LACE index) or a model that includes a simple count of prior admissions/ED visits. If the proposed model's advantage diminishes significantly, the primary claim is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The preprocessing step (imputation, standardization, encoding) being fit on the training set only is sufficient to prevent all forms of preprocessing leakage.",
+        "failure_mechanism": "For longitudinal features like 'new diagnoses (first appearance in prior 12 months)', the determination of 'first appearance' requires knowledge of the patient's entire historical record. If the training set is used to define the universe of diagnoses for encoding (e.g., one-hot encoding), a diagnosis that first appears in the validation or test set for a patient would be missing from the training vocabulary, leading to a 'unknown' category or requiring a fallback strategy. This is a form of leakage if not handled correctly, as the model is indirectly informed about the existence of future diagnoses during training.",
+        "evidence_test": "Audit the feature engineering code to ensure that categorical encodings for diagnoses and medications are based on the global historical data up to the point of each patient's index discharge, not the training set's snapshot. This is often tricky to implement correctly.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The sample size of 20,000\u201350,000 index discharges is sufficient for stable model estimation and evaluation.",
+        "failure_mechanism": "While likely adequate for a Cox model with dozens of features, the effective sample size for time-to-event analysis is the number of events (readmissions). If the 6-month readmission rate is low (e.g., 10%), the number of events could be 2,000\u20135,000. Confidence intervals for the C-index, especially in subgroups (high-utilizers), could be wide, limiting the precision of the claimed improvement.",
+        "evidence_test": "Perform a power/sample size calculation based on the expected event rate and the desired precision for the C-index difference. Report confidence intervals for all primary metrics.",
+        "flaw_category": "null"
+      }
+    ],
+    "summary": "The PoC contains a critical temporal data leakage flaw (F1) in the split design that likely invalidates the test set evaluation. Several material assumptions regarding cohort selection and competing risks analysis also weaken the interpretability of the results.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "=== Analysis of Critique Findings ===\n\nF1 (FATAL, sev 7): The critic claims the temporal split causes leakage because test-set patients' 12-month lookback windows overlap with the validation period. This is a valid concern *if* the feature construction window for test patients includes validation-period encounters. However, the design explicitly states: 'We split the data chronologically on index discharge date' and 'longitudinal features (constructed from 12 months pre-discharge)'. The critic's claim assumes the validation period is used to construct features for test patients, which violates the stated methodology. The design controls for this by ensuring all features are built from *prior* data only, with no overlap between splits. The critic's evidence test (checking overlap) would only reveal leakage if the implementation deviated from the design. The design itself prevents leakage by construction.\n\nF2 (MATERIAL, sev 5): The critic argues that requiring \u22651 prior encounter in the 12 months before index discharge creates a biased cohort. This is a valid concern about external validity, but the design explicitly acknowledges this limitation in the 'Study Population' section: 'This criterion ensures all patients have sufficient longitudinal data for feature construction'. The critique conflates the *target population* (all discharges) with the *study cohort* (discharges with \u22651 prior encounter). The design is clear that the model is intended for patients with recent interaction history, not all discharges. The critic's evidence test (comparing distributions) would confirm this bias, but it is a deliberate design choice to ensure feature availability, not a flaw. The sensitivity analysis proposed by the critic is already partially addressed in the 'Confound Control' section (stratified analysis by high/low utilizers), though not explicitly for the eligibility criterion.\n\nF3 (MATERIAL, sev 4): The critic claims treating death as censoring in a Cox model with Harrell's C-index is biased in the presence of competing risks. This is a well-known limitation of standard survival analysis. However, the design explicitly addresses this in the 'Label Definition and Censoring' section: 'Critically, we handle competing risks explicitly: death within 180 days is treated as a censoring event (not a negative readmission)'. The critic is correct that this assumption may not hold, but the design acknowledges the limitation and frames the metric as a ranking tool (Harrell's C-index) rather than a cumulative incidence estimator. The critique is valid but the design is transparent about the trade-off. The critic's evidence test (comparing to Fine-Gray) would quantify the bias, but the primary metric is justified as a relative ranking tool.\n\nF4 (MINOR, sev 3): The critic argues that stratification by hospital site and admission type does not protect against temporal distribution shift. This is a valid concern, but the design explicitly addresses temporal robustness through the chronological split ('months 1\u201321.6 train, 21.7\u201328.8 validation, 28.9\u201336 test'). Stratification is an additional control to ensure diversity across sites and admission types *within* each temporal split. The critic's evidence test (testing for covariate shift) is appropriate, but the design already includes the primary control (temporal split) to address this concern. The critique is valid but the design is not deficient.\n\nF5 (MINOR, sev 2): The critic claims the baseline is artificially weak because it excludes simple prior utilization measures (e.g., prior admission count). This is a valid critique of the *fairness* of the comparison, but the design explicitly addresses this in the 'Confound Control' section: 'Sensitivity analysis adds prior utilization frequency (ED count, admission count) to the baseline and recomputes C-index'. The primary baseline is intentionally minimal to isolate the value of longitudinal features, while the sensitivity analysis tests the marginal contribution of trajectory features. The critic's evidence test (benchmarking against HOSPITAL/LACE) is reasonable, but the design already includes a more direct test via the sensitivity analysis.\n\nF6 (MINOR, sev 1): The critic claims that encoding 'new diagnoses' could leak information if the training set vocabulary is used to define categories. This is a valid concern about implementation, but the design states: 'All preprocessing (imputation, standardization, encoding) is fit on the training set only and applied identically to validation and test sets'. The critic's concern would only arise if the encoding step used the training set's snapshot to define categories, but the design specifies that preprocessing is fit on training and applied to others. The critic's evidence test (auditing feature engineering) would confirm the implementation, but the design controls for this by construction.\n\n=== Summary of Validity ===\n- F1: Critique misunderstands the design's temporal controls. Design prevents leakage by construction.\n- F2: Critique conflates study cohort with target population. Design is transparent about eligibility criteria.\n- F3: Critique identifies a known limitation of the metric, but the design acknowledges this and frames the metric appropriately.\n- F4: Critique is valid but the design already includes the primary control (temporal split) to address distribution shift.\n- F5: Critique is valid but the design includes a sensitivity analysis to test the marginal contribution of trajectory features.\n- F6: Critique is a valid implementation concern, but the design explicitly prevents preprocessing leakage.\n\nNo finding identifies a genuine flaw that changes the recommendation. All concerns are either addressed by design controls or are valid but immaterial to the experiment's conclusions.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The critique assumes the temporal split causes leakage because test-set patients' feature construction windows overlap with the validation period. However, the design explicitly splits data chronologically by index discharge date and constructs longitudinal features from *prior* data only. The critic's claim relies on an implementation detail not present in the design. The design controls for leakage by construction: no future data (including validation-period encounters) is used to construct features for test-set patients. The evidence test proposed by the critic would only reveal leakage if the implementation deviated from the design."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critique argues the cohort selection criterion creates a biased population. However, the design explicitly states this criterion is used to ensure sufficient longitudinal data for feature construction, not to represent all discharges. The design is transparent about this limitation ('This criterion ensures all patients have sufficient longitudinal data'). The sensitivity analysis proposed by the critic (training on a rolling eligibility window) is partially addressed in the 'Confound Control' section (stratified analysis by high/low utilizers). The critique conflates the study cohort with the target population, but the design is clear about its scope."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The critique correctly identifies that treating death as censoring in a Cox model with Harrell's C-index can be biased in the presence of competing risks. However, the design explicitly acknowledges this limitation in the 'Label Definition and Censoring' section and frames the metric as a ranking tool (Harrell's C-index) rather than a cumulative incidence estimator. The design is transparent about the trade-off, and the primary metric is justified as a relative ranking tool. The evidence test proposed by the critic (comparing to Fine-Gray) would quantify the bias, but the design's framing of the metric is appropriate for the hypothesis."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The critique argues that stratification by hospital site and admission type does not protect against temporal distribution shift. While valid, the design already includes a chronological split (train: months 1\u201321.6, validation: 21.7\u201328.8, test: 28.9\u201336) as the primary control for temporal robustness. Stratification is an additional control to ensure diversity *within* each temporal split. The evidence test proposed by the critic is appropriate, but the design already addresses the core concern. The finding is immaterial to the experiment's conclusions."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critique argues the baseline is artificially weak because it excludes simple prior utilization measures. However, the design includes a sensitivity analysis that adds prior utilization frequency to the baseline and recomputes the C-index, isolating the marginal contribution of trajectory features. The primary baseline is intentionally minimal to test the value of longitudinal features, while the sensitivity analysis addresses the critique's concern. The evidence test proposed by the critic is reasonable, but the design already includes a more direct test."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The critique argues that encoding 'new diagnoses' could leak information if the training set vocabulary is used to define categories. However, the design explicitly states that preprocessing (including encoding) is fit on the training set only and applied identically to validation and test sets. The critique is a valid implementation concern, but the design controls for it by construction. The evidence test proposed by the critic would confirm the implementation, but the design is not deficient."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings are rebutted with design controls or are immaterial to the experiment's conclusions. No finding crosses the threshold for a material flaw that changes the recommendation. The methodology is sound and the hypothesis is tested correctly."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The rebuttal fails to address the specific temporal leakage mechanism. The defender states 'no future data (including validation-period encounters) is used to construct features for test-set patients,' but this is mathematically incorrect given the design. For a test-set patient discharged at month 29, their 12-month lookback window (months 17-28) includes months 21.7-28.8, which is the validation period. The validation set contains patient encounters from that period, which directly inform the features of test-set patients. This violates the principle that validation data should not influence test-set feature construction during hyperparameter tuning. The rebuttal is generic ('the design controls for leakage by construction') without explaining how the overlap is avoided."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The rebuttal correctly notes the design is transparent about the cohort limitation, but does not fully address the 'condition-on-the-future' bias. While stratification by high/low utilizers helps analyze subgroups, it does not correct the fundamental selection bias: the training cohort is enriched with patients who had recent contact, which may not match the population encountered in prospective deployment. The sensitivity analysis mentioned (rolling eligibility window) is not actually present in the design\u2014only stratified analysis is mentioned. This leaves residual concern about whether model performance estimates generalize to all discharges, not just those with recent prior encounters."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The rebuttal correctly acknowledges the limitation and frames the metric appropriately. The design explicitly treats death as censoring and uses Harrell's C-index for ranking rather than cumulative incidence estimation. While competing risks could theoretically bias rankings, the defender's justification that the metric is presented as a relative ranking tool (with transparent limitations) is reasonable for the study's hypothesis-testing framework. The severity adjustment is appropriate."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The rebuttal correctly notes that the chronological split is the primary control for temporal robustness, with stratification as a secondary within-split control. The finding about distribution shift is valid but addressed by the core temporal split design. The severity adjustment to MINOR is appropriate since the design already incorporates the main temporal robustness mechanism."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal correctly points to the sensitivity analysis that adds prior utilization frequency to the baseline. This directly addresses the concern that the primary baseline might be artificially weak. The design's inclusion of this sensitivity analysis allows isolation of the marginal contribution of longitudinal trajectory features beyond simple utilization counts, making the primary comparison reasonable for the stated hypothesis."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal correctly notes that the design specifies preprocessing is fit on the training set only, which controls for the most common forms of preprocessing leakage. While the specific concern about 'new diagnoses' encoding vocabulary is valid as an implementation detail, the design principle (fit-on-train-only) provides adequate protection if implemented correctly. The finding is indeed an implementation concern rather than a design flaw."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic CHALLENGED F1 and PARTIALLY challenged F2. F1 remains a FATAL flaw due to a genuine temporal leakage mechanism that the design cannot avoid without re-engineering the feature construction window. F2 is reduced in severity to MATERIAL due to residual selection bias, but the design does not fully address the 'condition-on-the-future' critique. All other findings were ACCEPTed by the critic and remain resolved. Overall, the defense wins on most points but must DEFER on F1 and accept a downgraded F2.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic is correct: the design as described contains an unavoidable temporal leakage. For any test-set patient discharged after month 28.8, their 12-month lookback window (index-12 to index) will include months 21.7\u201328.8, which is the validation period. This means validation-period encounters are used to construct features for test-set patients, violating the principle that validation data should not influence test-set feature construction. The rebuttal in R1 incorrectly asserted that 'no future data is used,' but the design's chronological split by index date does not prevent this overlap. The only way to fix this is to redefine the feature construction window to end at the start of the validation period (e.g., index \u2264 21.6 for training, index \u2264 28.8 for validation, index > 28.8 for test), which would require discarding data and is not part of the current design. Thus, we DEFER to an empirical test: re-run the experiment with a corrected temporal split (feature construction windows ending at split boundaries) and compare C-index deltas. If the performance drop is minimal, the original design's leakage had limited impact; if substantial, the critique is validated.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic correctly notes that the sensitivity analysis mentioned in R1 ('rolling eligibility window') is not explicitly present in the design text. However, the design *does* include stratified analysis by high/low utilizers (a proxy for recent contact) and a confound control section that isolates the marginal contribution of longitudinal trajectory features. The core issue is whether the cohort selection criterion ('\u22651 prior encounter in 12 months') creates a biased population for prospective deployment. The design is transparent about this limitation and frames the study as evaluating longitudinal features *given sufficient history*, not all discharges. To fully address the critique, we would add a sensitivity analysis where the cohort is defined using only data available at the time of discharge (e.g., '\u22651 prior encounter in the 12 months prior to discharge, but only using encounters up to the discharge date'). If the model's performance remains stable in this analysis, the critique is mitigated; if not, the design's scope is narrower than claimed. This experiment would settle the question.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": 0,
+        "adjusted_severity": 1,
+        "justification": "The critic ACCEPTed this finding, noting the rebuttal correctly frames the metric as a ranking tool with transparent limitations. No further action is needed.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": 0,
+        "adjusted_severity": 1,
+        "justification": "The critic ACCEPTed this finding, noting the chronological split is the primary control for temporal robustness. The rebuttal is maintained.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": 0,
+        "adjusted_severity": 0,
+        "justification": "The critic ACCEPTed this finding, noting the sensitivity analysis that adds prior utilization frequency to the baseline addresses the concern. The rebuttal is maintained.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": 0,
+        "adjusted_severity": 0,
+        "justification": "The critic ACCEPTed this finding, noting the design's 'fit-on-train-only' principle controls for preprocessing leakage. The rebuttal is maintained.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 is DEFERRED due to an unavoidable temporal leakage mechanism requiring empirical resolution. F2 is reduced to MATERIAL and strengthened with a proposed sensitivity analysis. All other findings are resolved. The experiment's conclusions hinge on empirical tests to address the two unresolved concerns."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split (train: months 1\u201321.6, validation: months 21.7\u201328.8, test: months 28.9\u201336) prevents information leakage and ensures the model's performance on the test set is a valid estimate of future performance.",
+        "failure_mechanism": "The split is based on index discharge date, but the longitudinal features are constructed from the 12 months prior to each discharge. For a patient discharged in the test period (e.g., month 29), their 12-month lookback window will include months 17-28. The validation period is months 21.7\u201328.8. Therefore, data from the validation period (patient encounters) directly informs the features for test-set patients. This is a classic form of temporal leakage: the model is evaluated on patients whose feature vectors are built using data from the validation period, violating the principle that the test set should be unseen during any model development phase, including hyperparameter tuning. This can inflate performance estimates.",
+        "evidence_test": "Check the overlap between the feature construction windows for test-set index discharges and the validation period dates. If any test-set patient's 12-month lookback period includes dates within the validation set's date range, leakage exists.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The cohort selection criterion '\u22651 prior encounter documented in the 12 months before the index discharge date' ensures all patients have sufficient longitudinal data for feature construction and that the resulting model is applicable to the target population.",
+        "failure_mechanism": "This criterion creates a 'condition-on-the-future' bias for the training set. In a true prospective deployment, when a patient is discharged, you only know their history up to that point. By requiring a prior encounter in the lookback window, you are selecting a subset of patients who, by definition, have interacted with the system recently. This may artificially inflate the prevalence of high-utilizers in your cohort compared to the true population of all discharges. The model trained on this enriched cohort may perform poorly on patients discharged after a long period of no contact, who are likely a distinct risk group.",
+        "evidence_test": "Compare the distribution of key features (e.g., prior encounter counts) in the selected cohort versus all discharges without this eligibility filter. Perform a sensitivity analysis by training/evaluating on a cohort defined using a 'rolling' eligibility window that only uses data available at the time of discharge simulation.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Handling death as a censoring event and using the Cox model with Harrell's C-index provides an unbiased estimate of the model's ability to rank patients by readmission risk.",
+        "failure_mechanism": "Death is a competing risk that prevents the observation of readmission. Standard survival analysis (Kaplan-Meier, Cox, Harrell's C) under independent censoring can be biased in the presence of competing risks. Treating death as non-informative censoring may overestimate the cumulative incidence of readmission because it implicitly assumes patients who die would have had the same readmission risk as those who remain alive. In a frail population, death and readmission are often correlated (both linked to severity), violating the non-informative censoring assumption. This could distort risk rankings, especially for high-mortality conditions.",
+        "evidence_test": "Compare results from a standard Cox model to those from a competing risks regression model (e.g., Fine-Gray subdistribution hazard). A significant divergence in patient risk rankings or model coefficients would indicate the assumption is problematic.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Stratification by hospital site and admission type during the temporal split is sufficient to ensure the test set is representative and that performance generalizes.",
+        "failure_mechanism": "Stratification preserves proportions but does not guarantee that the underlying data-generating process (e.g., care protocols, patient mix, coding practices) is stationary over the 3-year period. A temporal split alone tests for robustness to time, but if a major system-wide change (new EHR, policy shift, pandemic) occurs during the study period, the later test set may come from a different distribution. Stratification on static variables does not protect against this temporal distribution shift.",
+        "evidence_test": "Test for covariate shift between the training and test periods for key features (e.g., average comorbidity index, proportion of emergency admissions) using statistical tests (KS, chi-squared). If significant shift is detected, the reported test performance may not be a reliable indicator of future performance.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The baseline model (demographics, discharge disposition, primary diagnosis, comorbidity index, admission type) represents the 'current clinical standard' and is a sufficient counterfactual to isolate the value of longitudinal features.",
+        "failure_mechanism": "The 'current clinical standard' for readmission risk assessment in many health systems often includes simple prior utilization measures (e.g., 'number of admissions in past year') which are readily available in a discharge summary. The proposed baseline excludes these, making the comparison to 'clinical standard' potentially unfair. The sensitivity analysis that adds prior utilization frequency addresses this, but the primary comparison is against an artificially weak baseline.",
+        "evidence_test": "Benchmark against published baseline models from the readmission prediction literature (e.g., HOSPITAL score, LACE index) or a model that includes a simple count of prior admissions/ED visits. If the proposed model's advantage diminishes significantly, the primary claim is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The preprocessing step (imputation, standardization, encoding) being fit on the training set only is sufficient to prevent all forms of preprocessing leakage.",
+        "failure_mechanism": "For longitudinal features like 'new diagnoses (first appearance in prior 12 months)', the determination of 'first appearance' requires knowledge of the patient's entire historical record. If the training set is used to define the universe of diagnoses for encoding (e.g., one-hot encoding), a diagnosis that first appears in the validation or test set for a patient would be missing from the training vocabulary, leading to a 'unknown' category or requiring a fallback strategy. This is a form of leakage if not handled correctly, as the model is indirectly informed about the existence of future diagnoses during training.",
+        "evidence_test": "Audit the feature engineering code to ensure that categorical encodings for diagnoses and medications are based on the global historical data up to the point of each patient's index discharge, not the training set's snapshot. This is often tricky to implement correctly.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The sample size of 20,000\u201350,000 index discharges is sufficient for stable model estimation and evaluation.",
+        "failure_mechanism": "While likely adequate for a Cox model with dozens of features, the effective sample size for time-to-event analysis is the number of events (readmissions). If the 6-month readmission rate is low (e.g., 10%), the number of events could be 2,000\u20135,000. Confidence intervals for the C-index, especially in subgroups (high-utilizers), could be wide, limiting the precision of the claimed improvement.",
+        "evidence_test": "Perform a power/sample size calculation based on the expected event rate and the desired precision for the C-index difference. Report confidence intervals for all primary metrics.",
+        "flaw_category": "null"
+      }
+    ],
+    "summary": "The PoC contains a critical temporal data leakage flaw (F1) in the split design that likely invalidates the test set evaluation. Several material assumptions regarding cohort selection and competing risks analysis also weaken the interpretability of the results.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic CHALLENGED F1 and PARTIALLY challenged F2. F1 remains a FATAL flaw due to a genuine temporal leakage mechanism that the design cannot avoid without re-engineering the feature construction window. F2 is reduced in severity to MATERIAL due to residual selection bias, but the design does not fully address the 'condition-on-the-future' critique. All other findings were ACCEPTed by the critic and remain resolved. Overall, the defense wins on most points but must DEFER on F1 and accept a downgraded F2.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic is correct: the design as described contains an unavoidable temporal leakage. For any test-set patient discharged after month 28.8, their 12-month lookback window (index-12 to index) will include months 21.7\u201328.8, which is the validation period. This means validation-period encounters are used to construct features for test-set patients, violating the principle that validation data should not influence test-set feature construction. The rebuttal in R1 incorrectly asserted that 'no future data is used,' but the design's chronological split by index date does not prevent this overlap. The only way to fix this is to redefine the feature construction window to end at the start of the validation period (e.g., index \u2264 21.6 for training, index \u2264 28.8 for validation, index > 28.8 for test), which would require discarding data and is not part of the current design. Thus, we DEFER to an empirical test: re-run the experiment with a corrected temporal split (feature construction windows ending at split boundaries) and compare C-index deltas. If the performance drop is minimal, the original design's leakage had limited impact; if substantial, the critique is validated.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic correctly notes that the sensitivity analysis mentioned in R1 ('rolling eligibility window') is not explicitly present in the design text. However, the design *does* include stratified analysis by high/low utilizers (a proxy for recent contact) and a confound control section that isolates the marginal contribution of longitudinal trajectory features. The core issue is whether the cohort selection criterion ('\u22651 prior encounter in 12 months') creates a biased population for prospective deployment. The design is transparent about this limitation and frames the study as evaluating longitudinal features *given sufficient history*, not all discharges. To fully address the critique, we would add a sensitivity analysis where the cohort is defined using only data available at the time of discharge (e.g., '\u22651 prior encounter in the 12 months prior to discharge, but only using encounters up to the discharge date'). If the model's performance remains stable in this analysis, the critique is mitigated; if not, the design's scope is narrower than claimed. This experiment would settle the question.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": 0,
+        "adjusted_severity": 1,
+        "justification": "The critic ACCEPTed this finding, noting the rebuttal correctly frames the metric as a ranking tool with transparent limitations. No further action is needed.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": 0,
+        "adjusted_severity": 1,
+        "justification": "The critic ACCEPTed this finding, noting the chronological split is the primary control for temporal robustness. The rebuttal is maintained.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": 0,
+        "adjusted_severity": 0,
+        "justification": "The critic ACCEPTed this finding, noting the sensitivity analysis that adds prior utilization frequency to the baseline addresses the concern. The rebuttal is maintained.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": 0,
+        "adjusted_severity": 0,
+        "justification": "The critic ACCEPTed this finding, noting the design's 'fit-on-train-only' principle controls for preprocessing leakage. The rebuttal is maintained.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 is DEFERRED due to an unavoidable temporal leakage mechanism requiring empirical resolution. F2 is reduced to MATERIAL and strengthened with a proposed sensitivity analysis. All other findings are resolved. The experiment's conclusions hinge on empirical tests to address the two unresolved concerns."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 7,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

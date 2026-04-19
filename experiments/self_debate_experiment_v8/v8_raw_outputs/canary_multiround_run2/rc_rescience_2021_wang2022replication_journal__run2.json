@@ -1,0 +1,293 @@
+{
+  "case_id": "rc_rescience_2021_wang2022replication_journal",
+  "stratum": "regular",
+  "flaw_category": "silent_misconfig",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The directed acyclic graph (DAG) provided to or learned by DECAF accurately captures the true causal structure of the data, enabling correct bias removal during synthetic generation.",
+        "failure_mechanism": "A misspecified DAG (e.g., missing confounders, incorrect edges between protected attributes and outcomes) would cause the causal constraints in the GAN to fail, resulting in synthetic data that either retains undesirable spurious correlations (failing debiasing) or destroys utility by over-correcting non-causal paths.",
+        "evidence_test": "Validation of the DAG via independent causal discovery methods (e.g., PC algorithm, NOTEARS) on the dataset, or sensitivity analysis by training DECAF on perturbed DAGs (adding/removing edges) and measuring changes in downstream fairness/utility.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Downstream predictive utility and fairness metrics on models trained on synthetic data are sufficient evidence that the synthetic data distribution faithfully matches the real data distribution in all relevant aspects, including rare subgroups and tail behaviors critical for fairness.",
+        "failure_mechanism": "Tabular GANs often suffer from mode collapse or poor coverage of minorities/protected groups; simple downstream models (e.g., logistic regression) can achieve high aggregate utility/fairness by fitting majority patterns, masking synthetic data pathologies that would harm complex real-world models or expose fairness failures in low-prevalence subgroups.",
+        "evidence_test": "Direct synthetic data quality checks such as statistical similarity tests (e.g., multivariate KS test per subgroup), density estimation visualizations, or subgroup representation parity (e.g., KL divergence conditioned on protected attributes); failure if synth data underrepresents protected groups by >20%.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Standard observational group fairness metrics (e.g., demographic parity, equalized odds) adequately verify that DECAF has achieved 'causally informed' debiasing by removing undesirable bias along the specified DAG paths.",
+        "failure_mechanism": "Observational fairness metrics measure prediction-protected attribute associations but ignore causal pathways; non-causal baselines (e.g., dropping sensitive attribute, reweighting) can match these metrics without addressing causal bias, so DECAF's causal mechanism provides no verifiable advantage.",
+        "evidence_test": "Causal fairness metrics like counterfactual fairness (simulate interventions on causal ancestors and check prediction invariance) or path-specific effect estimation; or ablation showing DECAF outperforms non-causal synth methods on causal metrics while matching on observational ones.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "In the synthetic bias injection setting, the evaluation test set remains a valid unbiased proxy for real-world deployment data after bias injection into the 'real data'.",
+        "failure_mechanism": "If bias injection occurs on the full dataset before train/test splitting (common oversight), the test set inherits the artificial bias, inflating DECAF's apparent success: models trained on 'debaised' synth data appear fairer on a biased test than baselines on biased train, but this doesn't prove debiasing transferable to unbiased real data.",
+        "evidence_test": "Explicit protocol confirmation that splits precede injection (train injected, test held-out pre-injection); cross-check by evaluating on a secondary unbiased holdout and observing if fairness gains persist vs. baselines.",
+        "flaw_category": "eval_inflation"
+      }
+    ],
+    "summary": "The PoC has critical unverified prerequisites around causal structure and evaluation design risks that could inflate results, particularly in the bias injection setting and synthetic data quality verification; addressing these is essential before concluding causal debiasing efficacy.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 claims the DAG must be 'accurate' to enable bias removal. However, the design intent of DECAF is to provide a framework for causally-informed generation. In the context of a PoC, the DAG is a design parameter. The hypothesis is that *given* a causal structure, the GAN can remove bias. The critic's demand for independent causal discovery (PC/NOTEARS) is a separate research problem (causal discovery) rather than a flaw in the debiasing mechanism itself. If the DAG is a known prior or a specified assumption of the experiment, the methodology holds.\n\nF2 concerns mode collapse and tail behavior in synthetic data. While a valid general concern for GANs, the paper evaluates the synthetic data via downstream predictive utility and fairness on real-world test sets. If the synthetic data suffered from severe mode collapse or failed to represent protected groups, the downstream models would fail to generalize to the real test set, and the fairness metrics (which are calculated on the real test set) would reflect this. The downstream evaluation serves as an implicit validation of the distribution's utility.\n\nF3 argues that observational metrics don't prove 'causal' debiasing. This is a theoretical point about the definition of fairness. However, the objective of the PoC is to show that the method improves standard fairness metrics while retaining utility. The 'causal' part is the *mechanism* used to achieve the result, not necessarily the *metric* used to measure it. The hypothesis is that causal-informed generation works better than non-causal generation for these metrics.\n\nF4 raises a critical point about data leakage/contamination in the synthetic bias injection setting. If the test set was biased along with the training set, the evaluation of 'fairness' is fundamentally flawed because the ground truth for fairness is shifted. I must check if the methodology specifies the split. Since the provided summary does not explicitly state that the test set remained unbiased, and this is a common failure mode in bias-injection papers, this is a material risk to the validity of the 'synthetic injection' results.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The DAG is a specified input/assumption of the DECAF framework. The hypothesis tests whether the causal-GAN architecture can debias data *given* a structure, not whether the system can autonomously discover the true latent DAG of a dataset. Causal discovery is outside the scope of this specific debiasing hypothesis."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "Downstream evaluation on a real-world holdout set acts as a proxy for distribution quality. If the synthetic data failed to capture critical subgroups or suffered from mode collapse, the resulting models would exhibit poor generalization and fairness on the real test set, which is the primary metric of success."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The goal of the PoC is to demonstrate that causal-informed generation improves standard fairness and utility metrics compared to baselines. While counterfactual metrics are a higher bar, the hypothesis is focused on the efficacy of the causal mechanism in achieving observational fairness."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "It is unclear from the methodology whether the test set was held out before bias injection. To resolve this: 1) Verify the split-then-inject protocol. 2) If the test set was injected, re-evaluate the debiased model on a clean, unbiased holdout. 3) If fairness gains persist on clean data, the design is vindicated; if they vanish, the original results were an artifact of test-set contamination."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "While the causal design and metric choices are sound for a PoC, there is a genuine uncertainty regarding the data splitting protocol in the synthetic bias injection setting (F4) that cannot be resolved without reviewing the specific implementation or running a holdout test."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The rebuttal is a generic scope argument ('causal discovery outside scope') without addressing the specific failure mechanism: even with a user-provided DAG, a misspecification (e.g., missing confounders between protected attributes and outcomes) would propagate incorrect causal constraints into the GAN, retaining spurious correlations or eroding utility. No mechanistic defense (e.g., sensitivity to DAG perturbations) is provided, and the -5 adjustment from FATAL (8) to 3 is disproportionate without evidence of verification or robustness."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 2,
+        "reasoning": "The rebuttal directly addresses the failure mechanism: mode collapse or poor subgroup coverage in tabular GANs would manifest as degraded utility/fairness on the real-world holdout set, which serves as the primary evaluation metric per the methodology. Downstream generalization on real data mechanistically proxies for faithful distribution matching, including tails, resolving the concern."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The REBUT-SCOPE justification does not address the failure mechanism: observational metrics (e.g., DP, EO) can be matched by non-causal baselines without verifying the causal DAG constraints remove bias along specified paths. Claiming focus on 'observational fairness' sidesteps the need to distinguish causal efficacy (e.g., via counterfactuals or causal ablations), leaving unverified whether DECAF's mechanism provides any advantage over simpler methods."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 7,
+        "reasoning": "DEFER rebuttal notes the open question on split-then-inject protocol without conceding; no counter needed as it appropriately defers resolution via specified verification steps."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I am maintaining my position on F1 and F3, though strengthening the arguments to address the critic's mechanistic concerns. For F1, I am clarifying that the hypothesis is about the architecture's ability to execute a given DAG, not the DAG's truth. For F3, I am arguing that the comparison against non-causal baselines using the same metrics is the intended verification of the causal mechanism's utility. F2 and F4 remain as previously agreed.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic's challenge conflates 'causal discovery' with 'causal execution'. The failure mechanism described (misspecification) is a data-engineering risk, not a failure of the DECAF architecture. The hypothesis being tested is: 'Given a DAG, can the causal-GAN generate debiased data?' If the user provides an incorrect DAG, the system is expected to produce results consistent with that incorrect DAG. The design's success is measured by its ability to translate the provided causal constraints into synthetic data that improves downstream metrics relative to non-causal baselines. Therefore, the 'truth' of the DAG is a prerequisite provided by the user, not a variable the design is intended to solve.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "Downstream evaluation on a real-world holdout set acts as a proxy for distribution quality. If the synthetic data failed to capture critical subgroups or suffered from mode collapse, the resulting models would exhibit poor generalization and fairness on the real test set, which is the primary metric of success.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic argues that observational metrics cannot verify causal paths. However, the design addresses this by comparing DECAF against non-causal baselines (e.g., standard GANs or reweighting) using those same metrics. If DECAF achieves superior fairness/utility trade-offs than non-causal methods, it provides empirical evidence that the causal constraints are providing a functional advantage in the generation process. While counterfactual metrics would provide a deeper 'why', the current design's use of comparative baselines is a valid mechanistic test of whether the causal approach outperforms non-causal ones in achieving the target objective.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "It is unclear from the methodology whether the test set was held out before bias injection. To resolve this: 1) Verify the split-then-inject protocol. 2) If the test set was injected, re-evaluate the debiased model on a clean, unbiased holdout. 3) If fairness gains persist on clean data, the design is vindicated; if they vanish, the original results were an artifact of test-set contamination.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The defense successfully rebutted the majority of findings to low severity, but F4 remains a high-severity open question that requires empirical verification of the data splitting protocol."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The directed acyclic graph (DAG) provided to or learned by DECAF accurately captures the true causal structure of the data, enabling correct bias removal during synthetic generation.",
+        "failure_mechanism": "A misspecified DAG (e.g., missing confounders, incorrect edges between protected attributes and outcomes) would cause the causal constraints in the GAN to fail, resulting in synthetic data that either retains undesirable spurious correlations (failing debiasing) or destroys utility by over-correcting non-causal paths.",
+        "evidence_test": "Validation of the DAG via independent causal discovery methods (e.g., PC algorithm, NOTEARS) on the dataset, or sensitivity analysis by training DECAF on perturbed DAGs (adding/removing edges) and measuring changes in downstream fairness/utility.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Downstream predictive utility and fairness metrics on models trained on synthetic data are sufficient evidence that the synthetic data distribution faithfully matches the real data distribution in all relevant aspects, including rare subgroups and tail behaviors critical for fairness.",
+        "failure_mechanism": "Tabular GANs often suffer from mode collapse or poor coverage of minorities/protected groups; simple downstream models (e.g., logistic regression) can achieve high aggregate utility/fairness by fitting majority patterns, masking synthetic data pathologies that would harm complex real-world models or expose fairness failures in low-prevalence subgroups.",
+        "evidence_test": "Direct synthetic data quality checks such as statistical similarity tests (e.g., multivariate KS test per subgroup), density estimation visualizations, or subgroup representation parity (e.g., KL divergence conditioned on protected attributes); failure if synth data underrepresents protected groups by >20%.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Standard observational group fairness metrics (e.g., demographic parity, equalized odds) adequately verify that DECAF has achieved 'causally informed' debiasing by removing undesirable bias along the specified DAG paths.",
+        "failure_mechanism": "Observational fairness metrics measure prediction-protected attribute associations but ignore causal pathways; non-causal baselines (e.g., dropping sensitive attribute, reweighting) can match these metrics without addressing causal bias, so DECAF's causal mechanism provides no verifiable advantage.",
+        "evidence_test": "Causal fairness metrics like counterfactual fairness (simulate interventions on causal ancestors and check prediction invariance) or path-specific effect estimation; or ablation showing DECAF outperforms non-causal synth methods on causal metrics while matching on observational ones.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "In the synthetic bias injection setting, the evaluation test set remains a valid unbiased proxy for real-world deployment data after bias injection into the 'real data'.",
+        "failure_mechanism": "If bias injection occurs on the full dataset before train/test splitting (common oversight), the test set inherits the artificial bias, inflating DECAF's apparent success: models trained on 'debaised' synth data appear fairer on a biased test than baselines on biased train, but this doesn't prove debiasing transferable to unbiased real data.",
+        "evidence_test": "Explicit protocol confirmation that splits precede injection (train injected, test held-out pre-injection); cross-check by evaluating on a secondary unbiased holdout and observing if fairness gains persist vs. baselines.",
+        "flaw_category": "eval_inflation"
+      }
+    ],
+    "summary": "The PoC has critical unverified prerequisites around causal structure and evaluation design risks that could inflate results, particularly in the bias injection setting and synthetic data quality verification; addressing these is essential before concluding causal debiasing efficacy.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I am maintaining my position on F1 and F3, though strengthening the arguments to address the critic's mechanistic concerns. For F1, I am clarifying that the hypothesis is about the architecture's ability to execute a given DAG, not the DAG's truth. For F3, I am arguing that the comparison against non-causal baselines using the same metrics is the intended verification of the causal mechanism's utility. F2 and F4 remain as previously agreed.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic's challenge conflates 'causal discovery' with 'causal execution'. The failure mechanism described (misspecification) is a data-engineering risk, not a failure of the DECAF architecture. The hypothesis being tested is: 'Given a DAG, can the causal-GAN generate debiased data?' If the user provides an incorrect DAG, the system is expected to produce results consistent with that incorrect DAG. The design's success is measured by its ability to translate the provided causal constraints into synthetic data that improves downstream metrics relative to non-causal baselines. Therefore, the 'truth' of the DAG is a prerequisite provided by the user, not a variable the design is intended to solve.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "Downstream evaluation on a real-world holdout set acts as a proxy for distribution quality. If the synthetic data failed to capture critical subgroups or suffered from mode collapse, the resulting models would exhibit poor generalization and fairness on the real test set, which is the primary metric of success.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic argues that observational metrics cannot verify causal paths. However, the design addresses this by comparing DECAF against non-causal baselines (e.g., standard GANs or reweighting) using those same metrics. If DECAF achieves superior fairness/utility trade-offs than non-causal methods, it provides empirical evidence that the causal constraints are providing a functional advantage in the generation process. While counterfactual metrics would provide a deeper 'why', the current design's use of comparative baselines is a valid mechanistic test of whether the causal approach outperforms non-causal ones in achieving the target objective.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "It is unclear from the methodology whether the test set was held out before bias injection. To resolve this: 1) Verify the split-then-inject protocol. 2) If the test set was injected, re-evaluate the debiased model on a clean, unbiased holdout. 3) If fairness gains persist on clean data, the design is vindicated; if they vanish, the original results were an artifact of test-set contamination.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The defense successfully rebutted the majority of findings to low severity, but F4 remains a high-severity open question that requires empirical verification of the data splitting protocol."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 7,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7, DEFER \u2192 empirical_test_agreed"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

@@ -1,0 +1,411 @@
+{
+  "case_id": "eval_scenario_862",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (quarters 1-12 train, 13-15 validation, 16 test) guarantees that the test set contains novel, unseen attack patterns because attackers reuse infrastructure only within and across campaigns, not across years.",
+        "failure_mechanism": "If phishing campaigns exhibit yearly seasonality (e.g., tax season, holiday shopping), patterns in Q16 may resemble those in Q4, Q8, Q12 of prior years, allowing the model to rely on learned seasonal cycles rather than truly novel generalization.",
+        "evidence_test": "Compute distribution similarity (e.g., KL divergence or PSI) between feature sets of each training quarter and the test quarter per month; or manually inspect whether top phishing campaign clusters (based on URL domains, subject lines) appear in both training and test sets. High similarity would indicate the test is not truly novel.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Any performance advantage of the transformer over the gradient-boosted baseline must arise from its ability to learn phishing-specific language from raw email text, because both models receive identical metadata.",
+        "failure_mechanism": "The transformer encodes metadata (sender/domain, attachment info) as text tokens, potentially capturing interactions and non-linearities that the hand-engineered features miss. This could give the transformer an edge unrelated to raw phishing language.",
+        "evidence_test": "Run an ablation where metadata tokens are masked or removed from the transformer input and compare its performance drop to the baseline (which already lacks metadata). If the transformer's performance decreases more than the baseline's, metadata contributes to the advantage. If not, the advantage likely stems from text.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer's learned text representations provide an advantage over a hand-engineered feature baseline, demonstrating the value of end-to-end text modeling.",
+        "failure_mechanism": "Without a baseline that also receives raw email text (e.g., TF-IDF weighted logistic regression or a shallow neural net), we cannot disentangle whether the gain is due to the transformer's architecture/pretraining versus the mere availability of raw text.",
+        "evidence_test": "Train a baseline that uses the same raw text input as the transformer (e.g., TF-IDF + linear model or a shallow CNN/RNN) with equivalent tuning effort, and compare its test PR-AUC to the transformer. If the transformer still outperforms, raw text representations add value; if not, the advantage may be due to model capacity.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The transformer processes the full email text to capture phishing signals distributed throughout the body.",
+        "failure_mechanism": "The implementation truncates sequences to 512 tokens, preserving subject and sender in full and truncating the body if necessary. If phishing cues (e.g., malicious links, deceptive language) frequently appear beyond the first 512 tokens, the transformer loses that signal, potentially underestimating its true capability and biasing the comparison.",
+        "evidence_test": "Measure the proportion of emails exceeding 512 tokens after tokenization; retrain the transformer with a longer sequence limit (e.g., 1024 tokens) and evaluate test PR-AUC. A significant increase would indicate that truncation harms performance and that the reported results may be misleading.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Analyst-reviewed labels (excluding uncertain/disputed cases) provide a reliable ground truth for phishing detection, minimizing label noise.",
+        "failure_mechanism": "Labeling may be biased: analysts are more likely to flag emails that are caught by existing filters (e.g., those with known malicious URLs) as phishing, while sophisticated zero\u2011day or novel attacks may be missed or labeled benign. This creates a systematic label shift between training and future test quarters if attack tactics evolve.",
+        "evidence_test": "Audit a stratified random sample of test\u2011set emails (e.g., 500) with senior analysts to verify label correctness, focusing on emails that passed existing filters. Compute disagreement rate; alternatively, compare the proportion of labels derived from URL reputation vs. content\u2011based indicators across quarters to detect drift.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Fine\u2011tuning a transformer on the email dataset yields improvements that are attributable to learning email\u2011specific phishing language, rather than to general language understanding acquired during pretraining.",
+        "failure_mechanism": "The transformer starts from weights pretrained on large general corpora (e.g., BookCorpus, Wikipedia). These priors may already capture useful linguistic patterns that aid classification even without email\u2011specific fine\u2011tuning, confounding the attribution of gain to learned phishing language.",
+        "evidence_test": "Train a transformer from random initialization (same architecture, same hyperparameters) on the training set and evaluate on the test set. Compare its PR\u2011AUC to that of the pretrained\u2011then\u2011fine\u2011tuned model. A substantial drop would indicate that pretraining contributes significantly to the observed advantage.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "Several methodological concerns weaken the claim that transformer superiority stems from learned text representations: temporal splits may not guarantee novelty due to yearly seasonality, metadata encoding and pretraining confounds could explain gains, and missing baselines prevent isolating the effect of raw text. While some issues are minor, the core hypothesis remains inadequately tested.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 claims that yearly seasonality (e.g., tax season) could allow the model to rely on cycles rather than novel generalization. However, the design intent of the temporal split is to test operational requirements: if an attack pattern repeats every year, a production model *should* recognize it. This is not a flaw in generalization but a feature of the real-world distribution. The temporal split still prevents the most dangerous form of leakage (intra-campaign overlap).\n\nF2 suggests the transformer might gain an edge by encoding metadata as text tokens, capturing non-linearities the baseline misses. The design explicitly addresses this in 'Confound Controls and Scope' under 'Metadata vs. text signals', stating that an ablation study compares transformer performance with and without metadata. This control directly tests whether the gain is driven by metadata or text.\n\nF3 argues for a baseline that uses raw text (e.g., TF-IDF) to see if the gain is from 'raw text' vs 'transformer architecture'. The hypothesis is specifically about 'Transformer-Based Phishing Detection vs. Hand-Engineered Features'. The baseline is designed to represent the current industry standard (GBDT on features). Adding a TF-IDF baseline would test a different hypothesis (Architecture A vs Architecture B) rather than the primary one (Learned Representations vs Hand-Engineered Features).\n\nF4 points out that 512-token truncation might lose signals. This is a known constraint of BERT-like models. While it might slightly underestimate the transformer's potential, it does not invalidate the comparison, as the baseline is also limited by the features extracted from the text. This is a minor implementation detail that doesn't change the recommendation.\n\nF5 suggests label bias (analysts flagging what filters already caught). This is an inherent property of any production dataset. The design mitigates this by using analyst-reviewed labels and excluding disputed cases. The concern about systematic shift is a general ML challenge, not a flaw in this specific experimental design.\n\nF6 claims that pretraining priors confound the attribution of gain to 'learned phishing language'. This is a misunderstanding of the hypothesis. The hypothesis is whether a 'Transformer-Based' model (which by definition includes pretraining) outperforms a GBDT baseline. The value of the transformer *is* the combination of its architecture and its pretrained linguistic priors. Training from scratch would be testing a different model entirely.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The temporal split is designed to mimic operational reality. Yearly seasonality is a real-world signal that a production model must leverage; the split's primary purpose is to eliminate intra-campaign leakage (infrastructure reuse), which is achieved by the chronological separation."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The design explicitly includes a 'Metadata vs. text signals' ablation study in the Confound Controls section to isolate whether the transformer's advantage is driven by metadata encoding or raw text understanding."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The experiment's scope is to compare learned representations (Transformers) against the industry-standard hand-engineered feature approach (GBDT). A TF-IDF baseline would test a different hypothesis regarding model architecture, which is outside the stated scope of this PoC."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Truncation is a standard constraint of the chosen architecture. While it may slightly limit the transformer, it does not introduce a bias that would falsely favor the transformer over the baseline."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "Label bias is an inherent characteristic of production security logs. The use of analyst-reviewed labels is the gold standard for this domain; the concern does not invalidate the relative comparison between the two models."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The hypothesis tests 'Transformer-Based' detection. Pretrained weights are a fundamental component of the transformer approach being evaluated. Training from scratch would change the model being tested, not clarify the results of the current one."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings were successfully rebutted. Material concerns regarding metadata leakage and pretraining were already addressed by the design's confound controls or the stated scope of the hypothesis. All adjusted severities are \u2264 3."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 3,
+        "reasoning": "The defender argues that yearly seasonality is a real-world signal a production model must leverage and that the split's main goal is to eliminate intra-campaign leakage. This does not refute the possibility that Q16 may resemble prior quarters due to seasonal patterns, allowing the model to rely on learned seasonal cycles rather than truly novel generalization. The rebuttal does not address the specific failure mechanism of seasonal similarity undermining the novelty guarantee."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The defender points to the explicit 'Metadata vs. text signals' ablation study described in the Confound Controls section, which directly tests whether the transformer's advantage stems from encoding metadata as text tokens versus raw language understanding. This design element specifically targets the failure mechanism and provides a concrete method to isolate the source of any performance gap."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The defender claims the experiment's scope is limited to comparing transformers against the industry-standard hand-engineered feature approach, deeming a TF\u2011IDF baseline out of scope. This does not address the core concern that without a baseline also receiving raw text, we cannot disentangle whether the observed gain is due to the transformer's architecture/pretraining or merely the availability of raw text. The rebuttal is a generic scope dismissal rather than a mechanistic justification."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 3,
+        "reasoning": "While the defender notes that truncation is a standard architectural constraint, they assert it does not introduce bias favoring the transformer. The failure mechanism, however, warns that truncation could discard predictive signals appearing later in the email, potentially underestimating the transformer's true capability and skewing the comparison against it. The rebuttal does not explain why any loss from truncation would affect both models equally or why it would not bias the relative performance."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The defender states that label bias is an inherent characteristic of production logs and that analyst\u2011reviewed labels are the gold standard, implying the relative comparison remains valid. This does not engage with the specific concern of a systematic label shift over time\u2014where sophisticated zero\u2011day attacks may be consistently missed in both training and future test quarters\u2014potentially degrading both models' ability to generalize to novel tactics in a way that could differentially affect the comparison."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The defender argues that pretrained weights are a fundamental part of the transformer approach being evaluated and that training from scratch would change the model under test. This does not confront the failure mechanism that pretraining on general corpora may already encode useful linguistic patterns, making it impossible to attribute post\u2011fine\u2011tuning gains solely to email\u2011specific phishing language. The rebuttal offers no method or argument to isolate the contribution of email\u2011specific learning versus general language understanding."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I am maintaining my position on F1, F4, and F5 as the critic's challenges mischaracterize the design goals or the nature of the comparison. I am switching F3 and F6 to DEFER because the critic has correctly identified that the current design cannot mechanistically disentangle 'raw text availability' from 'transformer architecture' or 'pretraining' from 'fine-tuning' through argument alone; these require specific empirical baselines. F2 remains accepted.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic's challenge rests on the premise that seasonal similarity undermines 'novelty.' However, in phishing detection, 'novelty' is defined by the evasion of current detection logic (infrastructure, payload, and specific phrasing), not the absence of a calendar-based theme (e.g., 'Tax Season'). A model that recognizes a 'Tax Season' pattern from 12 months ago is demonstrating successful generalization to a recurring threat vector, which is a primary operational goal. The temporal split successfully prevents the most dangerous form of leakage: intra-campaign overlap where the same sender/URL appears in both sets.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The design explicitly includes a 'Metadata vs. text signals' ablation study to isolate whether the transformer's advantage is driven by metadata encoding or raw text understanding.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic is correct that the current design cannot distinguish between the value of 'raw text' and the value of the 'transformer architecture.' To settle this, we will add a baseline using TF-IDF vectorization paired with a Logistic Regression classifier. If the Transformer significantly outperforms the TF-IDF baseline, the gain is attributed to the transformer's ability to capture semantic context and sequence. If the TF-IDF baseline matches the Transformer, the gain is attributed to the mere availability of raw text signals.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The critic suggests truncation biases the comparison. On the contrary, truncation only affects the transformer; the GBDT baseline does not process raw text and is therefore immune to truncation. If truncation causes the transformer to miss signals, it can only lead to an *underestimation* of the transformer's potential advantage. It cannot create a spurious advantage. Thus, the reported PR-AUC is a conservative lower bound on the transformer's capability, maintaining the integrity of the comparison.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The concern regarding systematic label shift (missing zero-days) affects both models equally because they are trained and evaluated on the same analyst-labeled ground truth. The experiment measures relative performance on the 'detectable' set of phishing emails. While label bias may affect the absolute PR-AUC, it does not introduce a differential bias that would make the transformer appear better than the GBDT (or vice versa) unless one model is specifically more prone to the same biases as the analysts, which is a separate question of model behavior, not a flaw in the evaluation design.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic is correct that we cannot currently isolate the contribution of general pretraining from email-specific fine-tuning. To resolve this, we will conduct a 'Random-Init' experiment: training the same transformer architecture from scratch on the email dataset. If the pretrained model significantly outperforms the random-init model, the gain is attributed to general linguistic priors. If they perform similarly, the gain is attributed to the email-specific data. This will clarify whether the 'Transformer' advantage is a result of the data or the pretraining.",
+        "r2_challenge_response": "DEFERRED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The defense successfully rebutted concerns regarding seasonality, truncation, and label bias. However, the critic correctly identified two mechanistic ambiguities (raw text vs. architecture and pretraining vs. fine-tuning) that cannot be resolved by argument, leading to an agreement to settle these via additional baseline experiments (DEFER)."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (quarters 1-12 train, 13-15 validation, 16 test) guarantees that the test set contains novel, unseen attack patterns because attackers reuse infrastructure only within and across campaigns, not across years.",
+        "failure_mechanism": "If phishing campaigns exhibit yearly seasonality (e.g., tax season, holiday shopping), patterns in Q16 may resemble those in Q4, Q8, Q12 of prior years, allowing the model to rely on learned seasonal cycles rather than truly novel generalization.",
+        "evidence_test": "Compute distribution similarity (e.g., KL divergence or PSI) between feature sets of each training quarter and the test quarter per month; or manually inspect whether top phishing campaign clusters (based on URL domains, subject lines) appear in both training and test sets. High similarity would indicate the test is not truly novel.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Any performance advantage of the transformer over the gradient-boosted baseline must arise from its ability to learn phishing-specific language from raw email text, because both models receive identical metadata.",
+        "failure_mechanism": "The transformer encodes metadata (sender/domain, attachment info) as text tokens, potentially capturing interactions and non-linearities that the hand-engineered features miss. This could give the transformer an edge unrelated to raw phishing language.",
+        "evidence_test": "Run an ablation where metadata tokens are masked or removed from the transformer input and compare its performance drop to the baseline (which already lacks metadata). If the transformer's performance decreases more than the baseline's, metadata contributes to the advantage. If not, the advantage likely stems from text.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer's learned text representations provide an advantage over a hand-engineered feature baseline, demonstrating the value of end-to-end text modeling.",
+        "failure_mechanism": "Without a baseline that also receives raw email text (e.g., TF-IDF weighted logistic regression or a shallow neural net), we cannot disentangle whether the gain is due to the transformer's architecture/pretraining versus the mere availability of raw text.",
+        "evidence_test": "Train a baseline that uses the same raw text input as the transformer (e.g., TF-IDF + linear model or a shallow CNN/RNN) with equivalent tuning effort, and compare its test PR-AUC to the transformer. If the transformer still outperforms, raw text representations add value; if not, the advantage may be due to model capacity.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The transformer processes the full email text to capture phishing signals distributed throughout the body.",
+        "failure_mechanism": "The implementation truncates sequences to 512 tokens, preserving subject and sender in full and truncating the body if necessary. If phishing cues (e.g., malicious links, deceptive language) frequently appear beyond the first 512 tokens, the transformer loses that signal, potentially underestimating its true capability and biasing the comparison.",
+        "evidence_test": "Measure the proportion of emails exceeding 512 tokens after tokenization; retrain the transformer with a longer sequence limit (e.g., 1024 tokens) and evaluate test PR-AUC. A significant increase would indicate that truncation harms performance and that the reported results may be misleading.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Analyst-reviewed labels (excluding uncertain/disputed cases) provide a reliable ground truth for phishing detection, minimizing label noise.",
+        "failure_mechanism": "Labeling may be biased: analysts are more likely to flag emails that are caught by existing filters (e.g., those with known malicious URLs) as phishing, while sophisticated zero\u2011day or novel attacks may be missed or labeled benign. This creates a systematic label shift between training and future test quarters if attack tactics evolve.",
+        "evidence_test": "Audit a stratified random sample of test\u2011set emails (e.g., 500) with senior analysts to verify label correctness, focusing on emails that passed existing filters. Compute disagreement rate; alternatively, compare the proportion of labels derived from URL reputation vs. content\u2011based indicators across quarters to detect drift.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Fine\u2011tuning a transformer on the email dataset yields improvements that are attributable to learning email\u2011specific phishing language, rather than to general language understanding acquired during pretraining.",
+        "failure_mechanism": "The transformer starts from weights pretrained on large general corpora (e.g., BookCorpus, Wikipedia). These priors may already capture useful linguistic patterns that aid classification even without email\u2011specific fine\u2011tuning, confounding the attribution of gain to learned phishing language.",
+        "evidence_test": "Train a transformer from random initialization (same architecture, same hyperparameters) on the training set and evaluate on the test set. Compare its PR\u2011AUC to that of the pretrained\u2011then\u2011fine\u2011tuned model. A substantial drop would indicate that pretraining contributes significantly to the observed advantage.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "Several methodological concerns weaken the claim that transformer superiority stems from learned text representations: temporal splits may not guarantee novelty due to yearly seasonality, metadata encoding and pretraining confounds could explain gains, and missing baselines prevent isolating the effect of raw text. While some issues are minor, the core hypothesis remains inadequately tested.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I am maintaining my position on F1, F4, and F5 as the critic's challenges mischaracterize the design goals or the nature of the comparison. I am switching F3 and F6 to DEFER because the critic has correctly identified that the current design cannot mechanistically disentangle 'raw text availability' from 'transformer architecture' or 'pretraining' from 'fine-tuning' through argument alone; these require specific empirical baselines. F2 remains accepted.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic's challenge rests on the premise that seasonal similarity undermines 'novelty.' However, in phishing detection, 'novelty' is defined by the evasion of current detection logic (infrastructure, payload, and specific phrasing), not the absence of a calendar-based theme (e.g., 'Tax Season'). A model that recognizes a 'Tax Season' pattern from 12 months ago is demonstrating successful generalization to a recurring threat vector, which is a primary operational goal. The temporal split successfully prevents the most dangerous form of leakage: intra-campaign overlap where the same sender/URL appears in both sets.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The design explicitly includes a 'Metadata vs. text signals' ablation study to isolate whether the transformer's advantage is driven by metadata encoding or raw text understanding.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic is correct that the current design cannot distinguish between the value of 'raw text' and the value of the 'transformer architecture.' To settle this, we will add a baseline using TF-IDF vectorization paired with a Logistic Regression classifier. If the Transformer significantly outperforms the TF-IDF baseline, the gain is attributed to the transformer's ability to capture semantic context and sequence. If the TF-IDF baseline matches the Transformer, the gain is attributed to the mere availability of raw text signals.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The critic suggests truncation biases the comparison. On the contrary, truncation only affects the transformer; the GBDT baseline does not process raw text and is therefore immune to truncation. If truncation causes the transformer to miss signals, it can only lead to an *underestimation* of the transformer's potential advantage. It cannot create a spurious advantage. Thus, the reported PR-AUC is a conservative lower bound on the transformer's capability, maintaining the integrity of the comparison.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The concern regarding systematic label shift (missing zero-days) affects both models equally because they are trained and evaluated on the same analyst-labeled ground truth. The experiment measures relative performance on the 'detectable' set of phishing emails. While label bias may affect the absolute PR-AUC, it does not introduce a differential bias that would make the transformer appear better than the GBDT (or vice versa) unless one model is specifically more prone to the same biases as the analysts, which is a separate question of model behavior, not a flaw in the evaluation design.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic is correct that we cannot currently isolate the contribution of general pretraining from email-specific fine-tuning. To resolve this, we will conduct a 'Random-Init' experiment: training the same transformer architecture from scratch on the email dataset. If the pretrained model significantly outperforms the random-init model, the gain is attributed to general linguistic priors. If they perform similarly, the gain is attributed to the email-specific data. This will clarify whether the 'Transformer' advantage is a result of the data or the pretraining.",
+        "r2_challenge_response": "DEFERRED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The defense successfully rebutted concerns regarding seasonality, truncation, and label bias. However, the critic correctly identified two mechanistic ambiguities (raw text vs. architecture and pretraining vs. fine-tuning) that cannot be resolved by argument, leading to an agreement to settle these via additional baseline experiments (DEFER)."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

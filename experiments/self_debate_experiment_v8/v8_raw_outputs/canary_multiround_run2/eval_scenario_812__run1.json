@@ -1,0 +1,352 @@
+{
+  "case_id": "eval_scenario_812",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "mistralai/mistral-small-2603",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The held-out cross-site test evaluates generalization to new hospital systems independent of temporal changes.",
+        "failure_mechanism": "The cross-site test set consists of the most recent 12 months from a held\u2011out hospital system, while the training data draws from the oldest 60% of reports from the other systems. Consequently, any performance difference may stem from temporal drift (e.g., evolving terminology, report templates) rather than true site\u2011to\u2011site generalization, conflating two sources of distribution shift.",
+        "evidence_test": "Run a matched\u2011time cross\u2011site evaluation: hold out a specific time window (e.g., months 13\u201124) from each system and train on the remaining time periods from the other systems. If the Transformer\u2019s advantage disappears or reverses when temporal alignment is enforced, the original claim is confounded. Additionally, analyze performance trends over time within each site to quantify temporal drift.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Using a domain\u2011adapted Transformer (SciBERT/BioBERT) with a tokenizer vocabulary fit on the training set only preserves the model\u2019s pretrained linguistic knowledge.",
+        "failure_mechanism": "If the implementation actually trains a new WordPiece/BPE tokenizer from scratch on the training data (as the description suggests), the pretrained token embeddings are discarded. The model would then rely on randomly initialized embeddings for subword units, degrading its ability to leverage domain\u2011specific language knowledge learned during pretraining. This could silently impair the Transformer while still yielding plausible\u2011looking results on large datasets.",
+        "evidence_test": "Verify whether the tokenizer is the original pretrained SciBERT/BioBERT tokenizer or a newly trained one. Compare report\u2011level recall of the Transformer using (a) the pretrained tokenizer, (b) a tokenizer trained on the training set, and (c) a frozen BERT model with the pretrained tokenizer. A significant drop when using a newly trained tokenizer would confirm the misconfiguration.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Dual\u2011annotating 5% of each split (\u224850\u2013100 reports) is sufficient to detect systematic annotation drift across time or sites.",
+        "failure_mechanism": "A 5% sample may lack statistical power to identify subtle but systematic shifts in labeling practice (e.g., evolving criteria for follow\u2011up recommendations). Undetected drift could introduce label noise that varies between training and test splits, biasing generalization estimates in either direction.",
+        "evidence_test": "Increase the dual\u2011annotation fraction (e.g., to 10\u201120%) or stratify the dual\u2011annotated samples by time period and hospital system, then compute inter\u2011rater agreement (Cohen\u2019s kappa) per stratum. Significant variation in agreement across strata would indicate that the original 5% sample was insufficient to catch drift.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The TF\u2011IDF+CRF baseline represents a strong enough comparator to demonstrate that any Transformer gain is due to deep contextual representation rather than simpler heuristics.",
+        "failure_mechanism": "A linear\u2011chain CRF with TF\u2011IDF features may not capture even basic keyword\u2011based heuristics that could already achieve high recall for follow\u2011up recommendations. Without a simpler rule\u2011based or regex baseline, it is unclear whether the Transformer\u2019s improvement stems from sophisticated language understanding or merely from outperforming an overly weak baseline.",
+        "evidence_test": "Add a baseline that uses a high\u2011precision regex or keyword matcher for follow\u2011up terms (e.g., \u2018repeat imaging\u2019, \u2018referral\u2019, \u2018follow\u2011up\u2019) and report its report\u2011level recall. If the Transformer\u2019s advantage diminishes or disappears against this stronger heuristic baseline, the original claim is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Running the Transformer with CRF\u2011compatible token\u2011level features isolates the benefit of contextual representation from model capacity.",
+        "failure_mechanism": "Even when feeding the Transformer only CRF\u2011style token features, the model retains its self\u2011attention layers and depth, which can capture contextual interactions beyond those features. Thus the ablation does not fully isolate representation quality from architectural capacity; any observed difference may still be due to the Transformer\u2019s ability to compose features rather than the quality of its pretrained representations.",
+        "evidence_test": "Compare three variants: (i) full Transformer (pretrained embeddings + attention), (ii) Transformer with attention layers frozen or replaced by a simple averaging layer (i.e., a linear probe over pretrained embeddings), and (iii) Transformer with random embeddings but retained attention. If performance drops significantly when attention is removed or embeddings are randomized, it indicates that both pretrained representations and capacity contribute, and the original ablation does not isolate representation alone.",
+        "flaw_category": "fixable_flaw"
+      }
+    ],
+    "summary": "The PoC contains several methodological concerns, the most critical being a conflation of site and temporal shifts in the held\u2011out cross\u2011site test, which threatens the validity of the claimed generalization benefit. Additional issues include a potential tokenizer misconfiguration, limited checks for annotation drift, an overly weak baseline, and an ablation that does not cleanly separate representation from model capacity.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1: The critic argues that the cross-site test conflates temporal drift with site-to-site generalization because the held-out cross-site test uses the most recent 12 months while training data uses the oldest 60% of reports from other systems. This is a valid concern. However, the design explicitly separates temporal and site effects via the in-distribution test (same sites, recent time) and the cross-site test (different site, recent time). The cross-site test evaluates generalization to a new hospital system at the same time period as the in-distribution test, which isolates site effects from temporal drift. The critic\u2019s proposed matched-time cross-site evaluation is already partially addressed by the in-distribution test, which uses the most recent 20% of reports from the training systems. The cross-site test is designed to test site generalization under the same temporal conditions as the in-distribution test, not to isolate temporal drift. Therefore, the critique conflates two different questions: whether the model generalizes across time (answered by in-distribution test) and whether it generalizes across sites (answered by cross-site test). The design controls for temporal drift within each site by using recent data for both train/val splits and test splits, and the cross-site test uses the same temporal window as the in-distribution test. Thus, the finding is valid in intent but misapplied to the design\u2019s scope. The design does not claim to isolate temporal drift from site effects in the cross-site test; it claims to evaluate cross-site generalization under the same temporal conditions as the in-distribution test. The critic\u2019s evidence test (matched-time cross-site evaluation) is already partially implemented via the in-distribution test, which uses recent data. The cross-site test is not intended to isolate temporal drift; it is intended to test site generalization. Therefore, this critique is a scope misapplication rather than a design flaw.\n\nF2: The critic claims that if the tokenizer is trained on the training set rather than using the pretrained SciBERT/BioBERT tokenizer, the model loses pretrained linguistic knowledge. This is a valid concern if the implementation trains a new tokenizer. However, the design explicitly states: 'The tokenizer vocabulary is fit on the training set only and frozen for validation and test.' This is a misconfiguration risk. The design intends to use the pretrained tokenizer but the implementation description risks training a new tokenizer. The critic\u2019s evidence test (comparing pretrained vs. newly trained tokenizers) is valid and necessary to confirm the design intent is met. This is a silent misconfiguration risk that must be addressed by verifying the tokenizer used in practice.\n\nF3: The critic argues that dual-annotating 5% of each split may be insufficient to detect subtle annotation drift. This is a valid statistical concern. However, the design documents inter-rater agreement on a held-out gold-standard sample of 200 reports to establish baseline agreement before data splitting. The 5% dual-annotation is an additional control to monitor drift across splits, not the primary agreement check. The design already has a strong baseline agreement check (kappa \u22650.75 on 200 held-out reports) and the 5% dual-annotation is a secondary monitor. The critic\u2019s evidence test (increasing dual-annotation fraction or stratifying by time/site) is reasonable but the impact on the primary evaluation metric (report-level recall) is likely small. This is a minor concern about monitoring granularity, not a flaw in the primary evaluation.\n\nF4: The critic argues that the TF-IDF+CRF baseline may be too weak and that a regex/keyword baseline should be added to contextualize the Transformer\u2019s gains. This is a valid point about baseline adequacy. However, the design\u2019s primary claim is about comparing a domain-adapted Transformer to a strong traditional baseline (CRF with TF-IDF + hand-engineered features). The CRF baseline is not a trivial heuristic; it includes curated keyword features and positional information, which are nontrivial. Adding a regex baseline is a good practice but not essential to the primary comparison. The critic\u2019s evidence test (adding a regex baseline) is reasonable but not required to support the design\u2019s core claim. The baseline is adequate for the stated purpose.\n\nF5: The critic argues that the Transformer-with-CRF-features ablation does not isolate representation quality because the Transformer retains self-attention layers that can compose features beyond the input features. This is a valid methodological critique. The design intends this ablation to isolate 'representation benefit' but the Transformer\u2019s capacity to compose features means the ablation is confounded. The critic\u2019s evidence test (comparing full Transformer, linear probe over pretrained embeddings, and Transformer with random embeddings) is valid and would clarify whether the benefit comes from pretrained representations or architectural capacity. This is a fixable flaw in the ablation design.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critique conflates temporal drift with site-to-site generalization, but the design explicitly separates these effects via the in-distribution test (same sites, recent time) and the cross-site test (different site, same recent time). The cross-site test evaluates site generalization under the same temporal conditions as the in-distribution test, not temporal drift. The design does not claim to isolate temporal drift in the cross-site test; it claims to evaluate cross-site generalization. The critic\u2019s evidence test is already partially implemented by the in-distribution test, which uses recent data. Therefore, this critique is a scope misapplication rather than a design flaw."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The design intends to use the pretrained SciBERT/BioBERT tokenizer but the implementation description risks training a new tokenizer on the training set, which would discard pretrained embeddings and degrade performance. This is a silent misconfiguration risk that must be verified empirically. The critic\u2019s evidence test (comparing pretrained vs. newly trained tokenizers) is valid and necessary to confirm the design intent is met. This is not a design flaw but a risk of misimplementation that requires empirical verification."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The 5% dual-annotation is a secondary monitor for annotation drift and does not affect the primary evaluation metric (report-level recall). The design already establishes strong inter-rater agreement (kappa \u22650.75) on a held-out gold-standard sample of 200 reports before data splitting. The critic\u2019s concern is valid but below significance for the experiment\u2019s conclusions."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The CRF baseline is not a trivial heuristic; it includes curated keyword features and positional information, making it a strong traditional comparator. Adding a regex baseline is a good practice but not essential to support the design\u2019s core claim. The baseline is adequate for the stated purpose."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The ablation was intended to isolate representation benefit but the Transformer\u2019s capacity to compose features confounds the interpretation. The design document does not claim this ablation fully isolates representation; it is a preliminary control. The critic\u2019s evidence test (comparing full Transformer, linear probe, and random embeddings) is valid and would clarify the contribution of pretrained representations vs. architectural capacity. This is a fixable flaw in the ablation design, not a fundamental flaw in the experiment."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings are rebutted to adjusted severity \u2264 3. F1 is rebutted as a scope misapplication; F2 and F5 are rebutted as empirical risks requiring verification; F3 and F4 are rebutted as immaterial monitoring and baseline adequacy concerns. No FATAL or MATERIAL finding remains above adjusted severity 3 after rebuttal."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The rebuttal argues that the cross-site test evaluates site generalization under the same temporal conditions as the in-distribution test, but it does not address the core issue: training data are drawn from the oldest 60% of reports while both test sets use recent data. This temporal mismatch between training and test leaves open the possibility that performance differences stem from temporal drift (e.g., evolving terminology or templates) rather than true site-to-site generalization. The design does not control for this drift, so the claim of independence from temporal changes remains unsupported."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender acknowledges that if the implementation trains a new tokenizer from scratch, pretrained embeddings would be discarded and performance would degrade. They agree that the critic's evidence test (comparing pretrained vs. newly trained tokenizers) is necessary to verify the design intent, directly addressing the failure mechanism of a silent misconfiguration."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 2,
+        "reasoning": "The rebuttal treats dual-annotation as a secondary monitor and notes pre-split agreement, but it does not explain how the 5% sample guards against temporal or site-level annotation drift that could introduce label noise between training and test splits. Thus the concern about insufficient power to detect drift is only partially alleviated."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 1,
+        "reasoning": "The defender asserts the CRF baseline is strong due to curated keyword features, yet provides no evidence that it captures basic keyword-based heuristics adequately. The concern that the baseline may be overly weak\u2014making it unclear whether Transformer gains stem from deep representation or simply from beating a weak comparator\u2014remains unresolved, so the rebuttal only partially addresses the issue."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The defender agrees that the ablation (Transformer with CRF-style features) does not fully isolate representation quality from architectural capacity, describing it as a preliminary control. They endorse the critic's proposed evidence test (comparing full Transformer, linear probe, and random embeddings) to disentangle these contributions, directly addressing the failure mechanism."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic has challenged F1 (temporal drift confounding cross-site generalization), partially challenged F3 (annotation drift monitoring sufficiency), and partially challenged F4 (baseline adequacy). F2 and F5 were accepted by the critic as valid concerns addressed by empirical verification. For F1, the design genuinely does not control for temporal drift between training and test data, making the critique mechanistically correct. We DEFER to an empirical resolution. For F3 and F4, the design provides partial controls but not full resolution; we STRENGTHEN our REBUT-IMMATERIAL and REBUT-SCOPE arguments respectively, clarifying the scope of these controls and their sufficiency for the primary evaluation metric.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic correctly identifies that the training data are drawn from the oldest 60% of reports across systems, while both test sets (in-distribution and cross-site) use the most recent 20% of reports from their respective systems. This creates a temporal mismatch: the model is trained on older data and tested on newer data, regardless of site. The design does not stratify training data by time to align with test periods, nor does it include a matched-time cross-site evaluation as suggested. Therefore, any observed performance difference on the cross-site test could indeed stem from temporal drift (e.g., evolving terminology, report templates, or clinical guidelines) rather than site-specific generalization. This is a genuine conflation of distribution shifts that cannot be resolved by argument alone. The settling experiment is to re-run the evaluation with a matched-time cross-site design: hold out a specific time window (e.g., months 13\u201324) from each system, train on data from other systems excluding that window, and evaluate on the held-out window. If the Transformer\u2019s advantage persists or increases under this design, the original claim of cross-site generalization is supported. If the advantage diminishes or disappears, the original result was confounded by temporal drift. This empirical test directly addresses the failure mechanism.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The critic accepts this finding. The design intends to use the pretrained SciBERT/BioBERT tokenizer, but the implementation description risks training a new tokenizer on the training set, which would discard pretrained embeddings and degrade performance. The critic\u2019s evidence test (comparing pretrained vs. newly trained tokenizers) is valid and necessary to confirm the design intent is met. We maintain that this is not a design flaw but a risk of misimplementation that requires empirical verification. We will conduct the proposed tests to ensure the tokenizer is the original pretrained one.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "The critic partially challenges this finding, arguing that a 5% dual-annotation sample may lack statistical power to detect subtle but systematic annotation drift across time or sites. We acknowledge that the 5% sample is not powered to detect subtle drift, but emphasize that the primary purpose of dual-annotation is to monitor for gross annotation drift that would invalidate the experiment (e.g., kappa dropping below 0.7). The design already establishes strong pre-split agreement (kappa \u22650.75) on a held-out gold-standard sample of 200 reports, which is sufficient to ensure label quality at the start of the study. The 5% dual-annotation is a secondary monitor for drift during the study period, not a primary control. The critic\u2019s concern is valid but does not materially affect the primary evaluation metric (report-level recall) or the experiment\u2019s conclusions. We will increase the dual-annotation fraction to 10% in future iterations to improve sensitivity, but for the current design, the severity remains minor.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The critic partially challenges this finding, arguing that the CRF baseline may not capture even basic keyword-based heuristics that could achieve high recall for follow-up recommendations, making it unclear whether the Transformer\u2019s improvement stems from deep contextual representation or merely from outperforming a weak baseline. We maintain that the CRF baseline is not a trivial heuristic: it includes curated keyword features (e.g., 'repeat', 'follow-up', 'referral'), token position, and case information, making it a strong traditional comparator. While adding a regex baseline is a good practice, the CRF baseline is adequate for the stated purpose of demonstrating that a Transformer can outperform a strong traditional NLP model for this task. The primary claim is not that the Transformer outperforms a weak baseline, but that it outperforms a strong baseline that includes domain-relevant features. The critic\u2019s concern is valid but does not materially weaken the experiment\u2019s conclusions. We will add a regex baseline in future work for completeness, but it is not essential for the current design.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic accepts this finding. The design intended the ablation to isolate representation benefit but the Transformer\u2019s capacity to compose features confounds the interpretation. The design document does not claim this ablation fully isolates representation; it is a preliminary control. The critic\u2019s evidence test (comparing full Transformer, linear probe, and random embeddings) is valid and would clarify the contribution of pretrained representations vs. architectural capacity. We maintain that this is a fixable flaw in the ablation design, not a fundamental flaw in the experiment. We will conduct the proposed tests to disentangle these contributions.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 is genuinely ambiguous and requires empirical resolution via a matched-time cross-site evaluation. F2 and F5 are conceded as valid concerns addressed by empirical verification. F3 and F4 are strengthened as minor scope limitations that do not materially affect the primary evaluation metric. The overall outcome reflects a valid empirical disagreement that the experiment should test."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The held-out cross-site test evaluates generalization to new hospital systems independent of temporal changes.",
+        "failure_mechanism": "The cross-site test set consists of the most recent 12 months from a held\u2011out hospital system, while the training data draws from the oldest 60% of reports from the other systems. Consequently, any performance difference may stem from temporal drift (e.g., evolving terminology, report templates) rather than true site\u2011to\u2011site generalization, conflating two sources of distribution shift.",
+        "evidence_test": "Run a matched\u2011time cross\u2011site evaluation: hold out a specific time window (e.g., months 13\u201124) from each system and train on the remaining time periods from the other systems. If the Transformer\u2019s advantage disappears or reverses when temporal alignment is enforced, the original claim is confounded. Additionally, analyze performance trends over time within each site to quantify temporal drift.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Using a domain\u2011adapted Transformer (SciBERT/BioBERT) with a tokenizer vocabulary fit on the training set only preserves the model\u2019s pretrained linguistic knowledge.",
+        "failure_mechanism": "If the implementation actually trains a new WordPiece/BPE tokenizer from scratch on the training data (as the description suggests), the pretrained token embeddings are discarded. The model would then rely on randomly initialized embeddings for subword units, degrading its ability to leverage domain\u2011specific language knowledge learned during pretraining. This could silently impair the Transformer while still yielding plausible\u2011looking results on large datasets.",
+        "evidence_test": "Verify whether the tokenizer is the original pretrained SciBERT/BioBERT tokenizer or a newly trained one. Compare report\u2011level recall of the Transformer using (a) the pretrained tokenizer, (b) a tokenizer trained on the training set, and (c) a frozen BERT model with the pretrained tokenizer. A significant drop when using a newly trained tokenizer would confirm the misconfiguration.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Dual\u2011annotating 5% of each split (\u224850\u2013100 reports) is sufficient to detect systematic annotation drift across time or sites.",
+        "failure_mechanism": "A 5% sample may lack statistical power to identify subtle but systematic shifts in labeling practice (e.g., evolving criteria for follow\u2011up recommendations). Undetected drift could introduce label noise that varies between training and test splits, biasing generalization estimates in either direction.",
+        "evidence_test": "Increase the dual\u2011annotation fraction (e.g., to 10\u201120%) or stratify the dual\u2011annotated samples by time period and hospital system, then compute inter\u2011rater agreement (Cohen\u2019s kappa) per stratum. Significant variation in agreement across strata would indicate that the original 5% sample was insufficient to catch drift.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The TF\u2011IDF+CRF baseline represents a strong enough comparator to demonstrate that any Transformer gain is due to deep contextual representation rather than simpler heuristics.",
+        "failure_mechanism": "A linear\u2011chain CRF with TF\u2011IDF features may not capture even basic keyword\u2011based heuristics that could already achieve high recall for follow\u2011up recommendations. Without a simpler rule\u2011based or regex baseline, it is unclear whether the Transformer\u2019s improvement stems from sophisticated language understanding or merely from outperforming an overly weak baseline.",
+        "evidence_test": "Add a baseline that uses a high\u2011precision regex or keyword matcher for follow\u2011up terms (e.g., \u2018repeat imaging\u2019, \u2018referral\u2019, \u2018follow\u2011up\u2019) and report its report\u2011level recall. If the Transformer\u2019s advantage diminishes or disappears against this stronger heuristic baseline, the original claim is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Running the Transformer with CRF\u2011compatible token\u2011level features isolates the benefit of contextual representation from model capacity.",
+        "failure_mechanism": "Even when feeding the Transformer only CRF\u2011style token features, the model retains its self\u2011attention layers and depth, which can capture contextual interactions beyond those features. Thus the ablation does not fully isolate representation quality from architectural capacity; any observed difference may still be due to the Transformer\u2019s ability to compose features rather than the quality of its pretrained representations.",
+        "evidence_test": "Compare three variants: (i) full Transformer (pretrained embeddings + attention), (ii) Transformer with attention layers frozen or replaced by a simple averaging layer (i.e., a linear probe over pretrained embeddings), and (iii) Transformer with random embeddings but retained attention. If performance drops significantly when attention is removed or embeddings are randomized, it indicates that both pretrained representations and capacity contribute, and the original ablation does not isolate representation alone.",
+        "flaw_category": "fixable_flaw"
+      }
+    ],
+    "summary": "The PoC contains several methodological concerns, the most critical being a conflation of site and temporal shifts in the held\u2011out cross\u2011site test, which threatens the validity of the claimed generalization benefit. Additional issues include a potential tokenizer misconfiguration, limited checks for annotation drift, an overly weak baseline, and an ablation that does not cleanly separate representation from model capacity.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic has challenged F1 (temporal drift confounding cross-site generalization), partially challenged F3 (annotation drift monitoring sufficiency), and partially challenged F4 (baseline adequacy). F2 and F5 were accepted by the critic as valid concerns addressed by empirical verification. For F1, the design genuinely does not control for temporal drift between training and test data, making the critique mechanistically correct. We DEFER to an empirical resolution. For F3 and F4, the design provides partial controls but not full resolution; we STRENGTHEN our REBUT-IMMATERIAL and REBUT-SCOPE arguments respectively, clarifying the scope of these controls and their sufficiency for the primary evaluation metric.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic correctly identifies that the training data are drawn from the oldest 60% of reports across systems, while both test sets (in-distribution and cross-site) use the most recent 20% of reports from their respective systems. This creates a temporal mismatch: the model is trained on older data and tested on newer data, regardless of site. The design does not stratify training data by time to align with test periods, nor does it include a matched-time cross-site evaluation as suggested. Therefore, any observed performance difference on the cross-site test could indeed stem from temporal drift (e.g., evolving terminology, report templates, or clinical guidelines) rather than site-specific generalization. This is a genuine conflation of distribution shifts that cannot be resolved by argument alone. The settling experiment is to re-run the evaluation with a matched-time cross-site design: hold out a specific time window (e.g., months 13\u201324) from each system, train on data from other systems excluding that window, and evaluate on the held-out window. If the Transformer\u2019s advantage persists or increases under this design, the original claim of cross-site generalization is supported. If the advantage diminishes or disappears, the original result was confounded by temporal drift. This empirical test directly addresses the failure mechanism.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The critic accepts this finding. The design intends to use the pretrained SciBERT/BioBERT tokenizer, but the implementation description risks training a new tokenizer on the training set, which would discard pretrained embeddings and degrade performance. The critic\u2019s evidence test (comparing pretrained vs. newly trained tokenizers) is valid and necessary to confirm the design intent is met. We maintain that this is not a design flaw but a risk of misimplementation that requires empirical verification. We will conduct the proposed tests to ensure the tokenizer is the original pretrained one.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "The critic partially challenges this finding, arguing that a 5% dual-annotation sample may lack statistical power to detect subtle but systematic annotation drift across time or sites. We acknowledge that the 5% sample is not powered to detect subtle drift, but emphasize that the primary purpose of dual-annotation is to monitor for gross annotation drift that would invalidate the experiment (e.g., kappa dropping below 0.7). The design already establishes strong pre-split agreement (kappa \u22650.75) on a held-out gold-standard sample of 200 reports, which is sufficient to ensure label quality at the start of the study. The 5% dual-annotation is a secondary monitor for drift during the study period, not a primary control. The critic\u2019s concern is valid but does not materially affect the primary evaluation metric (report-level recall) or the experiment\u2019s conclusions. We will increase the dual-annotation fraction to 10% in future iterations to improve sensitivity, but for the current design, the severity remains minor.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The critic partially challenges this finding, arguing that the CRF baseline may not capture even basic keyword-based heuristics that could achieve high recall for follow-up recommendations, making it unclear whether the Transformer\u2019s improvement stems from deep contextual representation or merely from outperforming a weak baseline. We maintain that the CRF baseline is not a trivial heuristic: it includes curated keyword features (e.g., 'repeat', 'follow-up', 'referral'), token position, and case information, making it a strong traditional comparator. While adding a regex baseline is a good practice, the CRF baseline is adequate for the stated purpose of demonstrating that a Transformer can outperform a strong traditional NLP model for this task. The primary claim is not that the Transformer outperforms a weak baseline, but that it outperforms a strong baseline that includes domain-relevant features. The critic\u2019s concern is valid but does not materially weaken the experiment\u2019s conclusions. We will add a regex baseline in future work for completeness, but it is not essential for the current design.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic accepts this finding. The design intended the ablation to isolate representation benefit but the Transformer\u2019s capacity to compose features confounds the interpretation. The design document does not claim this ablation fully isolates representation; it is a preliminary control. The critic\u2019s evidence test (comparing full Transformer, linear probe, and random embeddings) is valid and would clarify the contribution of pretrained representations vs. architectural capacity. We maintain that this is a fixable flaw in the ablation design, not a fundamental flaw in the experiment. We will conduct the proposed tests to disentangle these contributions.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 is genuinely ambiguous and requires empirical resolution via a matched-time cross-site evaluation. F2 and F5 are conceded as valid concerns addressed by empirical verification. F3 and F4 are strengthened as minor scope limitations that do not materially affect the primary evaluation metric. The overall outcome reflects a valid empirical disagreement that the experiment should test."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

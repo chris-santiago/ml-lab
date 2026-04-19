@@ -1,0 +1,387 @@
+{
+  "case_id": "eval_scenario_897",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The evaluation design ensures that the model generalizes to realistic deployment conditions by using temporal splitting and incident-level grouping.",
+        "failure_mechanism": "The temporal split and incident-level grouping do not address the core challenge of distribution shift in SOC alert triage: the *nature* of alerts and incidents evolves over time due to changing attacker tactics, new detection rules, and evolving infrastructure. The model may memorize patterns in the training window (e.g., specific rule names, asset configurations) that are irrelevant or misleading in later periods. The incident-level grouping prevents duplicate alerts from inflating metrics but does not ensure the model ranks *new types* of incidents correctly.",
+        "evidence_test": "Evaluate the model on a held-out time window that includes novel alert families, asset types, or attack patterns not present in training. Measure Recall@10 on these 'out-of-distribution' incidents separately. If Recall@10 drops significantly for these cases compared to in-distribution incidents, the model has failed to generalize under distribution shift.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Upsampling confirmed incidents to 5% of training alerts ensures adequate positive signal for model training without distorting the evaluation.",
+        "failure_mechanism": "Upsampling duplicates incidents, which may artificially inflate the model's ability to recognize patterns in the duplicated data. This could lead to overfitting to the duplicated incidents rather than learning generalizable ranking behavior. The evaluation metrics (Recall@10, etc.) are computed on the *original* test set without upsampling, but the model's training signal is distorted. The 5% target is arbitrary and may not reflect the true positive rate in production. If the upsampled incidents are not representative of the broader distribution of incidents, the model may learn spurious correlations.",
+        "evidence_test": "Train the model without upsampling (or with upsampling to a more realistic positive rate, e.g., 0.5%) and compare Recall@10 on the test set. If performance degrades significantly, the upsampling has introduced a silent misconfiguration that inflates apparent results. Alternatively, use synthetic minority oversampling (SMOTE) or other techniques that generate novel examples rather than duplicating existing ones.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline (logistic regression) is a fair and sufficient comparator to test the hypothesis that ranking-specific inductive biases improve incident recall.",
+        "failure_mechanism": "The baseline is a binary classifier, not a ranker, and is evaluated by ranking its predicted probabilities. This is not a true 'ranking baseline'\u2014it lacks the listwise or pairwise inductive biases of a learning-to-rank model. A more appropriate baseline would be a pointwise ranker (e.g., a regression model trained to predict a score directly) or a heuristic ranker (e.g., sorting by severity). The current baseline may underperform not because ranking is ineffective, but because it is poorly optimized for ranking. This inflates the apparent benefit of the learning-to-rank model.",
+        "evidence_test": "Implement a pointwise ranker (e.g., a regression model trained with MSE on a proxy 'rankability' score) as a second baseline. Compare its Recall@10 to both the logistic regression and the learning-to-rank model. If the pointwise ranker performs similarly to the learning-to-rank model, the advantage of the latter is not due to ranking-specific biases.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The evaluation metric (Recall@10) directly measures the operational goal of alert triage.",
+        "failure_mechanism": "Recall@10 assumes that analysts review alerts in batches of 10, which may not reflect real-world triage workflows. Analysts may prioritize alerts based on other factors (e.g., asset criticality, time of day) or may review more than 10 alerts per shift. The metric also does not account for the *cost* of false positives\u2014Precision@10 is secondary but not integrated into a cost-sensitive metric. The 72-hour window for labeling incidents may also introduce noise: some incidents may take longer to confirm, and alerts linked to such incidents may be mislabeled.",
+        "evidence_test": "Conduct a sensitivity analysis of Recall@10 to the top-N cutoff (e.g., N=5, 10, 20, 50). Measure the trade-off between Recall@N and Precision@N. Alternatively, design a cost-sensitive metric that weights false positives and false negatives based on analyst workload and incident impact.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split and incident-level grouping ensure that the evaluation is free of leakage and reflects realistic operator experience.",
+        "failure_mechanism": "While the temporal split prevents future-to-past leakage, it does not address *within-incident leakage* in the training set. If an incident spans multiple months (e.g., a long-running campaign), alerts from the incident may appear in both training and validation/test sets if the incident ID is not strictly partitioned by time. The design states that 'No alert from a single incident appears in more than one partition,' but this is only verified if incidents are strictly partitioned by time, which may not hold for multi-month incidents. Additionally, the 72-hour labeling window could introduce leakage if alerts in the test set are labeled based on incidents that began in the training window.",
+        "evidence_test": "Audit the dataset for incidents spanning multiple temporal partitions. For such incidents, ensure all alerts are assigned to a single partition (e.g., the earliest month). Alternatively, use a strict incident-level temporal split: assign all alerts from an incident to the partition corresponding to the incident's first alert.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The preprocessing pipeline (standardization, encoding) is fit exclusively on the training set and applied to validation/test without refitting.",
+        "failure_mechanism": "The pipeline assumes that the distribution of categorical features (e.g., rule names, asset types) in validation/test is similar to training. If new rule families or asset types emerge in validation/test, they are mapped to an 'unknown' token, which may degrade performance. The pipeline also assumes that the distribution of numerical features (e.g., endpoint risk scores) is stationary. If the SOC's risk scoring changes over time, the preprocessing (e.g., standardization) may be miscalibrated.",
+        "evidence_test": "Measure the fraction of 'unknown' tokens in validation/test. If this fraction is high (e.g., >10%), the model may be handicapped by out-of-distribution categories. Alternatively, use embeddings or hashing tricks to handle new categories without collapsing them to 'unknown.'",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC has several critical flaws that undermine its ability to validate the hypothesis. The most severe issues are silent misconfiguration in upsampling (F2), lack of a fair ranking baseline (F3), and unaddressed distribution shift (F1). These flaws could produce plausible-looking results that do not reflect the model's true performance in production. The evaluation also risks leakage (F5) and uses a metric that may not align with operational goals (F4).",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "Detailed analysis of each finding considering the design intent, critic's claim, and evidence test proposed.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The concern about distribution shift is valid and requires empirical testing to resolve."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The impact of upsampling is an empirical question that needs to be tested."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "Additional baselines, such as a pointwise ranker, could strengthen the evaluation."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "Recall@10 is a deliberately chosen metric reflecting operational goals, with acknowledged limitations."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The design explicitly controls for within-incident leakage."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "Preprocessing assumptions are valid concerns requiring empirical verification."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Multiple findings were deferred for empirical testing, indicating that while the methodology is largely sound, certain aspects require further investigation to fully validate the design choices."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The defender acknowledges the metric limitations but argues that Recall@10 reflects operational goals. While the rebuttal does not fully address the cost of false positives or the arbitrary cutoff, it provides a reasoned justification for the metric choice. The severity adjustment to 3 is proportionate given the acknowledged limitations."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender explicitly states that the design controls for within-incident leakage by ensuring no alert from a single incident appears in more than one partition. This directly addresses the failure mechanism of within-incident leakage across temporal boundaries. The severity adjustment to 0 is appropriate."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic accepted our rebuttals for F4 and F5, while challenging our positions on F1, F2, F3, and F6. We will maintain or adjust our stance accordingly.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic's challenge on distribution shift remains valid. Empirical testing is required to assess the model's performance on out-of-distribution incidents. We propose measuring Recall@10 on novel alert families or attack patterns in a future test set.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The impact of upsampling on model performance is an empirical question. We suggest comparing model performance with and without upsampling in future experiments to resolve this concern.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic's suggestion to include additional baselines, such as a pointwise ranker, is valid. We acknowledge that this could provide further insight into the benefits of the learning-to-rank approach.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic accepted our rebuttal, acknowledging that Recall@10 reflects operational goals despite its limitations.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The critic accepted our rebuttal, confirming that the design controls for within-incident leakage.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic's challenge on preprocessing assumptions remains valid. We propose measuring the fraction of 'unknown' tokens in validation/test and considering alternative preprocessing techniques to handle new categories.",
+        "r2_challenge_response": "DEFERRED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Multiple findings were deferred to empirical testing, indicating that the review has surfaced real uncertainties that require experimental resolution."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The evaluation design ensures that the model generalizes to realistic deployment conditions by using temporal splitting and incident-level grouping.",
+        "failure_mechanism": "The temporal split and incident-level grouping do not address the core challenge of distribution shift in SOC alert triage: the *nature* of alerts and incidents evolves over time due to changing attacker tactics, new detection rules, and evolving infrastructure. The model may memorize patterns in the training window (e.g., specific rule names, asset configurations) that are irrelevant or misleading in later periods. The incident-level grouping prevents duplicate alerts from inflating metrics but does not ensure the model ranks *new types* of incidents correctly.",
+        "evidence_test": "Evaluate the model on a held-out time window that includes novel alert families, asset types, or attack patterns not present in training. Measure Recall@10 on these 'out-of-distribution' incidents separately. If Recall@10 drops significantly for these cases compared to in-distribution incidents, the model has failed to generalize under distribution shift.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Upsampling confirmed incidents to 5% of training alerts ensures adequate positive signal for model training without distorting the evaluation.",
+        "failure_mechanism": "Upsampling duplicates incidents, which may artificially inflate the model's ability to recognize patterns in the duplicated data. This could lead to overfitting to the duplicated incidents rather than learning generalizable ranking behavior. The evaluation metrics (Recall@10, etc.) are computed on the *original* test set without upsampling, but the model's training signal is distorted. The 5% target is arbitrary and may not reflect the true positive rate in production. If the upsampled incidents are not representative of the broader distribution of incidents, the model may learn spurious correlations.",
+        "evidence_test": "Train the model without upsampling (or with upsampling to a more realistic positive rate, e.g., 0.5%) and compare Recall@10 on the test set. If performance degrades significantly, the upsampling has introduced a silent misconfiguration that inflates apparent results. Alternatively, use synthetic minority oversampling (SMOTE) or other techniques that generate novel examples rather than duplicating existing ones.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline (logistic regression) is a fair and sufficient comparator to test the hypothesis that ranking-specific inductive biases improve incident recall.",
+        "failure_mechanism": "The baseline is a binary classifier, not a ranker, and is evaluated by ranking its predicted probabilities. This is not a true 'ranking baseline'\u2014it lacks the listwise or pairwise inductive biases of a learning-to-rank model. A more appropriate baseline would be a pointwise ranker (e.g., a regression model trained to predict a score directly) or a heuristic ranker (e.g., sorting by severity). The current baseline may underperform not because ranking is ineffective, but because it is poorly optimized for ranking. This inflates the apparent benefit of the learning-to-rank model.",
+        "evidence_test": "Implement a pointwise ranker (e.g., a regression model trained with MSE on a proxy 'rankability' score) as a second baseline. Compare its Recall@10 to both the logistic regression and the learning-to-rank model. If the pointwise ranker performs similarly to the learning-to-rank model, the advantage of the latter is not due to ranking-specific biases.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The evaluation metric (Recall@10) directly measures the operational goal of alert triage.",
+        "failure_mechanism": "Recall@10 assumes that analysts review alerts in batches of 10, which may not reflect real-world triage workflows. Analysts may prioritize alerts based on other factors (e.g., asset criticality, time of day) or may review more than 10 alerts per shift. The metric also does not account for the *cost* of false positives\u2014Precision@10 is secondary but not integrated into a cost-sensitive metric. The 72-hour window for labeling incidents may also introduce noise: some incidents may take longer to confirm, and alerts linked to such incidents may be mislabeled.",
+        "evidence_test": "Conduct a sensitivity analysis of Recall@10 to the top-N cutoff (e.g., N=5, 10, 20, 50). Measure the trade-off between Recall@N and Precision@N. Alternatively, design a cost-sensitive metric that weights false positives and false negatives based on analyst workload and incident impact.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split and incident-level grouping ensure that the evaluation is free of leakage and reflects realistic operator experience.",
+        "failure_mechanism": "While the temporal split prevents future-to-past leakage, it does not address *within-incident leakage* in the training set. If an incident spans multiple months (e.g., a long-running campaign), alerts from the incident may appear in both training and validation/test sets if the incident ID is not strictly partitioned by time. The design states that 'No alert from a single incident appears in more than one partition,' but this is only verified if incidents are strictly partitioned by time, which may not hold for multi-month incidents. Additionally, the 72-hour labeling window could introduce leakage if alerts in the test set are labeled based on incidents that began in the training window.",
+        "evidence_test": "Audit the dataset for incidents spanning multiple temporal partitions. For such incidents, ensure all alerts are assigned to a single partition (e.g., the earliest month). Alternatively, use a strict incident-level temporal split: assign all alerts from an incident to the partition corresponding to the incident's first alert.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The preprocessing pipeline (standardization, encoding) is fit exclusively on the training set and applied to validation/test without refitting.",
+        "failure_mechanism": "The pipeline assumes that the distribution of categorical features (e.g., rule names, asset types) in validation/test is similar to training. If new rule families or asset types emerge in validation/test, they are mapped to an 'unknown' token, which may degrade performance. The pipeline also assumes that the distribution of numerical features (e.g., endpoint risk scores) is stationary. If the SOC's risk scoring changes over time, the preprocessing (e.g., standardization) may be miscalibrated.",
+        "evidence_test": "Measure the fraction of 'unknown' tokens in validation/test. If this fraction is high (e.g., >10%), the model may be handicapped by out-of-distribution categories. Alternatively, use embeddings or hashing tricks to handle new categories without collapsing them to 'unknown.'",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC has several critical flaws that undermine its ability to validate the hypothesis. The most severe issues are silent misconfiguration in upsampling (F2), lack of a fair ranking baseline (F3), and unaddressed distribution shift (F1). These flaws could produce plausible-looking results that do not reflect the model's true performance in production. The evaluation also risks leakage (F5) and uses a metric that may not align with operational goals (F4).",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic accepted our rebuttals for F4 and F5, while challenging our positions on F1, F2, F3, and F6. We will maintain or adjust our stance accordingly.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic's challenge on distribution shift remains valid. Empirical testing is required to assess the model's performance on out-of-distribution incidents. We propose measuring Recall@10 on novel alert families or attack patterns in a future test set.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The impact of upsampling on model performance is an empirical question. We suggest comparing model performance with and without upsampling in future experiments to resolve this concern.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic's suggestion to include additional baselines, such as a pointwise ranker, is valid. We acknowledge that this could provide further insight into the benefits of the learning-to-rank approach.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic accepted our rebuttal, acknowledging that Recall@10 reflects operational goals despite its limitations.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The critic accepted our rebuttal, confirming that the design controls for within-incident leakage.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic's challenge on preprocessing assumptions remains valid. We propose measuring the fraction of 'unknown' tokens in validation/test and considering alternative preprocessing techniques to handle new categories.",
+        "r2_challenge_response": "DEFERRED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Multiple findings were deferred to empirical testing, indicating that the review has surfaced real uncertainties that require experimental resolution."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=9, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 8,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=8, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 7,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 4,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4, DEFER \u2192 empirical_test_agreed"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "4 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

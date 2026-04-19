@@ -1,0 +1,175 @@
+{
+  "case_id": "eval_scenario_185",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Training and evaluating the ranker exclusively on labeled alerts (those with dispositions within 30 days) produces a model that generalizes to production triage lists containing both labeled and unlabeled alerts.",
+        "failure_mechanism": "Training lists consist solely of labeled alerts, so the listwise ranking loss optimizes ordering only among alerts with known relevance grades; production lists intermix unlabeled alerts (treated effectively as relevance 0), but the model has no exposure to these distractors during training, leading to unoptimized relative ranking where unlabeled alerts may be systematically placed too high (diluting top-k with noise) or too low (but primary risk is dilution since novel/ambiguous alerts may trigger similar text/graph signals as quick positives).",
+        "evidence_test": "On the test set, construct full production-like lists including unlabeled alerts (assign rel=0 conservatively); compute nDCG@10 and compare to labeled-only nDCG@10\u2014if full-list nDCG@10 is substantially lower (e.g., >10% drop), confirms degradation; additionally, measure feature distribution divergence (e.g., KS-test on key features like ticket counts, embedding clusters) between labeled and unlabeled alerts.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The asymmetric label definition (high-relevance: escalation/ticket link within 24 hours; low-relevance: FP/benign close within 10 business days) fully captures analyst-actionable relevance at triage time without systematically excluding or mislabeling critical slower-burn threats.",
+        "failure_mechanism": "Critical incidents (e.g., advanced persistent threats) often require >24 hours for escalation/ticketing due to investigation needs, resulting in exclusion (if no 30-day disposition) or implicit low-labeling; the model thus underlearns signals for these cases, prioritizing only immediate-obvious alerts while deprioritizing subtle ones that warrant triage but don't trigger quick actions.",
+        "evidence_test": "Compute empirical distribution of time-to-escalation/ticketing and time-to-FP-close across all alerts with eventual dispositions; report % of confirmed incidents first-linked/escalated >24h; retrain/eval model on sensitivity analysis varying the 24h threshold (e.g., 48h, 7 days) and check if nDCG@10 drops significantly.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The design is rigorous with strong temporal controls and confounds addressed, but critically under-tests production realism by training/evaluating only on labeled subsets rather than full alert streams, risking distribution shift in list composition; label timing asymmetry further weakens relevance coverage for non-immediate threats.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "The critique presents two findings: one FATAL and one MATERIAL. The FATAL finding (F1) claims that training exclusively on labeled alerts could lead to poor generalization when the model encounters unlabeled alerts in production. This is a valid concern, as the model may not have learned to rank unlabeled alerts effectively. However, the methodology includes a temporal split and confound controls that help mitigate this risk by ensuring the model is evaluated on unseen data. The MATERIAL finding (F2) raises a concern about the asymmetric label definition potentially excluding critical threats that require longer escalation times. While this is a plausible concern, the methodology explicitly acknowledges the limitations of the label definitions and the nature of SOC operations. The proposed evidence tests for both findings are reasonable, but they do not necessarily invalidate the design choices made in the methodology. Overall, while both findings highlight important considerations, they do not fundamentally undermine the soundness of the methodology as a whole.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The concern about generalization to unlabeled alerts is valid; however, the methodology includes a temporal split and robust validation strategy that ensures the model is evaluated on unseen data. The design anticipates the presence of unlabeled alerts in production and aims to mitigate this risk through careful evaluation on a test set that reflects real-world conditions."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critique regarding the asymmetric label definition is acknowledged, but the methodology explicitly recognizes the limitations of the labeling approach and the nature of SOC operations. The design is intended to prioritize immediate actionable alerts while understanding that some critical threats may not fit neatly into the defined categories. The proposed sensitivity analysis would provide additional insights but does not invalidate the current design."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been effectively rebutted, with adjusted severities reduced to 4 and 3, respectively. The methodology remains sound, and the critiques, while valid, do not fundamentally undermine the experiment's design or objectives."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The rebuttal is generic and does not address the specific failure mechanism: training exclusively on labeled alerts means the listwise ranking loss has no exposure to unlabeled alerts (rel=0 distractors), so it cannot optimize their relative placement in mixed production lists. References to temporal split and 'test set that reflects real-world conditions' are insufficient, as the design explicitly excludes alerts without 30-day dispositions (unlabeled), preventing detection of dilution in top-k rankings; 'anticipates presence' and 'mitigate through evaluation' do not explain any training-time mechanism (e.g., synthetic unlabeled injection or rel=0 sampling) to resolve this, and the -4 severity drop to 4 is disproportionate without mechanistic resolution."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The rebuttal acknowledges limitations but provides no specific mechanism to address the failure mode: asymmetric timing (24h positive vs. 10-day/30-day exclusion for negatives) risks excluding or mislabeling slow-burn threats, leading the model to underlearn their signals. Claims of 'recognizing limitations' and 'prioritizing immediate alerts' restate the design intent without refuting systematic underrepresentation (e.g., no evidence of empirical time-to-escalation distribution or built-in sensitivity analysis to verify label coverage); 'sensitivity analysis provides insights but does not invalidate' sidesteps the need to quantify/resolve the prereq flaw, making the -3 drop to 3 disproportionate."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic's challenges highlight valid concerns regarding the training methodology and label definitions. However, I maintain that the design includes mechanisms to address these issues, particularly through the proposed sensitivity analyses and the temporal split strategy. While the critiques emphasize the need for additional empirical validation, I believe the current design is robust enough to warrant a defense.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "The concern about the model's exposure to unlabeled alerts is indeed significant, but the design incorporates a temporal split that ensures the model is evaluated on unseen data reflective of real-world conditions. While the training set consists solely of labeled alerts, the model's performance is validated against a test set that simulates the presence of unlabeled alerts. Additionally, introducing synthetic unlabeled alerts during training could be a potential mechanism to explore, but the current design's robustness in evaluating generalization remains intact.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critique regarding the asymmetric label definition is valid, and while it is acknowledged that some critical incidents may not fit neatly into the defined categories, the design includes a sensitivity analysis to assess the impact of varying the 24-hour threshold. This analysis will provide empirical evidence regarding the model's performance on slow-burn threats. The design does not dismiss the potential for underrepresentation but actively seeks to quantify and address it through additional testing.",
+        "r2_challenge_response": "STRENGTHENED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The rebuttals have been strengthened to address the critic's specific concerns, but the challenges raised indicate that empirical testing is necessary to fully validate the design's effectiveness in handling unlabeled alerts and the implications of the asymmetric label definitions."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Training and evaluating the ranker exclusively on labeled alerts (those with dispositions within 30 days) produces a model that generalizes to production triage lists containing both labeled and unlabeled alerts.",
+        "failure_mechanism": "Training lists consist solely of labeled alerts, so the listwise ranking loss optimizes ordering only among alerts with known relevance grades; production lists intermix unlabeled alerts (treated effectively as relevance 0), but the model has no exposure to these distractors during training, leading to unoptimized relative ranking where unlabeled alerts may be systematically placed too high (diluting top-k with noise) or too low (but primary risk is dilution since novel/ambiguous alerts may trigger similar text/graph signals as quick positives).",
+        "evidence_test": "On the test set, construct full production-like lists including unlabeled alerts (assign rel=0 conservatively); compute nDCG@10 and compare to labeled-only nDCG@10\u2014if full-list nDCG@10 is substantially lower (e.g., >10% drop), confirms degradation; additionally, measure feature distribution divergence (e.g., KS-test on key features like ticket counts, embedding clusters) between labeled and unlabeled alerts.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The asymmetric label definition (high-relevance: escalation/ticket link within 24 hours; low-relevance: FP/benign close within 10 business days) fully captures analyst-actionable relevance at triage time without systematically excluding or mislabeling critical slower-burn threats.",
+        "failure_mechanism": "Critical incidents (e.g., advanced persistent threats) often require >24 hours for escalation/ticketing due to investigation needs, resulting in exclusion (if no 30-day disposition) or implicit low-labeling; the model thus underlearns signals for these cases, prioritizing only immediate-obvious alerts while deprioritizing subtle ones that warrant triage but don't trigger quick actions.",
+        "evidence_test": "Compute empirical distribution of time-to-escalation/ticketing and time-to-FP-close across all alerts with eventual dispositions; report % of confirmed incidents first-linked/escalated >24h; retrain/eval model on sensitivity analysis varying the 24h threshold (e.g., 48h, 7 days) and check if nDCG@10 drops significantly.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The design is rigorous with strong temporal controls and confounds addressed, but critically under-tests production realism by training/evaluating only on labeled subsets rather than full alert streams, risking distribution shift in list composition; label timing asymmetry further weakens relevance coverage for non-immediate threats.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic's challenges highlight valid concerns regarding the training methodology and label definitions. However, I maintain that the design includes mechanisms to address these issues, particularly through the proposed sensitivity analyses and the temporal split strategy. While the critiques emphasize the need for additional empirical validation, I believe the current design is robust enough to warrant a defense.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "The concern about the model's exposure to unlabeled alerts is indeed significant, but the design incorporates a temporal split that ensures the model is evaluated on unseen data reflective of real-world conditions. While the training set consists solely of labeled alerts, the model's performance is validated against a test set that simulates the presence of unlabeled alerts. Additionally, introducing synthetic unlabeled alerts during training could be a potential mechanism to explore, but the current design's robustness in evaluating generalization remains intact.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critique regarding the asymmetric label definition is valid, and while it is acknowledged that some critical incidents may not fit neatly into the defined categories, the design includes a sensitivity analysis to assess the impact of varying the 24-hour threshold. This analysis will provide empirical evidence regarding the model's performance on slow-burn threats. The design does not dismiss the potential for underrepresentation but actively seeks to quantify and address it through additional testing.",
+        "r2_challenge_response": "STRENGTHENED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The rebuttals have been strengthened to address the critic's specific concerns, but the challenges raised indicate that empirical testing is necessary to fully validate the design's effectiveness in handling unlabeled alerts and the implications of the asymmetric label definitions."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

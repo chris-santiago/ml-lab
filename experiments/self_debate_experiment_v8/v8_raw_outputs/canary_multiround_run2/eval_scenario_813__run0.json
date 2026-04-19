@@ -1,0 +1,234 @@
+{
+  "case_id": "eval_scenario_813",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Validation and test sets of 200 labeled reports each are sufficient for stable hyperparameter tuning, model selection, early stopping, reliable span-level F1 estimation (including 95% CIs via bootstrap), and stratified subgroup analysis (e.g., per-modality, rare entities, sections).",
+        "failure_mechanism": "Small sample sizes yield high-variance F1 estimates, especially for rare entities (bottom 20% frequency, potentially <20 instances per split) or small strata (e.g., ~30 MRI reports in test); bootstrap CIs widen (>10-20% width), hyperparameter selection overfits noise in validation, and subgroup metrics become unstable, inflating apparent superiority or masking true differences.",
+        "evidence_test": "Report gold entity instance counts per type/stratum/split; compute observed bootstrap CI widths and minimum detectable effect size via power analysis (e.g., for \u0394F1=0.05 at \u03b1=0.05, power=0.8); simulate variance with subsampling.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Single training runs per hyperparameter configuration provide representative performance estimates for model comparison.",
+        "failure_mechanism": "Randomness from SGD initialization, dropout, and shuffling on n=1600 train reports induces high inter-run variance (typically 3-10% F1 swings in NER tasks with similar data sizes), causing val-based selection to pick lucky configs and test results to misrepresent expected deployment performance.",
+        "evidence_test": "Replicate top configs across 3-5 random seeds, reporting mean \u00b1 std dev of val/test F1; check if seed variance exceeds bootstrap CI width.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Temporal splits on the 2,000-report labeled sample (selected via non-temporal stratification on modalities/length/contexts) yield matched distributions of modalities, report lengths, and section presence across train/val/test.",
+        "failure_mechanism": "Non-time-aware sampling followed by chronological split inherits any temporal drifts in the corpus (e.g., rising MRI volumes or evolving clinical contexts post-2021), creating unintended covariate shifts misattributed to model robustness rather than data imbalance.",
+        "evidence_test": "Compute and report proportion tables for modalities/length bins/section presence across splits; perform chi-squared or Kolmogorov-Smirnov tests for distributional equality (p>0.05 threshold).",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The experiment design is rigorous with excellent controls for leakage, blinding, and confounds, but small validation/test sizes and lack of training randomness risk unreliable estimates and inflated confidence in transformer superiority, particularly for rare entities and subgroups.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "I need to analyze each critique finding against the methodology to determine if they identify genuine flaws or are valid concerns that don't invalidate the PoC.\n\nF1 (Severity 6 - MATERIAL): The critic claims 200 labeled reports per split is insufficient for stable evaluation, especially for rare entities and subgroup analysis. However, the methodology explicitly acknowledges this limitation in Section 8 ('What the experiment does not establish'). The experiment is a PoC comparing architectures, not establishing production-grade performance bounds. Bootstrap CIs (1000 resamples) are used to quantify uncertainty. In clinical NER research, 200-500 annotated reports is standard for comparative PoCs. The critic conflates PoC validation with production validation. This is a scope misalignment - the PoC doesn't claim to establish rare entity performance definitively.\n\nF2 (Severity 5 - MATERIAL): The critic claims single training runs are insufficient due to random seed variance. This is a valid concern for production deployment but not required for a PoC. The methodology states both models receive equivalent tuning effort. The hypothesis is about architecture advantage, not exact performance numbers. Multiple runs would be better but aren't required for the hypothesis test. This is a deliberate design choice for PoC efficiency.\n\nF3 (Severity 4 - MATERIAL): The critic claims temporal splits may not have matched distributions. However, Section 2 explicitly states: 'Within each split, the distribution of report modalities, section presence, and report length are stratified to match across train/val/test.' The methodology has an explicit design control for this concern. The critic is asking for verification of implementation, not identifying a design flaw. The design explicitly addresses this.\n\nAll three findings are valid concerns in general ML research, but for a PoC scope, none invalidate the methodology. F1 and F2 are scope/design choices appropriate for PoC. F3 is explicitly addressed by design controls. None require design changes for the PoC to be valid.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The critic misidentifies the experiment scope. Section 8 explicitly states what the experiment does not establish (rare entity performance bounds). For a PoC comparing Transformer vs BiLSTM-CRF architectures, 200 test reports is standard in clinical NER research. Bootstrap CIs quantify uncertainty. The PoC doesn't claim production-grade validation, so sample size requirements are appropriately scoped."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Single training runs per configuration is a deliberate design choice for PoC efficiency. Both models receive equivalent tuning effort on the same validation set. The hypothesis tests architecture advantage, not exact performance numbers. Multiple runs would improve production validation but aren't required for PoC hypothesis testing."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Section 2 explicitly addresses this concern: 'Within each split, the distribution of report modalities, section presence, and report length are stratified to match across train/val/test.' The design control exists. The critic requests verification of implementation, not identification of a design flaw. The methodology anticipates and controls for this covariate shift risk."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All three MATERIAL findings have been rebutted with adjusted severities \u2264 3 (F1: 2, F2: 2, F3: 1), satisfying EXONERATE conditions. The critique identifies valid concerns for production deployment but does not invalidate the PoC methodology for its stated scope of architecture comparison."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "REBUT-SCOPE is invalid: Section 8 explicitly states the experiment establishes Transformer advantage 'particularly on rare findings and negated mentions' (secondary metrics include F1 on rare findings and stratified subgroup analysis), placing stable estimation of rare entity/subgroup performance within scope. No mechanistic address of failure (high variance from <20 rare instances per split, wide CIs, hyperparam overfitting); 'standard for PoC' and bootstrap are generic/topically related but do not resolve instability (e.g., no power analysis or subsample simulation showing sufficient minimum detectable effect). Severity drop (-4) disproportionate without evidence of adequacy."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "REBUT-DESIGN is generic: 'deliberate for PoC efficiency' and 'equivalent tuning' do not mechanistically address inter-run variance from SGD/dropout/shuffling (3-10% F1 swings typical in NER), which risks val selecting lucky initializations and test misrepresenting expected performance. No mitigation cited (e.g., fixed seeds, multiple runs, or variance reporting). 'Tests architecture, not exact numbers' sidesteps inflation risk without resolving it. Severity drop (-3) disproportionate."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "REBUT-DESIGN valid and specific: Section 2 cites exact mechanism ('Within each split, the distribution of report modalities, section presence, and report length are stratified to match across train/val/test'), directly preventing covariate shifts from temporal drifts in non-time-aware sampling or corpus evolution. This resolves the failure mode of unintended distribution mismatches."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "F3 was ACCEPTED by the critic \u2014 I maintain my R1 position. F1 and F2 are DEFERRED as they represent genuinely unresolved empirical questions where the methodology lacks design controls but also doesn't preclude valid conclusions. F1's R1 REBUT-SCOPE was incorrect (Section 8 does claim rare entity evaluation is in scope), but the methodology still lacks power analysis controls. F2's R1 REBUT-DESIGN was insufficient (single runs don't address variance), but the architecture comparison could still be valid if variance is similar across models. Neither finding has an undeniable flaw \u2014 both require empirical resolution.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "R1 REBUT-SCOPE was incorrect \u2014 Section 8 explicitly states the experiment establishes Transformer advantage 'particularly on rare findings and negated mentions,' placing rare entity performance within scope. However, the methodology lacks a design control for statistical power (no power analysis, no subsampling simulation). With potentially <20 rare instances per split, bootstrap CIs quantify uncertainty but don't guarantee stability. Settling experiment: power analysis with subsampling simulation to determine minimum detectable effect size. Vindication: bootstrap CI widths <10% and subsampling shows stable rare entity F1 estimates. Validation: CI widths >15-20% or high variance in rare entity F1 across subsamples, which would invalidate claims about rare entity performance.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "R1 REBUT-DESIGN was insufficient \u2014 single runs don't mechanistically address inter-run variance from SGD/dropout/shuffling (3-10% F1 swings typical in NER). The methodology has no design control for this (no fixed seeds, no multiple runs, no variance reporting). However, the hypothesis tests architecture advantage, not exact performance numbers. Settling experiment: replicate top configs across 3-5 random seeds. Vindication: seed variance < architecture effect size and similar across both models, preserving valid comparison. Validation: seed variance exceeds bootstrap CI width or architecture effect, which would require multiple runs for valid conclusions.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Maintained from R1. Section 2 explicitly states: 'Within each split, the distribution of report modalities, section presence, and report length are stratified to match across train/val/test.' This design control directly prevents the critic's concern about unintended covariate shifts from temporal drifts. The critic ACCEPTED this in R2, confirming the mechanism addresses the failure mode.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Two findings (F1, F2) are DEFERRED as they represent genuinely unresolved empirical questions requiring power analysis and seed variance testing. One finding (F3) is ACCEPTED by the critic. Since DEFER findings exist and no findings CONCEDED above severity 3, empirical_test_agreed is the correct verdict."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Validation and test sets of 200 labeled reports each are sufficient for stable hyperparameter tuning, model selection, early stopping, reliable span-level F1 estimation (including 95% CIs via bootstrap), and stratified subgroup analysis (e.g., per-modality, rare entities, sections).",
+        "failure_mechanism": "Small sample sizes yield high-variance F1 estimates, especially for rare entities (bottom 20% frequency, potentially <20 instances per split) or small strata (e.g., ~30 MRI reports in test); bootstrap CIs widen (>10-20% width), hyperparameter selection overfits noise in validation, and subgroup metrics become unstable, inflating apparent superiority or masking true differences.",
+        "evidence_test": "Report gold entity instance counts per type/stratum/split; compute observed bootstrap CI widths and minimum detectable effect size via power analysis (e.g., for \u0394F1=0.05 at \u03b1=0.05, power=0.8); simulate variance with subsampling.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Single training runs per hyperparameter configuration provide representative performance estimates for model comparison.",
+        "failure_mechanism": "Randomness from SGD initialization, dropout, and shuffling on n=1600 train reports induces high inter-run variance (typically 3-10% F1 swings in NER tasks with similar data sizes), causing val-based selection to pick lucky configs and test results to misrepresent expected deployment performance.",
+        "evidence_test": "Replicate top configs across 3-5 random seeds, reporting mean \u00b1 std dev of val/test F1; check if seed variance exceeds bootstrap CI width.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Temporal splits on the 2,000-report labeled sample (selected via non-temporal stratification on modalities/length/contexts) yield matched distributions of modalities, report lengths, and section presence across train/val/test.",
+        "failure_mechanism": "Non-time-aware sampling followed by chronological split inherits any temporal drifts in the corpus (e.g., rising MRI volumes or evolving clinical contexts post-2021), creating unintended covariate shifts misattributed to model robustness rather than data imbalance.",
+        "evidence_test": "Compute and report proportion tables for modalities/length bins/section presence across splits; perform chi-squared or Kolmogorov-Smirnov tests for distributional equality (p>0.05 threshold).",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The experiment design is rigorous with excellent controls for leakage, blinding, and confounds, but small validation/test sizes and lack of training randomness risk unreliable estimates and inflated confidence in transformer superiority, particularly for rare entities and subgroups.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "F3 was ACCEPTED by the critic \u2014 I maintain my R1 position. F1 and F2 are DEFERRED as they represent genuinely unresolved empirical questions where the methodology lacks design controls but also doesn't preclude valid conclusions. F1's R1 REBUT-SCOPE was incorrect (Section 8 does claim rare entity evaluation is in scope), but the methodology still lacks power analysis controls. F2's R1 REBUT-DESIGN was insufficient (single runs don't address variance), but the architecture comparison could still be valid if variance is similar across models. Neither finding has an undeniable flaw \u2014 both require empirical resolution.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "R1 REBUT-SCOPE was incorrect \u2014 Section 8 explicitly states the experiment establishes Transformer advantage 'particularly on rare findings and negated mentions,' placing rare entity performance within scope. However, the methodology lacks a design control for statistical power (no power analysis, no subsampling simulation). With potentially <20 rare instances per split, bootstrap CIs quantify uncertainty but don't guarantee stability. Settling experiment: power analysis with subsampling simulation to determine minimum detectable effect size. Vindication: bootstrap CI widths <10% and subsampling shows stable rare entity F1 estimates. Validation: CI widths >15-20% or high variance in rare entity F1 across subsamples, which would invalidate claims about rare entity performance.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "R1 REBUT-DESIGN was insufficient \u2014 single runs don't mechanistically address inter-run variance from SGD/dropout/shuffling (3-10% F1 swings typical in NER). The methodology has no design control for this (no fixed seeds, no multiple runs, no variance reporting). However, the hypothesis tests architecture advantage, not exact performance numbers. Settling experiment: replicate top configs across 3-5 random seeds. Vindication: seed variance < architecture effect size and similar across both models, preserving valid comparison. Validation: seed variance exceeds bootstrap CI width or architecture effect, which would require multiple runs for valid conclusions.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Maintained from R1. Section 2 explicitly states: 'Within each split, the distribution of report modalities, section presence, and report length are stratified to match across train/val/test.' This design control directly prevents the critic's concern about unintended covariate shifts from temporal drifts. The critic ACCEPTED this in R2, confirming the mechanism addresses the failure mode.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Two findings (F1, F2) are DEFERRED as they represent genuinely unresolved empirical questions requiring power analysis and seed variance testing. One finding (F3) is ACCEPTED by the critic. Since DEFER findings exist and no findings CONCEDED above severity 3, empirical_test_agreed is the correct verdict."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

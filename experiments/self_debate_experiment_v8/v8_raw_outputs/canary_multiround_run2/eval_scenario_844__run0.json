@@ -1,0 +1,293 @@
+{
+  "case_id": "eval_scenario_844",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding zones or intervals with known collection gaps or sensor failures ensures high-quality data without biasing the dataset towards easier forecasting cases or inflating performance.",
+        "failure_mechanism": "Gaps and failures may disproportionately occur during high-demand events, sensor overloads in crowded zones, or low-volume periods with sparse signals, removing the precise scenarios where event-awareness and spatial smoothing provide the most value; the model thus excels on artificially clean data but would degrade in deployment when real-time gaps require online handling, misrepresenting operational robustness.",
+        "evidence_test": "Compare excluded vs included data distributions by event presence, zone volume tier, demand spikes, and time-of-day; evaluate model performance on a validation subset with simulated gaps (e.g., randomly masking 5-10% of intervals) using gap-robust methods like last-observation-carried-forward vs exclusion.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Imputation methods (forward-fill or domain-appropriate) fitted on the training set and applied identically to validation/test sets do not introduce temporal leakage, bias under distribution shift, or degrade feature quality for forecasting.",
+        "failure_mechanism": "Unspecified 'domain-appropriate' methods could involve target leakage during fitting (e.g., imputing weather using ride counts), global statistics ignoring chronology, or non-causal interpolation; applying a train-fitted imputer to future sets could propagate train-specific artifacts (e.g., seasonal biases in forward-fill params if any), especially if rare missings in val/test are filled with train-like values mismatched to shifted conditions, silently weakening event/weather signals.",
+        "evidence_test": "Specify exact imputation methods and hyperparameters; demonstrate no leakage by verifying val/test fills use only past data within their chronological windows; compare model performance with/without imputation on raw (missing-masked) data, and ablate imputation impact via validation MAE stratified by missing rate.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Gaussian kernel bandwidth for spatial smoothing, fitted on training data, remains optimal for validation and test periods without degradation from spatial distribution shifts.",
+        "failure_mechanism": "Spatial correlations in ride demand can evolve due to infrastructure changes (e.g., new transit), urban migration, or event pattern shifts over the 20+ months, causing train-fitted bandwidth to oversmooth or undersmooth future neighborhoods; this nullifies the spatial feature's contribution on shifted data while aggregate metrics pass due to temporal features dominating.",
+        "evidence_test": "Tune bandwidth via cross-validation on validation set and compare val MAE to train-fitted bandwidth; report bandwidth sensitivity via performance curves over a grid of values on val/test, stratified by zone tier and event presence.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Neighboring zones' ride counts used in spatial smoothing are available with negligible delay at the time of prediction (30-min ahead).",
+        "failure_mechanism": "Production data pipelines may have cross-zone aggregation delays >5-10 min due to processing latency, so at prediction time t, smoothed features inadvertently use stale or incomplete neighbor data from t-delta, degrading spatial signal during rapid demand propagation (e.g., event spillovers) while easy steady-state periods mask the issue.",
+        "evidence_test": "Audit data timestamps for max cross-zone lag in train/val; simulate delayed neighbor data on val set (shift by 10-30 min) and measure MAE delta, especially during high-variance events.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The experiment design is rigorous with strong controls for leakage, baselines, and stratification, but relies on unverified preprocessing preconditions around data cleaning, imputation, and spatial fitting that could silently bias results towards cleaner/easier cases than production. Addressing these via targeted evidence tests would solidify the claims.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 (MATERIAL, 6): The critic argues that excluding zones/intervals with collection gaps biases the dataset toward easier forecasting cases, potentially inflating performance metrics. The methodology explicitly states this exclusion is a data quality gate for the PoC. The experiment scope (Section 8) is limited to establishing whether the proposed feature set reduces MAE on valid data, not to validating robustness against sensor failures. Operational handling of gaps is a downstream engineering task (addressed by imputation strategies in F2), not the hypothesis being tested. Thus, this is a scope mismatch.\n\nF2 (MATERIAL, 5): The critic claims imputation methods could introduce leakage or bias. The methodology explicitly states imputation is 'fitted on the training set only' and 'applied to validation and test sets without re-fitting,' using 'forward-fill or domain-appropriate methods.' Forward-fill is inherently causal (uses past data). The design intent explicitly prevents leakage by forbidding re-fitting on future data. The concern is addressed by the stated design controls.\n\nF3 (MATERIAL, 4): The critic argues that a training-fitted spatial bandwidth may degrade due to distribution shifts over 20+ months. The methodology assumes stationarity for the 4-month test window (months 21-24), which is a standard assumption for PoCs validating feature efficacy. The experiment scope is to measure feature value under the assumption of stable spatial correlations over the short test horizon. Dynamic bandwidth adaptation is a production optimization, not a PoC requirement for establishing baseline feature value.\n\nF4 (MINOR, 2): The critic raises concerns about neighbor data latency at prediction time. The methodology assumes standard pipeline availability where neighbor data is accessible with negligible delay (consistent with lagged features). This is a minor operational detail that does not affect the core hypothesis of whether the spatial smoothing feature adds value when data is available. It is immaterial to the validity of the feature comparison.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The PoC scope is explicitly limited to feature efficacy on valid data (Section 8). Robustness to sensor failures is a downstream engineering concern, not the hypothesis being tested. The exclusion is a data quality gate for the analysis, not a model design flaw."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The methodology explicitly mandates 'without re-fitting' and uses 'forward-fill,' which is causal by design. This directly addresses the leakage concern through stated design controls."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The PoC assumes stationarity over the 4-month test window to validate feature value. Dynamic bandwidth adaptation is a production optimization, not required for establishing baseline feature efficacy in this scope."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The PoC assumes standard pipeline availability for neighbor data. This operational detail does not impact the validity of the feature comparison hypothesis when data is available."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been rebutted to MINOR severity or below, with no CONCEDEd findings remaining above the threshold, validating the methodology's soundness for the stated PoC scope."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "REBUT-SCOPE is invalid here: the finding concerns data quality biases within the experiment's scope (feature efficacy on test data), not downstream robustness. Exclusion mechanism\u2014disproportionate removal of high-demand/event intervals where new features add value\u2014remains unaddressed; no evidence that gaps are uniformly distributed or that test set representation is unaffected."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 2,
+        "reasoning": "Rebuttal specifically resolves leakage via causal forward-fill without refitting, but leaves unresolved the vagueness of 'domain-appropriate' methods (potential target leakage or non-chronological stats) and propagation of train artifacts under temporal shift (e.g., mismatched fills for rare val/test missings during novel events/weather), partially addressing but not eliminating feature degradation risk."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 3,
+        "reasoning": "Generic appeal to 'stationarity over 4-month test' and deferral to production ignores the core mechanism: bandwidth fitted on months 1-16 applied to 21-24 risks oversmoothing due to multi-year spatial shifts (e.g., urban changes); no design control (e.g., val-set bandwidth tuning) or evidence provided to validate optimality, and \u22123 adjustment disproportionate without mechanistic resolution."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 1,
+        "reasoning": "REBUT-IMMATERIAL is generic ('assumes standard pipeline'); does not address failure mechanism of cross-zone delays causing stale neighbor data during rapid spillovers (e.g., events), which could degrade spatial features in deployment even if backtest data is complete\u2014prereq for feature validity unresolved, though low original severity limits impact."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic's R2 challenges reveal genuine design gaps in F1 (test set bias from exclusion), F3 (spatial bandwidth stationarity), and F4 (neighbor data latency). F2's PARTIAL verdict acknowledges the forward-fill design but correctly flags vagueness in 'domain-appropriate' methods. I am DEFERRING F1, F3, and F4 to empirical validation as these are genuinely unresolved questions requiring measurement. I am STRENGTHENING F2 by committing to forward-fill only and proposing validation experiments. No CONCEDEs are warranted as all concerns can be empirically tested rather than being design flaws.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic is correct that exclusion bias cannot be resolved by scope argument alone. The test set's representativeness regarding high-demand/event intervals is genuinely unknown without measurement. This requires empirical validation: we will compare excluded vs. included data distributions by event presence and zone volume tier, and evaluate model performance on a validation subset with simulated gaps (5-10% random masking) using gap-robust methods. Result vindicating the design: excluded intervals show no significant difference in event presence or demand spike distribution compared to included intervals. Result validating the critique: excluded intervals are disproportionately high-demand/event periods, requiring the design to either include them with imputation or explicitly limit claims to 'clean data scenarios only.'",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic correctly identifies vagueness in 'domain-appropriate' methods. I am strengthening the design commitment: all imputation will use forward-fill only (no target-based or global statistics), fitted on training set and applied without re-fitting to validation/test. This is explicitly causal by design. Additionally, we will ablate imputation impact via validation MAE stratified by missing rate and compare performance with/without imputation on raw (missing-masked) data. This directly addresses the leakage concern through stated design controls and empirical validation.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic is correct that stationarity over 4 months cannot be assumed for spatial patterns. Multi-year shifts (infrastructure, urban migration) may invalidate train-fitted bandwidth. This requires empirical validation: we will tune bandwidth via cross-validation on validation set and compare val MAE to train-fitted bandwidth; report bandwidth sensitivity via performance curves over a grid of values on val/test, stratified by zone tier and event presence. Result vindicating the design: train-fitted bandwidth performs within 1% of validation-tuned bandwidth across all stratifications. Result validating the critique: train-fitted bandwidth degrades significantly on validation/test, requiring the design to either tune bandwidth on validation or explicitly limit claims to 'stationary spatial conditions.'",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "The critic is correct that cross-zone delays could degrade spatial features during rapid spillovers. This is a genuine prereq for feature validity. We will audit data timestamps for max cross-zone lag in train/val and simulate delayed neighbor data on val set (shift by 10-30 min) to measure MAE delta, especially during high-variance events. Result vindicating the design: latency simulation shows <2% MAE degradation, confirming neighbor data availability is sufficient. Result validating the critique: latency simulation shows >5% MAE degradation during events, requiring the design to either validate pipeline latency or explicitly limit claims to 'ideal data availability conditions.'",
+        "r2_challenge_response": "DEFERRED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Three findings (F1, F3, F4) are deferred to empirical validation as they represent genuinely unresolved questions requiring measurement rather than argument. One finding (F2) is strengthened with explicit design commitments and validation experiments. No findings are conceded as all concerns can be empirically tested. This is the correct outcome when reasonable people can disagree and empirical evidence is the right arbiter."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding zones or intervals with known collection gaps or sensor failures ensures high-quality data without biasing the dataset towards easier forecasting cases or inflating performance.",
+        "failure_mechanism": "Gaps and failures may disproportionately occur during high-demand events, sensor overloads in crowded zones, or low-volume periods with sparse signals, removing the precise scenarios where event-awareness and spatial smoothing provide the most value; the model thus excels on artificially clean data but would degrade in deployment when real-time gaps require online handling, misrepresenting operational robustness.",
+        "evidence_test": "Compare excluded vs included data distributions by event presence, zone volume tier, demand spikes, and time-of-day; evaluate model performance on a validation subset with simulated gaps (e.g., randomly masking 5-10% of intervals) using gap-robust methods like last-observation-carried-forward vs exclusion.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Imputation methods (forward-fill or domain-appropriate) fitted on the training set and applied identically to validation/test sets do not introduce temporal leakage, bias under distribution shift, or degrade feature quality for forecasting.",
+        "failure_mechanism": "Unspecified 'domain-appropriate' methods could involve target leakage during fitting (e.g., imputing weather using ride counts), global statistics ignoring chronology, or non-causal interpolation; applying a train-fitted imputer to future sets could propagate train-specific artifacts (e.g., seasonal biases in forward-fill params if any), especially if rare missings in val/test are filled with train-like values mismatched to shifted conditions, silently weakening event/weather signals.",
+        "evidence_test": "Specify exact imputation methods and hyperparameters; demonstrate no leakage by verifying val/test fills use only past data within their chronological windows; compare model performance with/without imputation on raw (missing-masked) data, and ablate imputation impact via validation MAE stratified by missing rate.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Gaussian kernel bandwidth for spatial smoothing, fitted on training data, remains optimal for validation and test periods without degradation from spatial distribution shifts.",
+        "failure_mechanism": "Spatial correlations in ride demand can evolve due to infrastructure changes (e.g., new transit), urban migration, or event pattern shifts over the 20+ months, causing train-fitted bandwidth to oversmooth or undersmooth future neighborhoods; this nullifies the spatial feature's contribution on shifted data while aggregate metrics pass due to temporal features dominating.",
+        "evidence_test": "Tune bandwidth via cross-validation on validation set and compare val MAE to train-fitted bandwidth; report bandwidth sensitivity via performance curves over a grid of values on val/test, stratified by zone tier and event presence.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Neighboring zones' ride counts used in spatial smoothing are available with negligible delay at the time of prediction (30-min ahead).",
+        "failure_mechanism": "Production data pipelines may have cross-zone aggregation delays >5-10 min due to processing latency, so at prediction time t, smoothed features inadvertently use stale or incomplete neighbor data from t-delta, degrading spatial signal during rapid demand propagation (e.g., event spillovers) while easy steady-state periods mask the issue.",
+        "evidence_test": "Audit data timestamps for max cross-zone lag in train/val; simulate delayed neighbor data on val set (shift by 10-30 min) and measure MAE delta, especially during high-variance events.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The experiment design is rigorous with strong controls for leakage, baselines, and stratification, but relies on unverified preprocessing preconditions around data cleaning, imputation, and spatial fitting that could silently bias results towards cleaner/easier cases than production. Addressing these via targeted evidence tests would solidify the claims.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic's R2 challenges reveal genuine design gaps in F1 (test set bias from exclusion), F3 (spatial bandwidth stationarity), and F4 (neighbor data latency). F2's PARTIAL verdict acknowledges the forward-fill design but correctly flags vagueness in 'domain-appropriate' methods. I am DEFERRING F1, F3, and F4 to empirical validation as these are genuinely unresolved questions requiring measurement. I am STRENGTHENING F2 by committing to forward-fill only and proposing validation experiments. No CONCEDEs are warranted as all concerns can be empirically tested rather than being design flaws.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic is correct that exclusion bias cannot be resolved by scope argument alone. The test set's representativeness regarding high-demand/event intervals is genuinely unknown without measurement. This requires empirical validation: we will compare excluded vs. included data distributions by event presence and zone volume tier, and evaluate model performance on a validation subset with simulated gaps (5-10% random masking) using gap-robust methods. Result vindicating the design: excluded intervals show no significant difference in event presence or demand spike distribution compared to included intervals. Result validating the critique: excluded intervals are disproportionately high-demand/event periods, requiring the design to either include them with imputation or explicitly limit claims to 'clean data scenarios only.'",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic correctly identifies vagueness in 'domain-appropriate' methods. I am strengthening the design commitment: all imputation will use forward-fill only (no target-based or global statistics), fitted on training set and applied without re-fitting to validation/test. This is explicitly causal by design. Additionally, we will ablate imputation impact via validation MAE stratified by missing rate and compare performance with/without imputation on raw (missing-masked) data. This directly addresses the leakage concern through stated design controls and empirical validation.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic is correct that stationarity over 4 months cannot be assumed for spatial patterns. Multi-year shifts (infrastructure, urban migration) may invalidate train-fitted bandwidth. This requires empirical validation: we will tune bandwidth via cross-validation on validation set and compare val MAE to train-fitted bandwidth; report bandwidth sensitivity via performance curves over a grid of values on val/test, stratified by zone tier and event presence. Result vindicating the design: train-fitted bandwidth performs within 1% of validation-tuned bandwidth across all stratifications. Result validating the critique: train-fitted bandwidth degrades significantly on validation/test, requiring the design to either tune bandwidth on validation or explicitly limit claims to 'stationary spatial conditions.'",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "The critic is correct that cross-zone delays could degrade spatial features during rapid spillovers. This is a genuine prereq for feature validity. We will audit data timestamps for max cross-zone lag in train/val and simulate delayed neighbor data on val set (shift by 10-30 min) to measure MAE delta, especially during high-variance events. Result vindicating the design: latency simulation shows <2% MAE degradation, confirming neighbor data availability is sufficient. Result validating the critique: latency simulation shows >5% MAE degradation during events, requiring the design to either validate pipeline latency or explicitly limit claims to 'ideal data availability conditions.'",
+        "r2_challenge_response": "DEFERRED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Three findings (F1, F3, F4) are deferred to empirical validation as they represent genuinely unresolved questions requiring measurement rather than argument. One finding (F2) is strengthened with explicit design commitments and validation experiments. No findings are conceded as all concerns can be empirically tested. This is the correct outcome when reasonable people can disagree and empirical evidence is the right arbiter."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 4,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "defense_wins",
+        "rule_applied": "constitutional: DEFER + adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

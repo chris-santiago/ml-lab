@@ -1,0 +1,293 @@
+{
+  "case_id": "eval_scenario_813",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "deepseek/deepseek-v3.2",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The BiLSTM-CRF baseline is a fair comparison to the Transformer because it uses 'established prior art' (static embeddings + engineered features).",
+        "failure_mechanism": "The Transformer's primary advantage in NER is not just the architecture, but the massive amount of domain-specific knowledge encoded in the pretrained weights (PubMedBERT/SciBERT). The BiLSTM-CRF uses frozen GloVe/FastText embeddings, which are shallow and lack the contextual nuance of a Transformer. By comparing a fine-tuned Transformer against a frozen-embedding BiLSTM, the experiment is actually testing 'Pretrained Contextual Embeddings vs. Static Embeddings' rather than 'Transformer vs. BiLSTM-CRF'. The BiLSTM-CRF is effectively handicapped by the lack of a comparable pretraining scale.",
+        "evidence_test": "Include a third baseline: a BiLSTM-CRF that uses the same clinical BERT embeddings as the Transformer (frozen or fine-tuned) as its input layer. If the Transformer still wins significantly, the architecture is the driver; if the gap closes, the pretraining is the driver.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (Months 1-24 train, 25-30 val, 31-36 test) provides a robust assessment of vocabulary drift and clinical presentation shifts.",
+        "failure_mechanism": "While temporal splits are generally superior, the total labeled sample size is very small (2,000 reports) relative to the 200,000 report corpus. With only 200 reports in the test set, the 'drift' observed may be stochastic noise rather than a systemic temporal shift. Furthermore, if the health system updated its reporting templates or software in Month 31, the model might fail due to a formatting change (a 'silent' shift) rather than a clinical vocabulary shift, which the current evaluation doesn't distinguish.",
+        "evidence_test": "Compare the test set performance against a random stratified split of the same 2,000 reports. If the temporal test set performs significantly worse than the random test set, drift is present. If they are similar, the temporal split is unnecessary/overkill for this sample size.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The use of class weights inversely proportional to label frequency handles rare entities.",
+        "failure_mechanism": "In NER, the 'O' (Outside) class typically dominates the distribution by an order of magnitude. Simple inverse frequency weighting can lead to extreme weights for rare entities (e.g., 'severity'), causing the model to over-predict these entities (high recall, very low precision) and potentially destabilizing the CRF transitions or the Transformer's linear head. This often results in 'noisy' spans that fail the strict span-level F1 requirement.",
+        "evidence_test": "Analyze the Precision-Recall curve specifically for the rare entity types. A sharp drop in precision accompanying the use of class weights would confirm the mechanism of failure.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The BiLSTM-CRF's character-level CNN captures morphology effectively.",
+        "failure_mechanism": "Clinical text often contains highly idiosyncratic abbreviations and typos that are not morphological in nature (e.g., 'L lung' vs 'Left lung'). A CNN with filters 3/4/5 may not capture the specific semantic patterns of clinical shorthand as well as a BPE/WordPiece tokenizer does, potentially biasing the comparison in favor of the Transformer's tokenization strategy.",
+        "evidence_test": "Compare OOV (Out-of-Vocabulary) error rates for the BiLSTM-CRF vs the Transformer specifically on abbreviated terms.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The PoC is well-structured regarding data leakage and temporal splitting, but it contains a fatal flaw in its baseline comparison: it compares a contextually-pretrained Transformer against a statically-embedded BiLSTM, confounding architectural advantages with pretraining advantages. Additionally, the small sample size of the test set may make the 'temporal drift' claims statistically insignificant.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "I will analyze each finding in sequence, referencing the methodology's design intent and controls.\n\n**F1 (Severity 8 - FATAL):** The critic claims the BiLSTM-CRF baseline is unfair because it compares a fine-tuned Transformer against static embeddings, testing 'Pretrained Contextual Embeddings vs. Static Embeddings' rather than 'Transformer vs. BiLSTM-CRF'. The methodology explicitly states the hypothesis: \"the transformer's pretraining and domain adaptation provide the advantage.\" The baseline uses \"established prior art (pretrained static embeddings + engineered features), which is a fair comparison.\" This is a deliberate design choice to test the value of modern transformer pretraining against the previous state-of-the-art approach. The experiment's scope (Section 8) explicitly states it does not establish whether the advantage is due to architecture vs. pretraining vs. capacity\u2014that would require ablations. The critic's proposed third baseline (BiLSTM-CRF with BERT embeddings) is a valid ablation for a follow-up study, but its absence doesn't invalidate the primary comparison between current best-practice approaches. The BiLSTM-CRF is not 'handicapped'\u2014it receives equivalent tuning effort and uses standard features for that architecture class. The finding misidentifies the experiment's scope.\n\n**F2 (Severity 6 - MATERIAL):** The critic questions whether the temporal split with 200 test reports provides robust assessment of drift, suggesting drift may be stochastic noise or caused by formatting changes. The methodology justifies the temporal split to \"assess the model's robustness to realistic vocabulary drift and clinical presentation shifts.\" With 200 test reports over 6 months, this provides a reasonable sample for detecting performance degradation. The critic's concern about 'silent' formatting shifts is valid but addressed by the methodology's confound controls: \"Template memorization\" and \"Section artifacts\" diagnostics would detect if models are over-relying on formatting. If a software update occurred in Month 31, the temporal split would correctly capture this as a real-world distribution shift the model must handle. Comparing against a random split (critic's evidence test) would answer a different question (is there drift?), not whether the temporal split is appropriate for evaluating real-world generalization. The finding raises a valid consideration about statistical power, but doesn't identify a flaw in the split strategy itself.\n\n**F3 (Severity 4 - MATERIAL):** The critic warns that inverse frequency weighting can cause over-prediction of rare entities and destabilize models. The methodology mentions class weights but doesn't detail the implementation. This is a known trade-off in imbalanced classification. However, the evaluation uses span-level F1 as the primary metric, which penalizes both false positives and false negatives. The validation set is used for model selection (monitoring span-level F1), which would naturally select against models that over-predict rare entities to the point of harming overall F1. The critic's evidence test (analyzing precision-recall curves) is a good diagnostic but not required for the primary conclusion. The concern is real but likely mitigated by the validation-based selection process.\n\n**F4 (Severity 2 - MINOR):** The critic suggests the BiLSTM-CRF's character CNN may not capture clinical abbreviations as well as BPE tokenization, potentially biasing the comparison. The methodology acknowledges vocabulary coverage differences and includes \"Vocabulary coverage: OOV rates are compared between transformer and BiLSTM vocabularies\" as a confound control. This control directly addresses the concern. The character CNN is a standard component for BiLSTM-CRF NER systems to handle morphology and OOV terms; claiming it's ineffective without evidence is speculative. The finding identifies a potential difference in tokenization strategies, which is already monitored.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critique misidentifies the experiment's scope. The methodology explicitly tests whether 'a domain-adapted transformer... achieves higher span-level F1 than a BiLSTM-CRF baseline' (Section 8), comparing current best-practice approaches. The BiLSTM-CRF uses standard features for that architecture class (static embeddings + engineered features) with equivalent tuning effort. The hypothesis specifically investigates the transformer's pretraining advantage. The critic's proposed third baseline would answer a different question (architecture vs. pretraining), which the methodology explicitly states is outside scope: 'What the experiment does not establish: Whether the transformer's advantage is due to (a) superior architecture, (b) pretrained clinical vocabulary, (c) larger model capacity, or (d) implicit regularization.'"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The temporal split is a deliberate design choice justified for evaluating real-world generalization. With 200 test reports over 6 months, it provides reasonable statistical power to detect performance differences. The concern about 'silent' formatting shifts is addressed by the methodology's confound controls: 'Template memorization' and 'Section artifacts' diagnostics would detect over-reliance on formatting. If a software update occurred in the test period, the temporal split correctly captures this as a real-world distribution shift the model must handle\u2014which is precisely what the split is designed to test. The critic's proposed random-split comparison would answer whether drift exists, not whether the temporal split is appropriate for the stated objective."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The concern about class weighting causing over-prediction is acknowledged but mitigated by the validation-based model selection. The primary metric (span-level F1) penalizes both false positives and false negatives. Model selection monitors validation span-level F1, which would naturally reject configurations that over-predict rare entities to the point of harming overall F1. While precision-recall analysis (critic's evidence test) would provide additional diagnostics, the current design with careful validation monitoring sufficiently controls for the risk of destabilization from class weights."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The methodology already addresses tokenization differences through explicit confound controls. Section 8 includes 'Vocabulary coverage: OOV rates are compared between transformer and BiLSTM vocabularies' to monitor this exact issue. The character CNN is a standard component for BiLSTM-CRF NER systems to handle morphology and OOV terms; claiming it's ineffective for clinical abbreviations without evidence is speculative. The design includes controls to detect if vocabulary differences materially affect outcomes."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been rebutted with adjusted severities \u2264 3. F1 was rebutted as a scope misunderstanding, F2 and F3 as addressed by design controls, and F4 as already monitored. No material flaws survive rebuttal, and no empirical tests are needed to resolve the critique."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 8,
+        "reasoning": "The defender uses a REBUT-SCOPE argument to avoid the core methodological flaw. While the defender correctly points out that the experiment doesn't aim to *isolate* the cause of the advantage (architecture vs. pretraining), the finding is that the comparison itself is unfair because the baseline is fundamentally handicapped. Comparing a state-of-the-art pretrained model against a frozen-embedding baseline doesn't test 'Transformer vs. BiLSTM-CRF'; it tests 'Modern Pretraining vs. 2014-era Embeddings'. To claim the Transformer is 'better' without controlling for the embedding quality makes the result trivial and the conclusion scientifically weak. The severity adjustment is disproportionate because a scope disclaimer does not resolve the lack of a competitive baseline."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 4,
+        "reasoning": "The defender correctly argues that the temporal split is intended to capture real-world shifts, including formatting changes. However, they fail to address the statistical concern: with only 200 reports in the test set, the signal-to-noise ratio for 'drift' is very low. While the confound controls (template memorization) help detect *why* a model fails, they don't solve the problem of whether the observed performance drop is a systemic shift or just a result of a small, high-variance sample. The severity is reduced because the design intent is sound, but the sample size concern remains."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The defender argues that validation-based model selection will naturally penalize over-prediction. While true in theory, this is a 'black box' defense. It doesn't address the mechanism of *how* the weights are calculated or if they are capped. In NER, inverse frequency weighting often creates a 'precision cliff' for rare classes that can be masked by the dominance of the 'O' class in overall F1. The rebuttal acknowledges the risk but relies on the metric to fix the problem rather than the training mechanism. A residual risk of unstable gradients or extreme precision loss for rare entities remains."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender correctly identifies that OOV rate comparison is already an explicit confound control in Section 8. Since the experiment is designed to monitor and report these differences, the concern that the comparison is biased is mitigated by the fact that the bias will be measured and documented. The argument that the CNN is standard practice is sufficient for a MINOR finding."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "For F1, the critic's challenge mischaracterizes the experiment's scope and fairness. The BiLSTM-CRF baseline is not 'handicapped'\u2014it uses standard, well-established features for that architecture class, and the comparison is precisely between a modern pretrained transformer and a traditional feature-engineered model. This is the intended comparison. I will strengthen the REBUT-SCOPE argument. For F2, the critic's statistical concern about sample size is valid but does not invalidate the temporal split design; the split is appropriate for the objective, and the small test size is a limitation acknowledged in the methodology. I will maintain REBUT-DESIGN but clarify that the design's intent is to test real-world generalization, not to precisely quantify drift magnitude. For F3, the critic's residual risk about class weighting is genuine but not fatal; the validation monitoring and overall F1 metric provide sufficient control. I will maintain REBUT-DESIGN. For F4, the critic ACCEPTed, so I will maintain.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic's challenge asserts the comparison is unfair because the BiLSTM-CRF uses '2014-era embeddings.' This misrepresents the experiment's purpose. The methodology explicitly compares a domain-adapted transformer (a modern best practice) against a BiLSTM-CRF with static embeddings and engineered features (the established best practice for that architecture class). The BiLSTM-CRF is not 'handicapped'; it receives equivalent tuning effort and uses standard, validated features (GloVe/FastText + CNN + POS tags) that are representative of state-of-the-art BiLSTM-CRF systems in the literature. The hypothesis is precisely about whether the transformer's pretraining and architecture provide an advantage over this traditional approach. Adding a third baseline with BERT embeddings would answer a different, mechanistic question (architecture vs. pretraining), which the methodology explicitly states it does not address (Section 8: 'What the experiment does not establish'). The comparison is fair within the defined scope.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic's statistical concern about sample size is acknowledged: with 200 test reports, the signal-to-noise ratio for detecting drift is limited. However, this does not invalidate the temporal split design. The temporal split is a deliberate choice to evaluate real-world generalization under realistic conditions (including potential formatting changes). The methodology's objective is to assess performance under future data, not to precisely quantify the magnitude of drift. The 200-report test set provides reasonable statistical power to detect performance differences between models (the primary comparison), as evidenced by the planned bootstrap confidence intervals. The confound controls (template memorization, section artifacts) help interpret any observed drop. The critic's proposed random-split comparison would answer whether drift exists, but that is a separate question. The temporal split is appropriate for the stated objective.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The critic's concern about inverse frequency weighting causing extreme weights and potential 'precision cliffs' for rare entities is valid as a theoretical risk. However, the design includes multiple controls that mitigate this risk. First, model selection is based on validation span-level F1, which balances precision and recall; a configuration that over-predicts rare entities would harm overall F1 and be rejected. Second, the experiment reports secondary metrics including 'F1 on rare findings' and 'Precision and recall separately,' which will directly reveal any precision collapse for rare classes. Third, the class weights are applied during training, but the final evaluation uses the strict span-level F1 metric, which penalizes false positives. While the critic's proposed precision-recall curve analysis would provide additional diagnostics, the existing validation and evaluation framework sufficiently controls for the risk.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critic ACCEPTed the rebuttal. The methodology's confound control 'Vocabulary coverage: OOV rates are compared between transformer and BiLSTM vocabularies' directly addresses the concern about tokenization differences. The character CNN is a standard component for BiLSTM-CRF systems to handle morphology and OOV terms. The design monitors and reports potential biases.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been rebutted with design or scope arguments, resulting in adjusted severities \u2264 3. No findings were conceded, and no DEFER was required, indicating the methodology's design controls adequately address the raised concerns."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The BiLSTM-CRF baseline is a fair comparison to the Transformer because it uses 'established prior art' (static embeddings + engineered features).",
+        "failure_mechanism": "The Transformer's primary advantage in NER is not just the architecture, but the massive amount of domain-specific knowledge encoded in the pretrained weights (PubMedBERT/SciBERT). The BiLSTM-CRF uses frozen GloVe/FastText embeddings, which are shallow and lack the contextual nuance of a Transformer. By comparing a fine-tuned Transformer against a frozen-embedding BiLSTM, the experiment is actually testing 'Pretrained Contextual Embeddings vs. Static Embeddings' rather than 'Transformer vs. BiLSTM-CRF'. The BiLSTM-CRF is effectively handicapped by the lack of a comparable pretraining scale.",
+        "evidence_test": "Include a third baseline: a BiLSTM-CRF that uses the same clinical BERT embeddings as the Transformer (frozen or fine-tuned) as its input layer. If the Transformer still wins significantly, the architecture is the driver; if the gap closes, the pretraining is the driver.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (Months 1-24 train, 25-30 val, 31-36 test) provides a robust assessment of vocabulary drift and clinical presentation shifts.",
+        "failure_mechanism": "While temporal splits are generally superior, the total labeled sample size is very small (2,000 reports) relative to the 200,000 report corpus. With only 200 reports in the test set, the 'drift' observed may be stochastic noise rather than a systemic temporal shift. Furthermore, if the health system updated its reporting templates or software in Month 31, the model might fail due to a formatting change (a 'silent' shift) rather than a clinical vocabulary shift, which the current evaluation doesn't distinguish.",
+        "evidence_test": "Compare the test set performance against a random stratified split of the same 2,000 reports. If the temporal test set performs significantly worse than the random test set, drift is present. If they are similar, the temporal split is unnecessary/overkill for this sample size.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The use of class weights inversely proportional to label frequency handles rare entities.",
+        "failure_mechanism": "In NER, the 'O' (Outside) class typically dominates the distribution by an order of magnitude. Simple inverse frequency weighting can lead to extreme weights for rare entities (e.g., 'severity'), causing the model to over-predict these entities (high recall, very low precision) and potentially destabilizing the CRF transitions or the Transformer's linear head. This often results in 'noisy' spans that fail the strict span-level F1 requirement.",
+        "evidence_test": "Analyze the Precision-Recall curve specifically for the rare entity types. A sharp drop in precision accompanying the use of class weights would confirm the mechanism of failure.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The BiLSTM-CRF's character-level CNN captures morphology effectively.",
+        "failure_mechanism": "Clinical text often contains highly idiosyncratic abbreviations and typos that are not morphological in nature (e.g., 'L lung' vs 'Left lung'). A CNN with filters 3/4/5 may not capture the specific semantic patterns of clinical shorthand as well as a BPE/WordPiece tokenizer does, potentially biasing the comparison in favor of the Transformer's tokenization strategy.",
+        "evidence_test": "Compare OOV (Out-of-Vocabulary) error rates for the BiLSTM-CRF vs the Transformer specifically on abbreviated terms.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The PoC is well-structured regarding data leakage and temporal splitting, but it contains a fatal flaw in its baseline comparison: it compares a contextually-pretrained Transformer against a statically-embedded BiLSTM, confounding architectural advantages with pretraining advantages. Additionally, the small sample size of the test set may make the 'temporal drift' claims statistically insignificant.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "For F1, the critic's challenge mischaracterizes the experiment's scope and fairness. The BiLSTM-CRF baseline is not 'handicapped'\u2014it uses standard, well-established features for that architecture class, and the comparison is precisely between a modern pretrained transformer and a traditional feature-engineered model. This is the intended comparison. I will strengthen the REBUT-SCOPE argument. For F2, the critic's statistical concern about sample size is valid but does not invalidate the temporal split design; the split is appropriate for the objective, and the small test size is a limitation acknowledged in the methodology. I will maintain REBUT-DESIGN but clarify that the design's intent is to test real-world generalization, not to precisely quantify drift magnitude. For F3, the critic's residual risk about class weighting is genuine but not fatal; the validation monitoring and overall F1 metric provide sufficient control. I will maintain REBUT-DESIGN. For F4, the critic ACCEPTed, so I will maintain.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic's challenge asserts the comparison is unfair because the BiLSTM-CRF uses '2014-era embeddings.' This misrepresents the experiment's purpose. The methodology explicitly compares a domain-adapted transformer (a modern best practice) against a BiLSTM-CRF with static embeddings and engineered features (the established best practice for that architecture class). The BiLSTM-CRF is not 'handicapped'; it receives equivalent tuning effort and uses standard, validated features (GloVe/FastText + CNN + POS tags) that are representative of state-of-the-art BiLSTM-CRF systems in the literature. The hypothesis is precisely about whether the transformer's pretraining and architecture provide an advantage over this traditional approach. Adding a third baseline with BERT embeddings would answer a different, mechanistic question (architecture vs. pretraining), which the methodology explicitly states it does not address (Section 8: 'What the experiment does not establish'). The comparison is fair within the defined scope.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic's statistical concern about sample size is acknowledged: with 200 test reports, the signal-to-noise ratio for detecting drift is limited. However, this does not invalidate the temporal split design. The temporal split is a deliberate choice to evaluate real-world generalization under realistic conditions (including potential formatting changes). The methodology's objective is to assess performance under future data, not to precisely quantify the magnitude of drift. The 200-report test set provides reasonable statistical power to detect performance differences between models (the primary comparison), as evidenced by the planned bootstrap confidence intervals. The confound controls (template memorization, section artifacts) help interpret any observed drop. The critic's proposed random-split comparison would answer whether drift exists, but that is a separate question. The temporal split is appropriate for the stated objective.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The critic's concern about inverse frequency weighting causing extreme weights and potential 'precision cliffs' for rare entities is valid as a theoretical risk. However, the design includes multiple controls that mitigate this risk. First, model selection is based on validation span-level F1, which balances precision and recall; a configuration that over-predicts rare entities would harm overall F1 and be rejected. Second, the experiment reports secondary metrics including 'F1 on rare findings' and 'Precision and recall separately,' which will directly reveal any precision collapse for rare classes. Third, the class weights are applied during training, but the final evaluation uses the strict span-level F1 metric, which penalizes false positives. While the critic's proposed precision-recall curve analysis would provide additional diagnostics, the existing validation and evaluation framework sufficiently controls for the risk.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critic ACCEPTed the rebuttal. The methodology's confound control 'Vocabulary coverage: OOV rates are compared between transformer and BiLSTM vocabularies' directly addresses the concern about tokenization differences. The character CNN is a standard component for BiLSTM-CRF systems to handle morphology and OOV terms. The design monitors and reports potential biases.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been rebutted with design or scope arguments, resulting in adjusted severities \u2264 3. No findings were conceded, and no DEFER was required, indicating the methodology's design controls adequately address the raised concerns."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

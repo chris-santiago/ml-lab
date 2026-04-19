@@ -1,0 +1,234 @@
+{
+  "case_id": "hyp_037_stage4",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "deepseek/deepseek-v3.2",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Preprocessing artifacts (standardization, vocabularies, co-occurrence statistics) are established from the full modeling corpus before training to ensure a consistent feature space.",
+        "failure_mechanism": "This is a classic case of data leakage. By calculating co-occurrence statistics and standardization parameters using the 'full modeling corpus' (which includes the validation and test sets), information from the future (months 13-18) leaks into the training set (months 1-12). In the context of transaction sequences, co-occurrence patterns often shift over time due to seasonality or changing consumer behavior; the model will implicitly 'know' the distribution of the test set, leading to inflated performance metrics that will not hold in production.",
+        "evidence_test": "Re-run the experiment where preprocessing parameters are calculated strictly on the training set (months 1-12) and applied to the validation/test sets. A significant drop in precision at the top 5% would confirm the leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline model (Logistic Regression) serves as a stable reference point to measure the added value of transaction-sequence information.",
+        "failure_mechanism": "The PoC compares a highly non-linear, tuned Gradient Boosted Decision Tree (GBDT) against a simple, untuned Logistic Regression. The observed improvement may be due to the model's ability to capture non-linear interactions between the *baseline* features (e.g., the interaction between tenure and spend) rather than the addition of the *sequence embeddings*. Because the baseline is not a GBDT using only baseline features, the 'added value' of the embeddings is confounded by the 'added value' of the model architecture.",
+        "evidence_test": "Introduce a second baseline: a GBDT trained only on the baseline features, tuned using the same validation process as the proposed model. If the proposed model still outperforms this GBDT, the claim about sequence embeddings is supported.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The proposed model's performance is measured by precision among the top 5% of accounts ranked by predicted churn probability.",
+        "failure_mechanism": "The target label defines churn as closing an account OR 60+ days of inactivity. However, the prediction window is only 30 days. There is a logical gap: if the label requires 60 days of inactivity to be '1', but the evaluation is based on a 30-day horizon, the labels for the test set cannot be fully determined until 60 days after the prediction date. If the '30 days following a prediction date' mentioned in Section 1 is the only window used to observe the label, it is mathematically impossible to observe 60 days of inactivity, meaning the 'inactivity' component of the label is either ignored or the window is misstated.",
+        "evidence_test": "Clarify the label observation window. If the label is observed at T+30, but requires 60 days of inactivity, the label is undefined. Evidence would be a check of the label generation code to see if the observation window is actually T+60 or T+90.",
+        "flaw_category": "silent_misconfig"
+      }
+    ],
+    "summary": "The PoC contains a fatal signal leakage flaw by using the full dataset for preprocessing and a flawed baseline comparison that confounds model architecture with feature utility. Additionally, there is a logical contradiction between the churn label definition (60 days inactivity) and the observation window (30 days).",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "I will analyze each finding in order, referencing the methodology design intent.\n\n**F1 (Severity 9 - FATAL):** The critic claims that establishing preprocessing artifacts (including co-occurrence statistics for embeddings) from the full modeling corpus constitutes data leakage. The methodology states this is done 'before training' to 'keep representation drift from the later time windows from being conflated with model effects.' The design intent is to create a consistent, frozen feature space for a fair comparison across time splits, preventing the model from learning shifting embeddings that could act as a confound. This is a deliberate design choice to isolate the effect of the model, not an oversight. The critic's failure mechanism assumes the goal is to simulate a production retraining pipeline where only past data is available. However, the stated scope is to 'establish whether transaction sequence embeddings improve churn prediction accuracy in this specific issuer's population during the test period.' The methodology explicitly controls for representation drift as a confound. Using the full corpus for embedding initialization is analogous to using a fixed, pre-trained word embedding (like GloVe) on a time-series text corpus; it provides a stable semantic space. The performance comparison is valid because both the proposed and baseline models are evaluated in this identical, frozen feature space. The critic's proposed test would measure a different effect: the cost of re-estimating embeddings on limited data over time. That is a valid concern for production deployment, but it is outside the stated scope of the PoC, which is a controlled, causal test of the feature set's predictive power. Therefore, the finding is based on a misunderstanding of the design's confound control.\n\n**F2 (Severity 7 - FATAL):** The critic claims the improvement may be due to the GBDT architecture's non-linearity rather than the sequence embeddings, because the baseline is a simple, untuned Logistic Regression. The methodology states the baseline is 'kept intentionally simple, using a fixed regularization setting selected a priori rather than a full hyperparameter sweep, so it serves as a stable linear reference point.' The design rationale is clear: the hypothesis is that transaction-sequence information adds value. To test this, you compare a strong model using all features (baseline + sequences) against a simple model using only baseline features. If the complex model wins, the gain could come from either the sequences or the model's ability to find non-linear patterns in the baseline features. The critic is correct that this confounds the two. The methodology does not contain a control for this (e.g., a GBDT trained only on baseline features). Scanning the Confound Controls and Scope sections, there is no explicit rationale for omitting this baseline. Therefore, this is a genuine methodological flaw. The proposed evidence test is exactly what is needed. The flaw is material because it directly challenges the core claim about the value of sequence embeddings.\n\n**F3 (Severity 5 - MATERIAL):** The critic identifies an apparent contradiction in the labeling logic: the target requires 60+ days of inactivity, but the prediction/observation horizon is 30 days. The methodology states: 'an account is labeled as 1 (churned) if it closes or exhibits 60+ consecutive days of inactivity within 30 days following a prediction date.' This is logically impossible as written. To observe 60 days of inactivity, you need a 60-day observation window. The most plausible interpretation is a wording error: the '60+ consecutive days of inactivity' is a condition that must be met *by the end* of a longer observation window (e.g., 90 days), or the '30 days' is incorrect. The methodology's Temporal Split Strategy mentions 'churn labels are observed 30 days after the feature window closes,' which reinforces the 30-day horizon. This inconsistency is a material flaw because it makes the label definition ambiguous and potentially miscalculated. If the labels are wrong, all evaluation metrics are invalid. The design does not contain an explicit control or rationale that resolves this contradiction. The critic's evidence test\u2014checking the label generation code\u2014is the correct next step. This is a silent misconfiguration that must be resolved empirically.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The design explicitly establishes a frozen feature space to control for representation drift as a confound (see Methodology Section 3: 'To keep representation drift... from being conflated with model effects'). Using the full corpus for embedding initialization creates a consistent semantic basis for comparison across time splits, isolating the test to whether sequence *structure* adds signal. This is a deliberate choice for a causal feature evaluation, not leakage for a temporal forecasting task. The critic's proposed test measures a different effect (online embedding adaptation), which is outside the PoC's stated scope of establishing predictive value for the test period."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic is correct. The methodology lacks a necessary control baseline: a GBDT model trained and tuned on baseline features only. Without it, any performance gain of the proposed model could be attributed to the non-linear modeling capacity of GBDT rather than the transaction-sequence embeddings. The Confound Controls and Scope sections do not provide a design rationale for omitting this baseline. This is a material flaw that directly challenges the hypothesis's core claim."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The labeling logic as written is contradictory. The specific experiment to settle this is an inspection of the label generation code/data. A result showing the observation window is actually longer (e.g., 90 days) or the inactivity threshold is lower (e.g., 30 days) would vindicate the design by revealing a documentation error. A result confirming the contradiction would validate the critique and necessitate a re-labeling of the entire dataset, which would change all performance metrics. The design contains no explicit control that resolves this ambiguity, making it unresolvable by argument alone."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "Finding F2 is conceded as a FATAL flaw (adjusted severity 7), and finding F3 is deferred as a MATERIAL unresolved issue (adjusted severity 5). Since at least one FATAL/MATERIAL finding was conceded and remains above adjusted severity 3, the critique wins."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 9,
+        "reasoning": "The defender's rebuttal is a scope disclaimer that fundamentally misunderstands the nature of data leakage. They argue that using the full corpus is a 'deliberate choice' to isolate sequence structure, but in a temporal split, any statistic (co-occurrence, mean, variance) calculated using the test set is a leak. If the 'semantic basis' of the embeddings is informed by patterns that only emerge in months 13-18, the model is effectively cheating by using future knowledge to interpret past sequences. The claim that this is 'outside the PoC's scope' is invalid because the PoC claims to use a temporal split to 'prevent future information leakage' (Section 2). You cannot simultaneously claim to prevent leakage while intentionally leaking the feature space distribution. The severity remains FATAL."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender fully conceded the finding, acknowledging that the lack of a GBDT-baseline confounds the effect of the embeddings with the effect of the model architecture."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 5,
+        "reasoning": "The defender deferred the finding, acknowledging the logical contradiction in the labeling window and the need for code inspection. No counter-argument was made, so the finding stands as a material ambiguity."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "For F1, the critic's challenge mischaracterizes the design's intent and the nature of the leakage. The design's use of the full corpus for embedding initialization is a deliberate, pre-experiment step to define a stable feature vocabulary, analogous to using a fixed dictionary, and does not constitute temporal leakage for the predictive task. I will strengthen the REBUT-DESIGN argument. F2 and F3 were accepted/deferred in R1 and remain unchanged.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The critic misapplies the concept of temporal leakage. The methodology states preprocessing artifacts are 'established once from the full modeling corpus before training and then frozen.' This is a feature engineering design choice to create a consistent, static representation space for the experiment, isolating the test to whether sequence *structure* within that fixed space adds predictive signal. It is not leakage of the target variable. The embeddings are initialized (e.g., via global co-occurrence statistics) to give merchant categories a semantic meaning; this initialization is a one-time, pre-modeling step akin to defining a fixed categorical vocabulary or using a pre-trained word embedding model. The model parameters are still fit *only* on the training window (months 1-12), and the frozen transformation is applied to validation/test sequences. No information about future *target labels* or the specific sequence distributions in the test period is used to train the model. The design's claim to 'prevent future information leakage' refers to the target label and feature values relative to the prediction date, which is upheld. The critic's proposed re-run measures a different effect: online adaptation of the feature space, which is outside the scope of this controlled comparison.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic is correct. The methodology lacks a necessary control baseline: a GBDT model trained and tuned on baseline features only. Without it, any performance gain of the proposed model could be attributed to the non-linear modeling capacity of GBDT rather than the transaction-sequence embeddings. The Confound Controls and Scope sections do not provide a design rationale for omitting this baseline. This is a material flaw that directly challenges the hypothesis's core claim.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The labeling logic as written is contradictory. The specific experiment to settle this is an inspection of the label generation code/data. A result showing the observation window is actually longer (e.g., 90 days) or the inactivity threshold is lower (e.g., 30 days) would vindicate the design by revealing a documentation error. A result confirming the contradiction would validate the critique and necessitate a re-labeling of the entire dataset, which would change all performance metrics. The design contains no explicit control that resolves this ambiguity, making it unresolvable by argument alone.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "One FATAL finding (F2) is conceded and remains high severity, and one MATERIAL finding (F3) is deferred, indicating genuine ambiguity requiring empirical resolution. Therefore, the final outcome is that the experiment requires design adjustments and empirical clarification before a definitive win/loss can be declared."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Preprocessing artifacts (standardization, vocabularies, co-occurrence statistics) are established from the full modeling corpus before training to ensure a consistent feature space.",
+        "failure_mechanism": "This is a classic case of data leakage. By calculating co-occurrence statistics and standardization parameters using the 'full modeling corpus' (which includes the validation and test sets), information from the future (months 13-18) leaks into the training set (months 1-12). In the context of transaction sequences, co-occurrence patterns often shift over time due to seasonality or changing consumer behavior; the model will implicitly 'know' the distribution of the test set, leading to inflated performance metrics that will not hold in production.",
+        "evidence_test": "Re-run the experiment where preprocessing parameters are calculated strictly on the training set (months 1-12) and applied to the validation/test sets. A significant drop in precision at the top 5% would confirm the leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline model (Logistic Regression) serves as a stable reference point to measure the added value of transaction-sequence information.",
+        "failure_mechanism": "The PoC compares a highly non-linear, tuned Gradient Boosted Decision Tree (GBDT) against a simple, untuned Logistic Regression. The observed improvement may be due to the model's ability to capture non-linear interactions between the *baseline* features (e.g., the interaction between tenure and spend) rather than the addition of the *sequence embeddings*. Because the baseline is not a GBDT using only baseline features, the 'added value' of the embeddings is confounded by the 'added value' of the model architecture.",
+        "evidence_test": "Introduce a second baseline: a GBDT trained only on the baseline features, tuned using the same validation process as the proposed model. If the proposed model still outperforms this GBDT, the claim about sequence embeddings is supported.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The proposed model's performance is measured by precision among the top 5% of accounts ranked by predicted churn probability.",
+        "failure_mechanism": "The target label defines churn as closing an account OR 60+ days of inactivity. However, the prediction window is only 30 days. There is a logical gap: if the label requires 60 days of inactivity to be '1', but the evaluation is based on a 30-day horizon, the labels for the test set cannot be fully determined until 60 days after the prediction date. If the '30 days following a prediction date' mentioned in Section 1 is the only window used to observe the label, it is mathematically impossible to observe 60 days of inactivity, meaning the 'inactivity' component of the label is either ignored or the window is misstated.",
+        "evidence_test": "Clarify the label observation window. If the label is observed at T+30, but requires 60 days of inactivity, the label is undefined. Evidence would be a check of the label generation code to see if the observation window is actually T+60 or T+90.",
+        "flaw_category": "silent_misconfig"
+      }
+    ],
+    "summary": "The PoC contains a fatal signal leakage flaw by using the full dataset for preprocessing and a flawed baseline comparison that confounds model architecture with feature utility. Additionally, there is a logical contradiction between the churn label definition (60 days inactivity) and the observation window (30 days).",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "For F1, the critic's challenge mischaracterizes the design's intent and the nature of the leakage. The design's use of the full corpus for embedding initialization is a deliberate, pre-experiment step to define a stable feature vocabulary, analogous to using a fixed dictionary, and does not constitute temporal leakage for the predictive task. I will strengthen the REBUT-DESIGN argument. F2 and F3 were accepted/deferred in R1 and remain unchanged.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The critic misapplies the concept of temporal leakage. The methodology states preprocessing artifacts are 'established once from the full modeling corpus before training and then frozen.' This is a feature engineering design choice to create a consistent, static representation space for the experiment, isolating the test to whether sequence *structure* within that fixed space adds predictive signal. It is not leakage of the target variable. The embeddings are initialized (e.g., via global co-occurrence statistics) to give merchant categories a semantic meaning; this initialization is a one-time, pre-modeling step akin to defining a fixed categorical vocabulary or using a pre-trained word embedding model. The model parameters are still fit *only* on the training window (months 1-12), and the frozen transformation is applied to validation/test sequences. No information about future *target labels* or the specific sequence distributions in the test period is used to train the model. The design's claim to 'prevent future information leakage' refers to the target label and feature values relative to the prediction date, which is upheld. The critic's proposed re-run measures a different effect: online adaptation of the feature space, which is outside the scope of this controlled comparison.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic is correct. The methodology lacks a necessary control baseline: a GBDT model trained and tuned on baseline features only. Without it, any performance gain of the proposed model could be attributed to the non-linear modeling capacity of GBDT rather than the transaction-sequence embeddings. The Confound Controls and Scope sections do not provide a design rationale for omitting this baseline. This is a material flaw that directly challenges the hypothesis's core claim.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The labeling logic as written is contradictory. The specific experiment to settle this is an inspection of the label generation code/data. A result showing the observation window is actually longer (e.g., 90 days) or the inactivity threshold is lower (e.g., 30 days) would vindicate the design by revealing a documentation error. A result confirming the contradiction would validate the critique and necessitate a re-labeling of the entire dataset, which would change all performance metrics. The design contains no explicit control that resolves this ambiguity, making it unresolvable by argument alone.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "One FATAL finding (F2) is conceded and remains high severity, and one MATERIAL finding (F3) is deferred, indicating genuine ambiguity requiring empirical resolution. Therefore, the final outcome is that the experiment requires design adjustments and empirical clarification before a definitive win/loss can be declared."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

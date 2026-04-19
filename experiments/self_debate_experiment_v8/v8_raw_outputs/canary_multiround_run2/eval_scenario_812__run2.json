@@ -1,0 +1,470 @@
+{
+  "case_id": "eval_scenario_812",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "nvidia/nemotron-3-super-120b-a12b",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The evaluation design ensures that the Transformer model's performance on the held-out cross-site test set is a valid measure of cross-site generalization.",
+        "failure_mechanism": "The cross-site test set is held out by hospital system, but the experiment does not control for or document the linguistic and stylistic variation across sites (e.g., report templates, terminology, abbreviation conventions, or local clinical workflows). If the held-out site's reports are systematically easier (e.g., simpler language, more explicit follow-up phrases) or harder (e.g., more negation, more conditional language) than the training sites, the cross-site test result conflates generalization ability with dataset shift severity. The design assumes that any performance drop on the cross-site test is attributable to the model's inability to generalize, rather than to a mismatch in difficulty or annotation style.",
+        "evidence_test": "Compare the held-out cross-site test set to the training sites using a domain similarity metric (e.g., Jensen-Shannon divergence between TF-IDF unigram distributions, or perplexity under a language model trained on training data). If the cross-site set is significantly more distant from the training data than the in-distribution test set, then a performance drop cannot be interpreted solely as a failure of generalization. Additionally, stratify the cross-site results by linguistic complexity (e.g., fraction of negations, conditionals, or rare abbreviations) and report performance within each stratum.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Report-level recall is an appropriate metric for the clinical screening goal of not missing reports with follow-up recommendations.",
+        "failure_mechanism": "Report-level recall only requires the model to detect at least one correct span in a report to count as a success, even if the report contains multiple follow-up recommendations. This metric is insensitive to false negatives on secondary recommendations within the same report. In a registry creation context, missing even one follow-up recommendation per report can lead to under-capture of clinical action, especially if the missed recommendation is the primary or most urgent one. The metric also does not penalize over-prediction (false positives), which can inflate apparent recall while increasing downstream workload. The design assumes that recall at the report level is sufficient to ensure clinical utility, but it does not reflect the cost of false positives or the risk of missing multiple recommendations.",
+        "evidence_test": "Compute per-report precision and recall for the number of correctly identified follow-up recommendations (not just binary report-level recall). Report the fraction of reports where the model misses all true follow-up recommendations (false negatives) and the fraction where it predicts at least one false positive. Additionally, simulate registry creation by aggregating predicted spans and comparing to the full set of gold-standard spans per report; report the fraction of true recommendations missed and the fraction of false recommendations added.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The CRF baseline with TF-IDF + hand-engineered features is a fair and competitive baseline for follow-up recommendation extraction.",
+        "failure_mechanism": "TF-IDF features are computed on unigrams and bigrams, which may not capture the semantic context necessary to distinguish follow-up recommendations from negations or conditionals (e.g., 'no follow-up needed' vs. 'follow-up recommended'). The hand-engineered features (e.g., presence of keywords like 'repeat') are brittle and may not generalize across sites with different terminology or report templates. The CRF baseline may also struggle with long-range dependencies or discourse-level patterns (e.g., 'The lesion is stable. Recommend follow-up in 6 months.'). The design assumes that the CRF baseline is sufficiently strong to serve as a meaningful lower bound, but it may be fundamentally mismatched to the task's linguistic complexity.",
+        "evidence_test": "Run an ablation where the Transformer is restricted to the same token-level features as the CRF (i.e., TF-IDF + hand-engineered features) and compare its performance to the full Transformer. If the restricted Transformer still outperforms the CRF, then the CRF's limitations are due to feature design, not capacity. Additionally, evaluate the CRF's performance on negated and conditional sentences using a curated subset of the test data; if recall on these subsets is <50%, the baseline is not competitive.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The annotation guidelines and inter-rater agreement (Cohen's kappa \u22650.75) ensure that the labels are reliable and consistent across sites and time periods.",
+        "failure_mechanism": "Inter-rater agreement is assessed on a held-out gold-standard sample of 200 reports, but the annotation guidelines are version-locked only before data splitting. If the guidelines evolve during the labeling of the full dataset (e.g., to clarify ambiguous cases like 'incidental finding follow-up'), the labels in the training set may differ systematically from those in the test set. This violates the assumption that the label distribution is stable across splits. The design does not document or control for annotation drift over time or across sites.",
+        "evidence_test": "Re-annotate a random sample of 200 reports from the training set using the finalized annotation guidelines and compute Cohen's kappa against the original labels. If kappa <0.75, annotation drift is present. Additionally, compare the distribution of entity types and negation/conditional rates across splits; significant differences suggest label drift.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (oldest 60% for training, most recent 20% for in-distribution test) prevents leakage from reporting trends or template evolution.",
+        "failure_mechanism": "The temporal split assumes that the distribution of follow-up recommendations and report templates is stationary over time. However, clinical guidelines, radiology report templates, and local practices can change (e.g., introduction of new follow-up protocols, adoption of structured reporting). If the most recent 20% of reports include novel follow-up phrases or templates not seen in the training data, the in-distribution test set may reflect dataset shift rather than temporal generalization. The design does not include a mechanism to detect or control for such shifts.",
+        "evidence_test": "Compute the Jensen-Shannon divergence between TF-IDF unigram distributions of the training set and the in-distribution test set. If divergence >0.1, significant temporal shift is present. Additionally, manually inspect a random sample of reports from the in-distribution test set for novel follow-up phrases or templates not present in the training set.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The primary metric (report-level recall) and secondary metrics (per-entity F1, span-level precision/recall) are sufficient to characterize the model's clinical utility.",
+        "failure_mechanism": "The metrics do not account for the clinical severity or urgency of missed follow-up recommendations (e.g., missing a 'repeat in 1 month' is worse than missing a 'follow-up as needed'). They also do not reflect the cost of false positives, which can overwhelm downstream workflows. The design assumes that all follow-up recommendations are equally important and that false positives are harmless, but this may not hold in practice.",
+        "evidence_test": "Augment the evaluation with a severity-weighted metric: assign a weight to each follow-up recommendation based on its urgency (e.g., 1.0 for 'repeat in 1 month', 0.5 for 'follow-up as needed') and compute a weighted F1 score. Additionally, report the fraction of false positives that are clinically plausible (e.g., 'repeat imaging' predicted where no follow-up was recommended) vs. implausible.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The tokenizer vocabulary is fit on the training set only and frozen for validation and test, preventing vocabulary leakage.",
+        "failure_mechanism": "While the tokenizer vocabulary is fit on the training set, the Transformer's subword tokenization may still produce different token frequencies or representations on the test set due to domain shift (e.g., rare medical terms or abbreviations). The design assumes that vocabulary fitting prevents any form of leakage, but it does not account for the impact of domain shift on tokenization behavior.",
+        "evidence_test": "Compute the out-of-vocabulary rate and the fraction of subword tokens that are rare (<0.1% frequency) in the training set but common in the test set. If these rates are >5% on the cross-site test set, the tokenizer's behavior may be compromised.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC has three fatal flaws: (1) the cross-site test set may conflate generalization with dataset shift, (2) report-level recall is insensitive to clinically important false negatives and false positives, and (3) the CRF baseline may be fundamentally mismatched to the task's linguistic complexity. These flaws invalidate the central claims about cross-site generalization and clinical utility. Material flaws include unverified annotation drift and temporal shift assumptions. The PoC requires a redesign of metrics, baselines, and evaluation controls before it can produce interpretable results.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "The critique raises seven concerns about the experimental design. F1 questions whether the held-out cross-site test truly measures generalization, arguing that uncontrolled linguistic/stylistic variation across sites could confound results. The design, however, includes several controls: out-of-vocabulary (OOV) rates are documented for each split, character 4-gram similarity is computed to flag template leakage, and negation/conditional language is explicitly documented to account for linguistic complexity. These measures allow post\u2011hoc assessment of site\u2011specific difficulty, weakening the claim of a missing control. F2 challenges report\u2011level recall as insensitive to secondary missed recommendations and false positives. The protocol already reports span\u2011level precision/recall, per\u2011entity F1, and span\u2011level micro\u2011averaged F1, which directly capture false positives and missed spans, addressing the critic\u2019s point. F3 doubts the competitiveness of the TF\u2011IDF+CRF baseline. The design contains a representation\u2011confound ablation that runs the Transformer with CRF\u2011compatible token\u2011level features, enabling a direct test of whether the CRF\u2019s limitations stem from feature design rather than capacity. F4 warns of annotation drift because guidelines are version\u2011locked only before splitting. The text states that guidelines are finalized and version\u2011locked before data splitting to prevent label leakage, and dual\u2011annotation of 5% of each split will be used to monitor inter\u2011rater agreement and detect any drift, directly countering the concern. F5 argues that the temporal split assumes stationarity and may miss novel follow\u2011up phrases in the recent 20%. The design\u2019s confound controls include template\u2011similarity checks and OOV\u2011rate monitoring, which can detect distribution shifts, and the in\u2011distribution test set itself measures temporal generalization, providing a mechanism to spot non\u2011stationarity. F6 claims the metrics ignore clinical severity/urgency and false\u2011positive costs. While true that no severity\u2011weighted metric is included, the experiment\u2019s scope is to establish whether the Transformer achieves higher report\u2011level recall than the CRF and to characterize extraction fidelity via secondary metrics; severity weighting pertains to downstream utility studies, which are explicitly outside the stated scope. F7 asserts that fitting the tokenizer vocabulary on the training set does not mitigate domain\u2011shift effects on tokenization. The protocol documents OOV rates for each split, allowing detection of shifts in tokenization behavior, thus addressing the concern. Overall, each critique either misstates the existing controls, concerns aspects outside the experiment\u2019s scope, or is mitigated by explicit design elements.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 3,
+        "justification": "The critic claims the design lacks control for linguistic/stylistic variation across sites. However, the methodology documents out-of-vocabulary rates for each split, computes character 4-gram similarity to flag template leakage, and explicitly records negation and conditional language to account for linguistic complexity. These measures provide empirical checks on site\u2011specific difficulty, contradicting the claim of absent controls."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic argues report\u2011level recall ignores false positives and secondary missed recommendations. The evaluation plan includes span\u2011level precision and recall, per\u2011entity\u2011type F1, and span\u2011level micro\u2011averaged F1, which directly quantify false positives and missed spans. Thus the design does address the critic\u2019s concerns via secondary metrics."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The critic suggests the TF\u2011IDF+CRF baseline may be uncompetitive due to limited semantic context and brittle features. The protocol contains a representation\u2011confound ablation: running the Transformer with CRF\u2011compatible token\u2011level features to isolate the benefit of representation. This ablation directly tests whether the CRF\u2019s performance gap stems from feature design, providing empirical evidence to evaluate the baseline\u2019s competitiveness."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The critic warns that annotation guidelines might evolve during labeling, causing drift across splits. The text states that guidelines are finalized and version\u2011locked before data splitting to prevent label leakage, and dual\u2011annotation of 5% of each split will be performed to monitor inter\u2011rater agreement and detect any drift. These actions directly prevent and monitor guideline evolution, nullifying the concern."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic contends the temporal split assumes stationarity and may miss novel follow\u2011up phrases in the recent 20%. The design includes confound controls that compute character 4\u2011gram similarity between train and test sets and document out\u2011of\u2011vocabulary rates to detect distribution shifts, and the in\u2011distribution test set itself measures temporal generalization. These mechanisms provide explicit checks for non\u2011stationarity, contradicting the claim of absent controls."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The critic argues the metrics ignore clinical severity/urgency and false\u2011positive costs. The experiment\u2019s scope, as stated in Section\u202f7, is to determine whether the Transformer achieves higher report\u2011level recall than the CRF and to characterize extraction fidelity via secondary metrics. Severity\u2011weighted evaluation and utility\u2011focused analyses are explicitly noted as outside this scope (requiring downstream user studies). Hence the concern pertains to a different context, not the present experimental goals."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The critic claims fitting the tokenizer vocabulary on the training set does not account for domain\u2011shift effects on tokenization. The methodology specifies that out\u2011of\u2011vocabulary rates will be documented for each dataset split to detect distribution shift, thereby monitoring any impact of domain shift on tokenization behavior. This directly addresses the critic\u2019s concern."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been rebutted with sufficient adjustments to bring each adjusted severity to 3 or lower, satisfying the EXONERATE condition. Consequently, the defense prevails and no empirical test is required."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The rebuttal cites out-of-vocabulary rates, character 4-gram similarity, and negation/conditional language tracking as controls for linguistic/stylistic variation. However, these measures are diagnostic tools for detecting shift\u2014they do not *control* for or *adjust* the impact of site-specific linguistic difficulty on the cross-site generalization metric. The failure mechanism is that performance drops on the cross-site test could reflect dataset shift severity rather than model generalization. The rebuttal does not provide a mechanism to disentangle these effects (e.g., stratifying results by linguistic complexity or adjusting for divergence in distributions). Thus, the rebuttal is generic and does not resolve the core concern."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The rebuttal correctly points to secondary metrics (span-level precision/recall, per-entity F1, micro-averaged F1) that directly quantify false positives and missed spans. These metrics address the failure mechanism by providing a more granular view of model performance than report-level recall alone. The concern is fully resolved."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 2,
+        "reasoning": "The rebuttal cites the representation-confound ablation (Transformer with CRF-compatible features) as a direct test of the baseline's competitiveness. This ablation isolates whether the CRF's limitations stem from feature design or capacity, directly addressing the failure mechanism. The concern is fully resolved."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The rebuttal cites version-locked annotation guidelines and dual-annotation of 5% of each split to monitor drift, which directly addresses the risk of annotation drift across splits. The concern is fully resolved."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 3,
+        "reasoning": "The rebuttal cites confound controls (character 4-gram similarity, out-of-vocabulary rates) and the in-distribution test set as measures of temporal shift. However, these are diagnostic tools, not controls for non-stationarity. The failure mechanism is that the in-distribution test set may reflect dataset shift (novel phrases/templates) rather than temporal generalization. The rebuttal does not provide a mechanism to adjust for or mitigate this shift (e.g., reweighting, stratification, or explicit modeling of temporal trends). Thus, the rebuttal is generic and does not resolve the core concern."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal correctly invokes the experiment's stated scope (Section 7), which explicitly excludes severity-weighted metrics and utility-focused analyses. The concern is outside the scope of the experiment and thus validly conceded."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 2,
+        "reasoning": "The rebuttal cites documentation of out-of-vocabulary rates to monitor tokenization behavior under domain shift. This addresses the concern partially by providing a diagnostic tool, but it does not *control* for or *mitigate* the impact of domain shift on tokenization (e.g., adjusting tokenization strategies or retraining the tokenizer). The residual issue is that tokenization behavior may still degrade silently, affecting performance without being detected by OOV rates alone."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "We accept the challengers' updates for F2, F3, F4, and F6, as their concerns were fully addressed by our original rebuttals. For F1, F5, and F7, we find the challenges raise valid points about diagnostic versus controlling measures, but the design provides sufficient post\u2011hoc analyses (per\u2011site performance, linguistic/token\u2011level diagnostics) to disentangle the confounding factors. Therefore we strengthen our original rebuttals for those three findings rather than conceding or deferring.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 3,
+        "justification": "The challenger argues that our diagnostics (OOV rates, 4\u2011gram similarity, negation/conditional tracking) merely detect shift but do not control for its impact on the cross\u2011site generalization metric. However, the design also records per\u2011site F1 and explicitly documents negation and conditional language in the label definition. These enable post\u2011hoc stratification: we can compare Transformer vs CRF performance within strata of high/low negation, high/low conditional usage, or high/low template similarity. If the Transformer\u2019s advantage persists across strata, the performance gap reflects genuine generalization rather than differential difficulty. Thus the design provides the necessary controls to isolate the effect of distribution shift.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The challenger accepted our original rebuttal: secondary metrics (span\u2011level precision/recall, per\u2011entity F1, micro\u2011averaged F1) directly quantify false positives and missed spans, addressing the concern that report\u2011level recall ignores these aspects.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The challenger accepted our original rebuttal: the representation\u2011confound ablation (Transformer with CRF\u2011compatible features) isolates whether the performance gap stems from feature design or capacity, directly testing the competitiveness of the CRF baseline.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The challenger accepted our original rebuttal: version\u2011locked annotation guidelines before data splitting and dual\u2011annotation of 5% of each split to monitor inter\u2011rater agreement directly prevent and detect annotation drift, resolving the concern about evolving guidelines.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The challenger claims our diagnostics (4\u2011gram similarity, OOV rates, in\u2011distribution test) are merely observational and do not control for non\u2011stationarity. However, these measures let us test whether temporal shifts affect both models equally. By comparing Transformer and CRF performance on the in\u2011distribution test and checking whether any performance drop correlates with rising OOV or similarity scores, we can determine if the observed gap is due to a genuine generalization advantage or merely to temporal shift. If the Transformer still outperforms after accounting for shift, the conclusion of generalization holds.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The challenger accepted our original rebuttal: the experiment\u2019s scope (Section\u202f7) is limited to establishing whether the Transformer achieves higher report\u2011level recall than the CRF and characterizing extraction fidelity via the listed secondary metrics. Severity\u2011weighted evaluation and utility\u2011focused analyses are explicitly noted as outside this scope, so the concern does not apply to the present goals.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The challenger finds our documentation of OOV rates only partially addresses tokenization\u2011shift concerns because it does not mitigate the impact. The design also computes character\u20114\u2011gram similarity to detect token\u2011level shifts and reports per\u2011site performance, allowing us to examine whether performance drops correlate with rising similarity or OOV rates. If performance degradation is not linked to these tokenization diagnostics, we can infer that tokenization shift is not driving the results. Thus the design provides the needed controls to rule out tokenization as a confounder.",
+        "r2_challenge_response": "STRENGTHENED"
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have adjusted severities \u22643, meaning no remaining fatal or material concerns after our rebuttals; thus the defense prevails."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The evaluation design ensures that the Transformer model's performance on the held-out cross-site test set is a valid measure of cross-site generalization.",
+        "failure_mechanism": "The cross-site test set is held out by hospital system, but the experiment does not control for or document the linguistic and stylistic variation across sites (e.g., report templates, terminology, abbreviation conventions, or local clinical workflows). If the held-out site's reports are systematically easier (e.g., simpler language, more explicit follow-up phrases) or harder (e.g., more negation, more conditional language) than the training sites, the cross-site test result conflates generalization ability with dataset shift severity. The design assumes that any performance drop on the cross-site test is attributable to the model's inability to generalize, rather than to a mismatch in difficulty or annotation style.",
+        "evidence_test": "Compare the held-out cross-site test set to the training sites using a domain similarity metric (e.g., Jensen-Shannon divergence between TF-IDF unigram distributions, or perplexity under a language model trained on training data). If the cross-site set is significantly more distant from the training data than the in-distribution test set, then a performance drop cannot be interpreted solely as a failure of generalization. Additionally, stratify the cross-site results by linguistic complexity (e.g., fraction of negations, conditionals, or rare abbreviations) and report performance within each stratum.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Report-level recall is an appropriate metric for the clinical screening goal of not missing reports with follow-up recommendations.",
+        "failure_mechanism": "Report-level recall only requires the model to detect at least one correct span in a report to count as a success, even if the report contains multiple follow-up recommendations. This metric is insensitive to false negatives on secondary recommendations within the same report. In a registry creation context, missing even one follow-up recommendation per report can lead to under-capture of clinical action, especially if the missed recommendation is the primary or most urgent one. The metric also does not penalize over-prediction (false positives), which can inflate apparent recall while increasing downstream workload. The design assumes that recall at the report level is sufficient to ensure clinical utility, but it does not reflect the cost of false positives or the risk of missing multiple recommendations.",
+        "evidence_test": "Compute per-report precision and recall for the number of correctly identified follow-up recommendations (not just binary report-level recall). Report the fraction of reports where the model misses all true follow-up recommendations (false negatives) and the fraction where it predicts at least one false positive. Additionally, simulate registry creation by aggregating predicted spans and comparing to the full set of gold-standard spans per report; report the fraction of true recommendations missed and the fraction of false recommendations added.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The CRF baseline with TF-IDF + hand-engineered features is a fair and competitive baseline for follow-up recommendation extraction.",
+        "failure_mechanism": "TF-IDF features are computed on unigrams and bigrams, which may not capture the semantic context necessary to distinguish follow-up recommendations from negations or conditionals (e.g., 'no follow-up needed' vs. 'follow-up recommended'). The hand-engineered features (e.g., presence of keywords like 'repeat') are brittle and may not generalize across sites with different terminology or report templates. The CRF baseline may also struggle with long-range dependencies or discourse-level patterns (e.g., 'The lesion is stable. Recommend follow-up in 6 months.'). The design assumes that the CRF baseline is sufficiently strong to serve as a meaningful lower bound, but it may be fundamentally mismatched to the task's linguistic complexity.",
+        "evidence_test": "Run an ablation where the Transformer is restricted to the same token-level features as the CRF (i.e., TF-IDF + hand-engineered features) and compare its performance to the full Transformer. If the restricted Transformer still outperforms the CRF, then the CRF's limitations are due to feature design, not capacity. Additionally, evaluate the CRF's performance on negated and conditional sentences using a curated subset of the test data; if recall on these subsets is <50%, the baseline is not competitive.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The annotation guidelines and inter-rater agreement (Cohen's kappa \u22650.75) ensure that the labels are reliable and consistent across sites and time periods.",
+        "failure_mechanism": "Inter-rater agreement is assessed on a held-out gold-standard sample of 200 reports, but the annotation guidelines are version-locked only before data splitting. If the guidelines evolve during the labeling of the full dataset (e.g., to clarify ambiguous cases like 'incidental finding follow-up'), the labels in the training set may differ systematically from those in the test set. This violates the assumption that the label distribution is stable across splits. The design does not document or control for annotation drift over time or across sites.",
+        "evidence_test": "Re-annotate a random sample of 200 reports from the training set using the finalized annotation guidelines and compute Cohen's kappa against the original labels. If kappa <0.75, annotation drift is present. Additionally, compare the distribution of entity types and negation/conditional rates across splits; significant differences suggest label drift.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (oldest 60% for training, most recent 20% for in-distribution test) prevents leakage from reporting trends or template evolution.",
+        "failure_mechanism": "The temporal split assumes that the distribution of follow-up recommendations and report templates is stationary over time. However, clinical guidelines, radiology report templates, and local practices can change (e.g., introduction of new follow-up protocols, adoption of structured reporting). If the most recent 20% of reports include novel follow-up phrases or templates not seen in the training data, the in-distribution test set may reflect dataset shift rather than temporal generalization. The design does not include a mechanism to detect or control for such shifts.",
+        "evidence_test": "Compute the Jensen-Shannon divergence between TF-IDF unigram distributions of the training set and the in-distribution test set. If divergence >0.1, significant temporal shift is present. Additionally, manually inspect a random sample of reports from the in-distribution test set for novel follow-up phrases or templates not present in the training set.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The primary metric (report-level recall) and secondary metrics (per-entity F1, span-level precision/recall) are sufficient to characterize the model's clinical utility.",
+        "failure_mechanism": "The metrics do not account for the clinical severity or urgency of missed follow-up recommendations (e.g., missing a 'repeat in 1 month' is worse than missing a 'follow-up as needed'). They also do not reflect the cost of false positives, which can overwhelm downstream workflows. The design assumes that all follow-up recommendations are equally important and that false positives are harmless, but this may not hold in practice.",
+        "evidence_test": "Augment the evaluation with a severity-weighted metric: assign a weight to each follow-up recommendation based on its urgency (e.g., 1.0 for 'repeat in 1 month', 0.5 for 'follow-up as needed') and compute a weighted F1 score. Additionally, report the fraction of false positives that are clinically plausible (e.g., 'repeat imaging' predicted where no follow-up was recommended) vs. implausible.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The tokenizer vocabulary is fit on the training set only and frozen for validation and test, preventing vocabulary leakage.",
+        "failure_mechanism": "While the tokenizer vocabulary is fit on the training set, the Transformer's subword tokenization may still produce different token frequencies or representations on the test set due to domain shift (e.g., rare medical terms or abbreviations). The design assumes that vocabulary fitting prevents any form of leakage, but it does not account for the impact of domain shift on tokenization behavior.",
+        "evidence_test": "Compute the out-of-vocabulary rate and the fraction of subword tokens that are rare (<0.1% frequency) in the training set but common in the test set. If these rates are >5% on the cross-site test set, the tokenizer's behavior may be compromised.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC has three fatal flaws: (1) the cross-site test set may conflate generalization with dataset shift, (2) report-level recall is insensitive to clinically important false negatives and false positives, and (3) the CRF baseline may be fundamentally mismatched to the task's linguistic complexity. These flaws invalidate the central claims about cross-site generalization and clinical utility. Material flaws include unverified annotation drift and temporal shift assumptions. The PoC requires a redesign of metrics, baselines, and evaluation controls before it can produce interpretable results.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "We accept the challengers' updates for F2, F3, F4, and F6, as their concerns were fully addressed by our original rebuttals. For F1, F5, and F7, we find the challenges raise valid points about diagnostic versus controlling measures, but the design provides sufficient post\u2011hoc analyses (per\u2011site performance, linguistic/token\u2011level diagnostics) to disentangle the confounding factors. Therefore we strengthen our original rebuttals for those three findings rather than conceding or deferring.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 3,
+        "justification": "The challenger argues that our diagnostics (OOV rates, 4\u2011gram similarity, negation/conditional tracking) merely detect shift but do not control for its impact on the cross\u2011site generalization metric. However, the design also records per\u2011site F1 and explicitly documents negation and conditional language in the label definition. These enable post\u2011hoc stratification: we can compare Transformer vs CRF performance within strata of high/low negation, high/low conditional usage, or high/low template similarity. If the Transformer\u2019s advantage persists across strata, the performance gap reflects genuine generalization rather than differential difficulty. Thus the design provides the necessary controls to isolate the effect of distribution shift.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The challenger accepted our original rebuttal: secondary metrics (span\u2011level precision/recall, per\u2011entity F1, micro\u2011averaged F1) directly quantify false positives and missed spans, addressing the concern that report\u2011level recall ignores these aspects.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The challenger accepted our original rebuttal: the representation\u2011confound ablation (Transformer with CRF\u2011compatible features) isolates whether the performance gap stems from feature design or capacity, directly testing the competitiveness of the CRF baseline.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The challenger accepted our original rebuttal: version\u2011locked annotation guidelines before data splitting and dual\u2011annotation of 5% of each split to monitor inter\u2011rater agreement directly prevent and detect annotation drift, resolving the concern about evolving guidelines.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The challenger claims our diagnostics (4\u2011gram similarity, OOV rates, in\u2011distribution test) are merely observational and do not control for non\u2011stationarity. However, these measures let us test whether temporal shifts affect both models equally. By comparing Transformer and CRF performance on the in\u2011distribution test and checking whether any performance drop correlates with rising OOV or similarity scores, we can determine if the observed gap is due to a genuine generalization advantage or merely to temporal shift. If the Transformer still outperforms after accounting for shift, the conclusion of generalization holds.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The challenger accepted our original rebuttal: the experiment\u2019s scope (Section\u202f7) is limited to establishing whether the Transformer achieves higher report\u2011level recall than the CRF and characterizing extraction fidelity via the listed secondary metrics. Severity\u2011weighted evaluation and utility\u2011focused analyses are explicitly noted as outside this scope, so the concern does not apply to the present goals.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The challenger finds our documentation of OOV rates only partially addresses tokenization\u2011shift concerns because it does not mitigate the impact. The design also computes character\u20114\u2011gram similarity to detect token\u2011level shifts and reports per\u2011site performance, allowing us to examine whether performance drops correlate with rising similarity or OOV rates. If performance degradation is not linked to these tokenization diagnostics, we can infer that tokenization shift is not driving the results. Thus the design provides the needed controls to rule out tokenization as a confounder.",
+        "r2_challenge_response": "STRENGTHENED"
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have adjusted severities \u22643, meaning no remaining fatal or material concerns after our rebuttals; thus the defense prevails."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

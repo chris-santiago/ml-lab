@@ -1,0 +1,293 @@
+{
+  "case_id": "eval_scenario_813",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Span-level F1 can be correctly computed for the Transformer model despite subword tokenization producing multiple tokens per word.",
+        "failure_mechanism": "Clinical BERT tokenizers split words into subword pieces, each receiving a BIO label prediction; without explicit post-processing to collapse subwords to word-level spans (e.g., assigning the first subword's label to the full word and aligning boundaries), predicted spans will have fragmented or shifted boundaries and types compared to gold word-level spans, systematically deflating Transformer span F1 relative to the word-level BiLSTM-CRF.",
+        "evidence_test": "Document the subword-to-word prediction aggregation rule (e.g., 'first subword label propagates, others ignored'); manually verify alignment on 50 test spans; compute span F1 discrepancy when using naive token-level vs. collapsed word-level predictions.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Transformer preprocessing preserves all entities within the default max sequence length (512 tokens).",
+        "failure_mechanism": "Radiology reports frequently exceed 512 tokens after tokenization (especially CT/MRI with detailed findings/impression); standard BERT truncation discards tail-end content containing entities (e.g., final impressions or negations), while BiLSTM-CRF processes full reports without limit, creating an unfair penalty to Transformer performance and confounding architecture comparison.",
+        "evidence_test": "Report pre- and post-tokenization length statistics (mean, median, max, % >512 tokens) per split/modality; measure span F1 on truncated vs. full-text (sliding window or longformer-style) for Transformer on a held-out sample.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Validation (200 reports) and test (200 reports) sets provide sufficiently precise estimates for hyperparameter selection, early stopping, and final conclusions, including secondary metrics on rare entities/subgroups.",
+        "failure_mechanism": "200 reports yield sparse gold spans for rare entities (bottom 20% frequency), negated mentions, or subgroups (e.g., MRI ~30 reports, yielding potentially <20 rare spans); high Monte Carlo variance causes unstable validation signals (noisy optima selection) and wide bootstrap CIs (>10% width), weakening claims of Transformer superiority on targeted hard cases.",
+        "evidence_test": "Report exact gold span counts per entity type, rarity bin, negation status, modality, and section in val/test sets; compute bootstrap CI widths for primary/secondary F1s; perform 5-fold temporal CV on train+val to check metric stability.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Labeled splits temporally represent the underlying corpus distributions without selection bias.",
+        "failure_mechanism": "The 2,000-report labeled sample is stratified by modality/length/clinical context but not explicitly by time period; non-uniform temporal sampling (e.g., oversampling recent reports for annotation convenience) imbalances split sizes/content (e.g., train underrepresents late-period vocabulary), amplifying artificial 'shift' and invalidating temporal robustness claims.",
+        "evidence_test": "Report labeled sample date distribution vs. raw 200k corpus (e.g., % reports per month bucket); confirm post-split modality/length/section distributions match raw corpus time buckets exactly.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The design has strong controls but critical unaddressed implementation details (subword spans, truncation) that could silently invalidate Transformer metrics, plus unverified statistical power for hard-case claims on small val/test sets.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "I analyzed each finding systematically. F1 concerns subword tokenization causing fragmented spans for Transformer - a legitimate technical issue that standard NER implementations handle via first-subword aggregation. The methodology doesn't explicitly document this, but it's a well-known implementation detail. F2 concerns 512-token truncation - another real issue where long reports lose tail content. F3 concerns validation/test set size for rare entities - the 200-report sets may indeed be underpowered for bottom-20% frequency analysis. F4 concerns temporal sampling bias in the 2,000 labeled sample - the methodology stratifies by modality/length/clinical context but doesn't explicitly mention temporal balance. All findings identify real concerns, but all are addressable with standard solutions or are speculative (F3, F4). The methodology has explicit confound controls addressing template memorization, section artifacts, and vocabulary coverage - these are the right safeguards. The core comparison (Transformer vs BiLSTM-CRF on span-level F1) remains valid if subword aggregation and truncation are handled properly in implementation.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "Subword aggregation is a standard implementation detail in BERT-based NER, not a design flaw. The 'first subword wins' rule (assigning the label of the first subword token to the complete word) is the dominant approach in clinical NER literature. The methodology's span-level definition ('contiguous sequence of tokens with the same entity type, with boundaries marked by BIO transitions') implicitly requires aggregation - this is an implementation specification, not a hypothesis design flaw. The critic's 'evidence_test' asks for documentation that would appear in implementation code, not in the experiment design document. The claim of 'systematically deflating' Transformer F1 assumes no aggregation is performed, which is an implementation assumption not evidence of design failure."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "Truncation at 512 tokens is a known limitation of standard BERT, but it's an implementation choice with standard workarounds (sliding window, Longformer, hierarchical encoding). The experiment compares fine-tuned Clinical BERT against BiLSTM-CRF - both are standard prior art with known constraints. The methodology explicitly states the evaluation scope is 'realistic temporal and modality distribution shifts' - if truncation affects results, that's part of the architecture comparison, not a confounder. The critic's evidence_test asks for length statistics that would be reported in a results appendix, not a design flaw. The claim of 'unfair penalty' assumes the experiment aims to test architecture in isolation from practical constraints, but the stated hypothesis tests 'whether a domain-adapted transformer... achieves higher span-level F1' under realistic conditions."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The 200-report validation/test sets are small for rare-entity analysis, but this is explicitly acknowledged in the methodology's secondary metrics - they are reported as exploratory findings, not primary conclusions. The experiment's primary claim is about overall span-level F1 superiority, not rare-entity performance specifically. Bootstrap CIs and 5-fold CV are standard solutions that would be applied in implementation, not design flaws. The critic's concern is valid for interpreting secondary metrics but does not invalidate the primary comparison. The methodology explicitly states it 'does not establish' performance on rare findings as a primary conclusion - this is a scope limitation, not a design flaw."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The methodology states the 2,000-report sample is 'stratified random sample... selected to represent all modalities, report lengths, and clinical contexts proportionally.' Temporal balance is not explicitly mentioned, but the critic's claim of 'non-uniform temporal sampling (e.g., oversampling recent reports)' is speculative - there's no evidence this occurred. The temporal split itself (train: 2021-2022, val: Jan-Jun 2023, test: Jul-Dec 2023) ensures chronological separation regardless of annotation sampling. The confound controls explicitly include 'Vocabulary coverage: OOV rates are compared' which would detect temporal vocabulary shifts. The concern is a plausible risk but not an demonstrated flaw."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All four findings identify real technical concerns that would need implementation-level handling (subword aggregation, truncation, sample size, temporal sampling), but none constitute fatal design flaws. After adjustments, F1 and F2 land at adjusted severity 5 (MATERIAL range), while F3 and F4 are at adjusted severity 3 (MINOR range). All findings are below the adjusted severity threshold of 4+, so EXONERATE applies - the methodology is sound for testing the stated hypothesis."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 8,
+        "reasoning": "Rebuttal is generic, referencing standard 'first subword wins' practice in clinical NER literature without confirming it is specified or implemented in this design. The methodology defines spans via BIO transitions on 'tokens' but is silent on subword-to-word collapse/alignment for Transformer vs. word-level BiLSTM-CRF, leaving the fragmentation/shift mechanism unresolved. No mechanistic evidence (e.g., documented rule) provided; rebuttal shifts blame to implementation assumption rather than addressing design silence."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "Rebuttal generically frames truncation as a 'known limitation' and part of 'realistic' architecture comparison but fails to address the specific mechanism: whether radiology reports exceed 512 tokens (especially CT/MRI), leading to systematic entity discard in Transformer tails while BiLSTM processes full text. No length statistics or mitigation (e.g., sliding window) confirmed in design; claiming 'realistic conditions' does not negate the confounding handicap to Transformer F1 if truncation impacts entities, as evidence test requires verification."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 4,
+        "reasoning": "Rebuttal partially addresses by noting secondary metrics are exploratory and acknowledging small size limits interpretation, with bootstrap/CV as mitigations. However, residual issue: design's hypothesis explicitly claims Transformer superiority 'particularly on rare findings and negated mentions' (Section 8), making val/test sparsity a direct threat to precise hyperparameter selection, early stopping stability, and CI widths for these targeted claims\u2014not just overall F1."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "Rebuttal is generic and speculative ('no evidence this occurred'), asserting temporal split suffices without verifying labeled sample's temporal distribution matches raw corpus (e.g., proportional per time bucket). Stratification omits time explicitly; mechanism of non-uniform sampling (e.g., annotation convenience bias) amplifying artificial shift remains unaddressed, despite evidence test requiring date distribution reports and confound checks like vocab OOV not substituting for temporal rep verification."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "R2 challenges F1 and F2 as design silence on critical mechanisms, F3 as partial but with residual concern about explicit rare-finding claims, F4 as speculative but unverified. I will: (1) DEFER F1 - the design is silent on subword aggregation, which is standard implementation but creates genuine ambiguity; (2) DEFER F2 - truncation impact requires empirical measurement, not design argument; (3) STRENGTHEN F3 - acknowledge the explicit rare-finding claim in Section 8 creates a tighter requirement, but maintain this is scope-limited, not fatal; (4) DEFER F4 - temporal sampling verification requires evidence not in design, making this genuinely ambiguous.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic correctly identifies that the methodology is silent on subword-to-word aggregation for Transformer predictions. While 'first subword wins' is standard clinical NER practice, the design does not specify this mechanism. The design defines spans via 'tokens' without clarifying alignment between Transformer subword tokenization and BiLSTM word-level tokenization. This is a genuine design ambiguity - both parties have valid points. The settling experiment: implement both naive token-level span F1 (no aggregation) and proper word-level aggregation for Transformer, compare to BiLSTM word-level F1. If aggregated Transformer F1 matches or exceeds BiLSTM, the design is sound; if naive token-level F1 is 5-10% lower, this is a real confounder requiring design modification. The critic's challenge is valid - design silence on this mechanism cannot be resolved by argument alone.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic correctly points out that my R1 rebuttal did not address whether radiology reports in this corpus actually exceed 512 tokens. The design is silent on truncation mitigation (no sliding window, Longformer, or hierarchical encoding specified). This is a genuine ambiguity: does truncation affect entity-containing regions in practice? The settling experiment: compute pre-tokenization length statistics (% reports >512 tokens by modality); measure span F1 on truncated vs. full-text for a sample; if >20% of reports exceed 512 tokens and entities appear in final 20% of text, truncation creates real information loss. If reports average <400 tokens, truncation is irrelevant. Without this measurement, both the defense (truncation is 'realistic limitation') and critique ('unfair handicap') are speculative. This requires empirical verification.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic correctly notes Section 8 explicitly claims Transformer superiority 'particularly on rare findings and negated mentions,' tightening the requirement beyond my R1 characterization. However, this claim is in the 'What the experiment establishes' section describing the hypothesis, not the evaluation methodology. The primary metric remains span-level F1 overall. Secondary metrics (rare entity F1) are explicitly exploratory - reported to characterize performance but not as primary evidence. The design acknowledges this limitation: 'does not establish performance on rare findings as a primary conclusion.' With 200 reports each in val/test, rare-entity analysis is underpowered, but this is a scope limitation, not a design flaw. Bootstrap CIs and 5-fold CV would be applied in implementation to quantify uncertainty. The critic's concern is valid for interpreting secondary claims but does not invalidate the primary comparison.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic correctly points out that the methodology does not verify the temporal distribution of the 2,000 annotated reports against the 200k raw corpus. Stratification includes modality, length, and clinical context but explicitly omits time period. The critic's concern about 'annotation convenience bias' (oversampling recent reports) is speculative but plausible - annotators often prefer recent reports for relevance. The temporal split itself (train: 2021-2022, val/test: 2023) provides some protection, but if the annotated sample over-represents late-2022 or early-2023, the train set could underrepresent vocabulary drift. The settling experiment: report the date distribution of the 2,000 annotated reports (e.g., monthly bucket percentages) and compare to the raw corpus distribution. If distributions match proportionally, the concern is unfounded. If they diverge significantly, the temporal split is confounded by sampling bias. This requires evidence not in the current design.",
+        "r2_challenge_response": "DEFERRED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Four findings were CHALLENGED: F1 and F2 involve genuine design silence on critical mechanisms (subword aggregation, truncation impact) requiring empirical verification; F3 was strengthened but remains scope-limited; F4 requires temporal sampling verification. Three findings are now DEFER (F1, F2, F4), meaning the design has unverified mechanisms that need empirical measurement. F3 is REBUT-DESIGN with adjusted severity 3. Since multiple FATAL findings remain at original severity due to DEFER, but the path to resolution is empirical (not argumentative), this is the correct 'empirical_test_agreed' verdict."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Span-level F1 can be correctly computed for the Transformer model despite subword tokenization producing multiple tokens per word.",
+        "failure_mechanism": "Clinical BERT tokenizers split words into subword pieces, each receiving a BIO label prediction; without explicit post-processing to collapse subwords to word-level spans (e.g., assigning the first subword's label to the full word and aligning boundaries), predicted spans will have fragmented or shifted boundaries and types compared to gold word-level spans, systematically deflating Transformer span F1 relative to the word-level BiLSTM-CRF.",
+        "evidence_test": "Document the subword-to-word prediction aggregation rule (e.g., 'first subword label propagates, others ignored'); manually verify alignment on 50 test spans; compute span F1 discrepancy when using naive token-level vs. collapsed word-level predictions.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Transformer preprocessing preserves all entities within the default max sequence length (512 tokens).",
+        "failure_mechanism": "Radiology reports frequently exceed 512 tokens after tokenization (especially CT/MRI with detailed findings/impression); standard BERT truncation discards tail-end content containing entities (e.g., final impressions or negations), while BiLSTM-CRF processes full reports without limit, creating an unfair penalty to Transformer performance and confounding architecture comparison.",
+        "evidence_test": "Report pre- and post-tokenization length statistics (mean, median, max, % >512 tokens) per split/modality; measure span F1 on truncated vs. full-text (sliding window or longformer-style) for Transformer on a held-out sample.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Validation (200 reports) and test (200 reports) sets provide sufficiently precise estimates for hyperparameter selection, early stopping, and final conclusions, including secondary metrics on rare entities/subgroups.",
+        "failure_mechanism": "200 reports yield sparse gold spans for rare entities (bottom 20% frequency), negated mentions, or subgroups (e.g., MRI ~30 reports, yielding potentially <20 rare spans); high Monte Carlo variance causes unstable validation signals (noisy optima selection) and wide bootstrap CIs (>10% width), weakening claims of Transformer superiority on targeted hard cases.",
+        "evidence_test": "Report exact gold span counts per entity type, rarity bin, negation status, modality, and section in val/test sets; compute bootstrap CI widths for primary/secondary F1s; perform 5-fold temporal CV on train+val to check metric stability.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Labeled splits temporally represent the underlying corpus distributions without selection bias.",
+        "failure_mechanism": "The 2,000-report labeled sample is stratified by modality/length/clinical context but not explicitly by time period; non-uniform temporal sampling (e.g., oversampling recent reports for annotation convenience) imbalances split sizes/content (e.g., train underrepresents late-period vocabulary), amplifying artificial 'shift' and invalidating temporal robustness claims.",
+        "evidence_test": "Report labeled sample date distribution vs. raw 200k corpus (e.g., % reports per month bucket); confirm post-split modality/length/section distributions match raw corpus time buckets exactly.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The design has strong controls but critical unaddressed implementation details (subword spans, truncation) that could silently invalidate Transformer metrics, plus unverified statistical power for hard-case claims on small val/test sets.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "R2 challenges F1 and F2 as design silence on critical mechanisms, F3 as partial but with residual concern about explicit rare-finding claims, F4 as speculative but unverified. I will: (1) DEFER F1 - the design is silent on subword aggregation, which is standard implementation but creates genuine ambiguity; (2) DEFER F2 - truncation impact requires empirical measurement, not design argument; (3) STRENGTHEN F3 - acknowledge the explicit rare-finding claim in Section 8 creates a tighter requirement, but maintain this is scope-limited, not fatal; (4) DEFER F4 - temporal sampling verification requires evidence not in design, making this genuinely ambiguous.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic correctly identifies that the methodology is silent on subword-to-word aggregation for Transformer predictions. While 'first subword wins' is standard clinical NER practice, the design does not specify this mechanism. The design defines spans via 'tokens' without clarifying alignment between Transformer subword tokenization and BiLSTM word-level tokenization. This is a genuine design ambiguity - both parties have valid points. The settling experiment: implement both naive token-level span F1 (no aggregation) and proper word-level aggregation for Transformer, compare to BiLSTM word-level F1. If aggregated Transformer F1 matches or exceeds BiLSTM, the design is sound; if naive token-level F1 is 5-10% lower, this is a real confounder requiring design modification. The critic's challenge is valid - design silence on this mechanism cannot be resolved by argument alone.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic correctly points out that my R1 rebuttal did not address whether radiology reports in this corpus actually exceed 512 tokens. The design is silent on truncation mitigation (no sliding window, Longformer, or hierarchical encoding specified). This is a genuine ambiguity: does truncation affect entity-containing regions in practice? The settling experiment: compute pre-tokenization length statistics (% reports >512 tokens by modality); measure span F1 on truncated vs. full-text for a sample; if >20% of reports exceed 512 tokens and entities appear in final 20% of text, truncation creates real information loss. If reports average <400 tokens, truncation is irrelevant. Without this measurement, both the defense (truncation is 'realistic limitation') and critique ('unfair handicap') are speculative. This requires empirical verification.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic correctly notes Section 8 explicitly claims Transformer superiority 'particularly on rare findings and negated mentions,' tightening the requirement beyond my R1 characterization. However, this claim is in the 'What the experiment establishes' section describing the hypothesis, not the evaluation methodology. The primary metric remains span-level F1 overall. Secondary metrics (rare entity F1) are explicitly exploratory - reported to characterize performance but not as primary evidence. The design acknowledges this limitation: 'does not establish performance on rare findings as a primary conclusion.' With 200 reports each in val/test, rare-entity analysis is underpowered, but this is a scope limitation, not a design flaw. Bootstrap CIs and 5-fold CV would be applied in implementation to quantify uncertainty. The critic's concern is valid for interpreting secondary claims but does not invalidate the primary comparison.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic correctly points out that the methodology does not verify the temporal distribution of the 2,000 annotated reports against the 200k raw corpus. Stratification includes modality, length, and clinical context but explicitly omits time period. The critic's concern about 'annotation convenience bias' (oversampling recent reports) is speculative but plausible - annotators often prefer recent reports for relevance. The temporal split itself (train: 2021-2022, val/test: 2023) provides some protection, but if the annotated sample over-represents late-2022 or early-2023, the train set could underrepresent vocabulary drift. The settling experiment: report the date distribution of the 2,000 annotated reports (e.g., monthly bucket percentages) and compare to the raw corpus distribution. If distributions match proportionally, the concern is unfounded. If they diverge significantly, the temporal split is confounded by sampling bias. This requires evidence not in the current design.",
+        "r2_challenge_response": "DEFERRED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Four findings were CHALLENGED: F1 and F2 involve genuine design silence on critical mechanisms (subword aggregation, truncation impact) requiring empirical verification; F3 was strengthened but remains scope-limited; F4 requires temporal sampling verification. Three findings are now DEFER (F1, F2, F4), meaning the design has unverified mechanisms that need empirical measurement. F3 is REBUT-DESIGN with adjusted severity 3. Since multiple FATAL findings remain at original severity due to DEFER, but the path to resolution is empirical (not argumentative), this is the correct 'empirical_test_agreed' verdict."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=9, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 8,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=8, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "3 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

@@ -1,0 +1,293 @@
+{
+  "case_id": "eval_scenario_777",
+  "stratum": "regular",
+  "flaw_category": "distribution_shift",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal-stratified split prevents information leakage and respects the deployment scenario.",
+        "failure_mechanism": "The PoC defines the training set as the 'first 60% of the timeline' and the test set as the 'final 20%'. However, it also restricts the cohort to patients with 'at least 12 months of observable history in the system before the index admission'. For a patient whose index admission falls at the very start of the Test period, their 12-month lookback window necessarily overlaps with the Training and Validation periods. If the model is trained on the 'first 60% of the timeline', it will have seen the historical encounters (diagnoses, labs, medications) of the patients who later appear in the test set. The Transformer, which learns embeddings for categorical codes and patient-specific sequences, can effectively 'memorize' patient-specific patterns or longitudinal trajectories during training that then reappear in the test set, leading to inflated performance that won't generalize to new patients.",
+        "evidence_test": "Compare the PR-AUC of the Transformer on the current test set versus a 'Strict Patient-Out' test set where any patient who had a single encounter during the training window is entirely excluded from the test set.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The Transformer's gain comes from temporal sequences, not just baseline features.",
+        "failure_mechanism": "The PoC proposes using 'permutation importance' to verify the source of the gain. Permutation importance is notoriously unreliable for models with highly collinear features or complex interactions (like those in Transformers). Because the Transformer receives both the baseline features AND the temporal sequences (which are essentially the raw versions of the baseline features), the model can distribute signal across both. Permuting the sequences might not drop performance if the baseline features provide a sufficient proxy, and vice versa, leading to a false conclusion that the temporal sequences aren't adding value, or masking the fact that the model is simply ignoring the sequences and relying on the baseline.",
+        "evidence_test": "Run an ablation study: train a Transformer version that is strictly forbidden from seeing the baseline features and only receives the temporal sequences, and compare it to the Logistic Regression baseline.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (Logistic Regression) is a fair 'apples-to-apples' comparison for the Transformer.",
+        "failure_mechanism": "The Logistic Regression is limited to 'hand-engineered features' (summaries, counts, indices). The Transformer, however, is given the raw sequences. The performance gap may not be due to the Transformer's architecture (attention/temporal modeling) but rather the difference between 'manual feature engineering' and 'automated feature extraction'. A Gradient Boosted Decision Tree (GBDT) on the same hand-engineered features, or a GBDT on expanded temporal aggregates (e.g., slope of lab values, max/min over time), would likely close the gap, revealing that the 'Transformer' advantage is actually just a 'better feature representation' advantage.",
+        "evidence_test": "Include an XGBoost or LightGBM baseline using the same baseline features, and another using expanded temporal aggregates (e.g., windowed means/variances).",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 5% manual chart review is sufficient to validate label accuracy.",
+        "failure_mechanism": "In clinical readmission data, 'unplanned' vs 'planned' is often a source of significant noise (e.g., a patient is admitted for a complication of a surgery, which the coder marks as 'planned' but the clinician views as 'unplanned'). A 5% sample may be too small to detect systematic coding shifts that occur across different discharge units or over the 36-month timeline, especially if the error is concentrated in specific high-risk cohorts.",
+        "evidence_test": "Perform stratified sampling for the manual review, ensuring a minimum sample size per discharge unit to check for unit-specific label noise.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The PoC contains a critical signal leakage flaw where the temporal split allows the model to see the historical data of test patients during training. Additionally, the evaluation strategy fails to isolate the architectural benefit of the Transformer from the benefit of automated feature extraction.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "The critic's claims raise valid concerns regarding the methodology, but they do not fundamentally undermine the design intent or the overall robustness of the experiment. For finding F1, while the concern about temporal overlap is noted, the design intentionally uses a stratified approach to mitigate leakage, and the potential for overlap is a known risk that is somewhat controlled by the cohort restriction. For finding F2, the use of permutation importance is a recognized method in model evaluation, and while it has limitations, it is still a valid approach to assess feature importance in this context. Finding F3 highlights a potential gap in baseline comparisons, but the intent was to compare two distinct modeling approaches rather than exhaustively evaluate all possible alternatives. Lastly, finding F4, while it raises a valid point about sample size, does not significantly impact the overall conclusions drawn from the study. The methodology is sound, and while there are areas for improvement, they do not warrant a change in the overall design or conclusions.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "The design intentionally employs a temporal-stratified split to minimize information leakage, and while there may be some overlap in patient histories, this is a recognized risk in longitudinal studies. The cohort restriction to patients with at least 12 months of history aims to mitigate this issue, and the overall design respects the deployment scenario."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "Permutation importance is a standard method for assessing feature contribution in complex models. While it has limitations, it is still a valid approach in this context. The design acknowledges these limitations and aims to provide insights into the model's performance based on temporal sequences."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The intention of the comparison was to evaluate the transformer against logistic regression specifically, not to exhaustively evaluate all possible models. While other models like GBDT could provide additional insights, the current design focuses on the primary hypothesis of comparing these two approaches."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "While the concern regarding the sample size for manual chart review is valid, it is a common practice in clinical studies to use a 5% sample for initial validation. The potential for systematic coding shifts is acknowledged, but this finding does not significantly impact the overall conclusions of the study."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been addressed with appropriate rebuttals, and the adjusted severities are all at or below 3, indicating that the methodology remains sound despite the critiques raised."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 8,
+        "reasoning": "The rebuttal is generic and fails to address the specific failure mechanism. The defender admits there is 'some overlap in patient histories' but claims the 12-month history restriction 'mitigates' this. In reality, the 12-month restriction *guarantees* the overlap for any patient in the test set who was also present in the training window. The defender does not explain how the model avoids memorizing patient-specific trajectories (the core of the leakage) when the same patient's historical data is present in both sets. The severity remains FATAL."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The rebuttal is a generic defense of a 'standard method' and does not address the specific mechanistic flaw: the high collinearity between the baseline features and the raw sequences provided to the Transformer. Simply stating that permutation importance is 'valid' does not resolve the risk that the model may ignore the sequences while the permutation test suggests they are unimportant (or vice versa) due to signal redundancy. No mitigation or alternative analysis (like the suggested ablation) was offered."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The rebuttal is a scope disclaimer ('the intention was to evaluate... not to exhaustively evaluate'). However, the original claim of the experiment is to test if a *Transformer* outperforms Logistic Regression. Without a non-linear baseline (like GBDT) on the same features, the experiment cannot distinguish between the benefit of the Transformer architecture and the benefit of simply using a non-linear model or better feature extraction. This is a fundamental flaw in the experimental control, not a matter of scope."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 1,
+        "reasoning": "The defender concedes the concern is valid but argues it is common practice. While the risk of systematic coding shifts remains, the impact on the overall hypothesis (Transformer vs. LR) is likely low since both models use the same noisy labels. The severity reduction is acceptable, but the mechanism remains unaddressed."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I am contesting the challenges raised by the critic, as the design does address the concerns raised, albeit imperfectly articulated in R1. The temporal overlap in patient histories is a recognized risk in longitudinal studies, and while the permutation importance method has limitations, it remains a valid approach in this context. The comparison with logistic regression is designed to evaluate the transformer specifically, and while the concern about label validation is acknowledged, it does not materially impact the conclusions.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "While it is true that the 12-month history restriction leads to overlap in patient histories, this overlap is a common challenge in longitudinal studies. The design incorporates a temporal-stratified split to minimize information leakage, and the potential for memorization of patient-specific trajectories is mitigated by the stratification by discharge unit and the model's reliance on temporal sequences rather than solely on historical encounters. The overall design respects the deployment scenario and aims to generalize findings across diverse clinical contexts.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "I acknowledge the concern regarding collinearity between baseline features and temporal sequences. However, permutation importance remains a standard method for assessing feature contribution, and while it has limitations, it can still provide valuable insights. To further address this concern, I propose conducting an ablation study as suggested, training a Transformer model with only temporal sequences and comparing its performance against the logistic regression baseline. This will help clarify the contributions of the temporal sequences independent of the baseline features.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The intention of the comparison was to evaluate the transformer against logistic regression specifically, but I recognize the importance of including additional baselines to strengthen the findings. While the current design focuses on the primary hypothesis, I agree that including a non-linear model like GBDT could provide further insights into the performance differences and help distinguish between the advantages of the Transformer architecture and better feature extraction.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The concern regarding the sample size for manual chart review is valid, and while a 5% sample is common practice, I acknowledge that systematic coding shifts could occur. However, both models will be affected equally by label noise, and thus the impact on the overall conclusions of the study remains low. The design can still yield valuable insights despite this limitation.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The rebuttals effectively address the critiques raised, particularly with strengthened arguments for F1, F2, and F3, while acknowledging the validity of F4. The proposed ablation study and additional baseline models indicate a commitment to empirical testing, making this a reasonable outcome."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal-stratified split prevents information leakage and respects the deployment scenario.",
+        "failure_mechanism": "The PoC defines the training set as the 'first 60% of the timeline' and the test set as the 'final 20%'. However, it also restricts the cohort to patients with 'at least 12 months of observable history in the system before the index admission'. For a patient whose index admission falls at the very start of the Test period, their 12-month lookback window necessarily overlaps with the Training and Validation periods. If the model is trained on the 'first 60% of the timeline', it will have seen the historical encounters (diagnoses, labs, medications) of the patients who later appear in the test set. The Transformer, which learns embeddings for categorical codes and patient-specific sequences, can effectively 'memorize' patient-specific patterns or longitudinal trajectories during training that then reappear in the test set, leading to inflated performance that won't generalize to new patients.",
+        "evidence_test": "Compare the PR-AUC of the Transformer on the current test set versus a 'Strict Patient-Out' test set where any patient who had a single encounter during the training window is entirely excluded from the test set.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The Transformer's gain comes from temporal sequences, not just baseline features.",
+        "failure_mechanism": "The PoC proposes using 'permutation importance' to verify the source of the gain. Permutation importance is notoriously unreliable for models with highly collinear features or complex interactions (like those in Transformers). Because the Transformer receives both the baseline features AND the temporal sequences (which are essentially the raw versions of the baseline features), the model can distribute signal across both. Permuting the sequences might not drop performance if the baseline features provide a sufficient proxy, and vice versa, leading to a false conclusion that the temporal sequences aren't adding value, or masking the fact that the model is simply ignoring the sequences and relying on the baseline.",
+        "evidence_test": "Run an ablation study: train a Transformer version that is strictly forbidden from seeing the baseline features and only receives the temporal sequences, and compare it to the Logistic Regression baseline.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (Logistic Regression) is a fair 'apples-to-apples' comparison for the Transformer.",
+        "failure_mechanism": "The Logistic Regression is limited to 'hand-engineered features' (summaries, counts, indices). The Transformer, however, is given the raw sequences. The performance gap may not be due to the Transformer's architecture (attention/temporal modeling) but rather the difference between 'manual feature engineering' and 'automated feature extraction'. A Gradient Boosted Decision Tree (GBDT) on the same hand-engineered features, or a GBDT on expanded temporal aggregates (e.g., slope of lab values, max/min over time), would likely close the gap, revealing that the 'Transformer' advantage is actually just a 'better feature representation' advantage.",
+        "evidence_test": "Include an XGBoost or LightGBM baseline using the same baseline features, and another using expanded temporal aggregates (e.g., windowed means/variances).",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 5% manual chart review is sufficient to validate label accuracy.",
+        "failure_mechanism": "In clinical readmission data, 'unplanned' vs 'planned' is often a source of significant noise (e.g., a patient is admitted for a complication of a surgery, which the coder marks as 'planned' but the clinician views as 'unplanned'). A 5% sample may be too small to detect systematic coding shifts that occur across different discharge units or over the 36-month timeline, especially if the error is concentrated in specific high-risk cohorts.",
+        "evidence_test": "Perform stratified sampling for the manual review, ensuring a minimum sample size per discharge unit to check for unit-specific label noise.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The PoC contains a critical signal leakage flaw where the temporal split allows the model to see the historical data of test patients during training. Additionally, the evaluation strategy fails to isolate the architectural benefit of the Transformer from the benefit of automated feature extraction.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I am contesting the challenges raised by the critic, as the design does address the concerns raised, albeit imperfectly articulated in R1. The temporal overlap in patient histories is a recognized risk in longitudinal studies, and while the permutation importance method has limitations, it remains a valid approach in this context. The comparison with logistic regression is designed to evaluate the transformer specifically, and while the concern about label validation is acknowledged, it does not materially impact the conclusions.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "While it is true that the 12-month history restriction leads to overlap in patient histories, this overlap is a common challenge in longitudinal studies. The design incorporates a temporal-stratified split to minimize information leakage, and the potential for memorization of patient-specific trajectories is mitigated by the stratification by discharge unit and the model's reliance on temporal sequences rather than solely on historical encounters. The overall design respects the deployment scenario and aims to generalize findings across diverse clinical contexts.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "I acknowledge the concern regarding collinearity between baseline features and temporal sequences. However, permutation importance remains a standard method for assessing feature contribution, and while it has limitations, it can still provide valuable insights. To further address this concern, I propose conducting an ablation study as suggested, training a Transformer model with only temporal sequences and comparing its performance against the logistic regression baseline. This will help clarify the contributions of the temporal sequences independent of the baseline features.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The intention of the comparison was to evaluate the transformer against logistic regression specifically, but I recognize the importance of including additional baselines to strengthen the findings. While the current design focuses on the primary hypothesis, I agree that including a non-linear model like GBDT could provide further insights into the performance differences and help distinguish between the advantages of the Transformer architecture and better feature extraction.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The concern regarding the sample size for manual chart review is valid, and while a 5% sample is common practice, I acknowledge that systematic coding shifts could occur. However, both models will be affected equally by label noise, and thus the impact on the overall conclusions of the study remains low. The design can still yield valuable insights despite this limitation.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The rebuttals effectively address the critiques raised, particularly with strengthened arguments for F1, F2, and F3, while acknowledging the validity of F4. The proposed ablation study and additional baseline models indicate a commitment to empirical testing, making this a reasonable outcome."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

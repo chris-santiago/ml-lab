@@ -1,0 +1,411 @@
+{
+  "case_id": "rc_rescience_2020_harrison2021learning_journal",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "If attention is low on impermissible tokens, the model isn't using them",
+        "failure_mechanism": "Attention weights are correlational, not causal. The model could use information from impermissible tokens without attending to them (e.g., through embeddings or hidden state propagation). Low attention does not prove information was not used; it only proves the attention mechanism did not weight that token highly.",
+        "evidence_test": "Use causal intervention methods (e.g., counterfactual generation, ablation studies, or gradient-based attribution) to test whether removing impermissible tokens actually changes model behavior independent of attention weights",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Removing impermissible tokens and measuring accuracy drop is valid evidence that the model relied on those tokens",
+        "failure_mechanism": "Accuracy drop could be due to input quality degradation, not token reliance. The model might have learned to use other features that co-occur with impermissible tokens, or the removal itself changes the input distribution in ways that affect performance regardless of token importance.",
+        "evidence_test": "Compare accuracy drop to a control where permissible tokens are removed in similar quantity; if both show similar drops, the signal is not specific to impermissible tokens",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Penalizing attention to impermissible tokens will suppress actual attention to those tokens",
+        "failure_mechanism": "Attention mechanisms have complex dynamics; the penalty might not translate to actual attention suppression, especially with gradient masking, attention head specialization, or the model learning to route information through alternative pathways while maintaining low attention scores.",
+        "evidence_test": "Measure actual attention weights on impermissible tokens before and after penalty training; verify that the penalty term correlates with actual attention suppression, not just the penalty value",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Removing impermissible tokens tests whether the model relies on them",
+        "failure_mechanism": "Token removal changes the input distribution in ways that affect model behavior beyond just token absence. The model may have learned contextual patterns that span multiple tokens, so removing one token affects the entire input representation.",
+        "evidence_test": "Compare to masked token scenarios where tokens are replaced with neutral tokens instead of removed; if both show similar accuracy drops, the signal is not specific to token presence",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Results on synthetic tasks generalize to real NLP tasks",
+        "failure_mechanism": "Synthetic tasks (Bigram Flip, Sequence Copy, Sequence Reverse) have simpler patterns and may not capture the complexity of real-world impermissible token usage. Real-world bias-inducing tokens appear in complex contextual patterns that synthetic tasks do not replicate.",
+        "evidence_test": "Test on real-world datasets with known bias patterns (e.g., gender bias in sentiment analysis, occupation prediction with protected traits) and compare attention suppression effectiveness",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The proposed method tests whether models can hide impermissible information",
+        "failure_mechanism": "No comparison to adversarial training or explicit debiasing methods that are known to work. Without this baseline, it is unclear whether the attention penalty approach is novel or simply reproduces known debiasing techniques.",
+        "evidence_test": "Compare to models trained with adversarial debiasing objectives; if performance is similar, the novelty claim is weakened",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "Three FATAL-level flaws fundamentally invalidate the core hypothesis: attention weights are not causal explanations, token removal accuracy drop does not reliably indicate token reliance, and attention penalties may not suppress actual attention. Two MATERIAL-level findings weaken generalization claims and baseline comparisons.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "The core hypothesis of the PoC is that attention weights are not necessarily faithful explanations of model behavior. To prove this, the designer aims to create a scenario where a model continues to perform a task (indicating it is still using impermissible information) even when the attention weights on those tokens are explicitly suppressed via a penalty term.\n\nF1 claims that low attention doesn't prove the model isn't using the tokens. This is actually the *central premise* of the paper, not a flaw. The paper isn't claiming 'low attention = not using'; it is claiming 'low attention + high performance = the model is using information without attending to it,' thereby proving attention is unfaithful. This is a fundamental misunderstanding of the hypothesis by the critic.\n\nF2 and F4 both attack the 'token removal' baseline. F2 suggests accuracy drop could be due to input degradation, and F4 suggests distribution shift. However, the token removal is used as a baseline to establish that the model *can* use these tokens for the task in the first place. If removing the tokens causes a drop, it confirms the tokens were useful. The critic's suggestion to remove permissible tokens as a control is a valid point for a full paper, but for a PoC establishing the existence of the signal, the current approach is standard.\n\nF3 questions whether the penalty actually suppresses attention. The methodology explicitly states that the evaluation 'compares predictive performance and attention distributions to the unpenalized setting.' This means the designer is already measuring the actual attention weights to verify suppression. The critic's claim that the penalty might not translate to suppression is exactly what the attention distribution measurement is designed to check.\n\nF5 argues that synthetic tasks don't generalize. The methodology, however, includes both synthetic tasks AND real NLP tasks (occupation prediction, gender identity, SST). The synthetic tasks are used as controlled environments to isolate the mechanism, while the real tasks provide ecological validity. The claim that it relies solely on synthetic data is factually incorrect.\n\nF6 suggests a lack of comparison to adversarial debiasing. The goal of this PoC is not to create the *best* debiasing method, but to investigate the *faithfulness of attention*. Comparing it to SOTA debiasing is outside the scope of a hypothesis investigation into attention interpretability.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The critic fundamentally misinterprets the hypothesis. The paper does NOT assume 'low attention = not using'; rather, it seeks to demonstrate that a model can maintain performance (using the info) while showing low attention, which would prove that attention is NOT a faithful explanation. The 'flaw' identified is the actual phenomenon being studied."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "Token removal is used here as a preliminary baseline to confirm the model's capacity to utilize the impermissible tokens. While a control group of permissible token removal would add rigor, the current method is sufficient for a PoC to establish that a performance delta exists."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic claims the penalty might not suppress attention, but the methodology explicitly includes comparing 'attention distributions to the unpenalized setting.' The design already includes the evidence test suggested by the critic."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "Distribution shift from token removal is a known limitation of ablation, but in the context of this PoC, it serves only to establish the upper bound of token utility, not the final conclusion on attention faithfulness."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The claim that results rely on synthetic tasks is factually incorrect. The methodology explicitly lists real-world datasets: occupation prediction, gender identity, and SST."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The objective is to investigate the faithfulness of attention weights as explanations, not to develop a state-of-the-art debiasing algorithm. Comparison to adversarial debiasing is outside the scope of this specific hypothesis test."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Most findings were rebutted as misunderstandings of the design or factual errors regarding the datasets used. However, F1 and F2, while partially rebutted, leave a residual question about whether the 'performance maintenance' is truly caused by the model using the tokens via non-attention pathways or other artifacts, which warrants empirical verification."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender correctly identifies that the finding is based on a misinterpretation of the paper's hypothesis. The finding claims the paper assumes 'low attention = not using', but the defender clarifies the paper's actual goal is to demonstrate that performance can be maintained *despite* low attention (proving attention is not faithful). Since the finding attacks a non-existent assumption (a strawman), the severity is reduced to 0. The underlying concern about attention being correlational is valid in general, but not applicable to this specific paper's stated logic."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 4,
+        "reasoning": "The defender acknowledges the flaw ('While a control group... would add rigor') but argues it is acceptable for a Proof of Concept ('sufficient for a PoC'). This partially addresses the concern by contextualizing the limitation, but does not fully resolve the methodological weakness (confounding due to input quality degradation). The severity reduction from 8 to 4 reflects the mitigation via the PoC framing, but the residual issue remains."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The defender correctly identifies a factual error in the finding's premise. The finding claims the methodology does not verify if the penalty suppresses attention, but the methodology explicitly states it 'compares predictive performance and attention distributions to the unpenalized setting.' Since the design includes the suggested evidence test, the concern about 'silent misconfig' is mitigated. The severity is reduced to 3 as the finding's core premise is corrected."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The defender acknowledges the distribution shift is a 'known limitation' but argues it serves only to establish an 'upper bound' rather than the final conclusion. This partially addresses the concern by limiting the scope of the finding's impact, but does not eliminate the methodological flaw (token removal affects context). The severity reduction from 5 to 3 reflects this partial mitigation."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender correctly identifies a factual error in the finding's premise. The finding claims the results rely on synthetic tasks, but the methodology explicitly lists real-world datasets (occupation prediction, gender identity, SST). Since the paper does not rely solely on synthetic tasks, the concern about 'synthetic data assumption' is invalid for this paper. Severity reduced to 0."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender correctly clarifies the scope of the paper. The finding critiques the lack of comparison to adversarial debiasing baselines, but the defender states the objective is to investigate 'faithfulness of attention weights', not to develop a 'state-of-the-art debiasing algorithm'. Since the finding attacks a requirement (novelty comparison) that is outside the paper's stated scope, the finding is invalid. Severity reduced to 0."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic has accepted the rebuttals for F1, F3, F5, and F6, acknowledging that these findings were based on misinterpretations of the hypothesis, factual errors regarding the datasets, or scope misunderstandings. For F2 and F4, the critic issued PARTIAL verdicts, arguing that while the PoC framing and 'upper bound' logic mitigate the severity, the underlying methodological flaws (input degradation and distribution shift from token removal) remain. I am maintaining my position on F2 and F4 as REBUT-SCOPE and REBUT-IMMATERIAL respectively, because the token removal step is not the primary evidence for the paper's main claim\u2014it is a preliminary sanity check to ensure the tokens are useful in the first place. The core of the paper's argument rests on the penalty-training phase, not the removal phase.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The critic has accepted that this finding was based on a misinterpretation. The paper's goal is to prove that attention is NOT a faithful explanation by showing that performance can be maintained while attention is suppressed. The 'failure mechanism' described by the critic is the exact phenomenon the paper intends to demonstrate.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The critic's concern about input quality degradation is valid for a study on token importance, but the token removal here is a preliminary baseline to establish that the model *can* use the tokens. The primary conclusion regarding attention faithfulness is derived from the comparison between penalized and unpenalized models where tokens remain present in both cases, thus bypassing the 'removal' flaw entirely for the main result.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic has accepted that the design already includes the suggested evidence test (comparing attention distributions before and after penalty training), resolving the concern about silent misconfiguration.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "While token removal causes distribution shift, this step is used only to establish the utility of the tokens. The main hypothesis\u2014that attention weights can be manipulated while preserving information flow\u2014is tested using a penalty term on the existing input, which does not involve token removal or the associated distribution shift.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The critic has accepted that the finding was factually incorrect, as the methodology explicitly employs real-world datasets (SST, occupation prediction, gender identity).",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The critic has accepted that the objective is to investigate the faithfulness of attention as an explanation, not to compete with state-of-the-art debiasing baselines.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been either fully accepted as invalid or adjusted to a severity of 4 or below. The remaining concerns (F2, F4) relate to a preliminary baseline step and do not undermine the primary experimental design used to test the main hypothesis."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "If attention is low on impermissible tokens, the model isn't using them",
+        "failure_mechanism": "Attention weights are correlational, not causal. The model could use information from impermissible tokens without attending to them (e.g., through embeddings or hidden state propagation). Low attention does not prove information was not used; it only proves the attention mechanism did not weight that token highly.",
+        "evidence_test": "Use causal intervention methods (e.g., counterfactual generation, ablation studies, or gradient-based attribution) to test whether removing impermissible tokens actually changes model behavior independent of attention weights",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Removing impermissible tokens and measuring accuracy drop is valid evidence that the model relied on those tokens",
+        "failure_mechanism": "Accuracy drop could be due to input quality degradation, not token reliance. The model might have learned to use other features that co-occur with impermissible tokens, or the removal itself changes the input distribution in ways that affect performance regardless of token importance.",
+        "evidence_test": "Compare accuracy drop to a control where permissible tokens are removed in similar quantity; if both show similar drops, the signal is not specific to impermissible tokens",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Penalizing attention to impermissible tokens will suppress actual attention to those tokens",
+        "failure_mechanism": "Attention mechanisms have complex dynamics; the penalty might not translate to actual attention suppression, especially with gradient masking, attention head specialization, or the model learning to route information through alternative pathways while maintaining low attention scores.",
+        "evidence_test": "Measure actual attention weights on impermissible tokens before and after penalty training; verify that the penalty term correlates with actual attention suppression, not just the penalty value",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Removing impermissible tokens tests whether the model relies on them",
+        "failure_mechanism": "Token removal changes the input distribution in ways that affect model behavior beyond just token absence. The model may have learned contextual patterns that span multiple tokens, so removing one token affects the entire input representation.",
+        "evidence_test": "Compare to masked token scenarios where tokens are replaced with neutral tokens instead of removed; if both show similar accuracy drops, the signal is not specific to token presence",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Results on synthetic tasks generalize to real NLP tasks",
+        "failure_mechanism": "Synthetic tasks (Bigram Flip, Sequence Copy, Sequence Reverse) have simpler patterns and may not capture the complexity of real-world impermissible token usage. Real-world bias-inducing tokens appear in complex contextual patterns that synthetic tasks do not replicate.",
+        "evidence_test": "Test on real-world datasets with known bias patterns (e.g., gender bias in sentiment analysis, occupation prediction with protected traits) and compare attention suppression effectiveness",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The proposed method tests whether models can hide impermissible information",
+        "failure_mechanism": "No comparison to adversarial training or explicit debiasing methods that are known to work. Without this baseline, it is unclear whether the attention penalty approach is novel or simply reproduces known debiasing techniques.",
+        "evidence_test": "Compare to models trained with adversarial debiasing objectives; if performance is similar, the novelty claim is weakened",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "Three FATAL-level flaws fundamentally invalidate the core hypothesis: attention weights are not causal explanations, token removal accuracy drop does not reliably indicate token reliance, and attention penalties may not suppress actual attention. Two MATERIAL-level findings weaken generalization claims and baseline comparisons.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic has accepted the rebuttals for F1, F3, F5, and F6, acknowledging that these findings were based on misinterpretations of the hypothesis, factual errors regarding the datasets, or scope misunderstandings. For F2 and F4, the critic issued PARTIAL verdicts, arguing that while the PoC framing and 'upper bound' logic mitigate the severity, the underlying methodological flaws (input degradation and distribution shift from token removal) remain. I am maintaining my position on F2 and F4 as REBUT-SCOPE and REBUT-IMMATERIAL respectively, because the token removal step is not the primary evidence for the paper's main claim\u2014it is a preliminary sanity check to ensure the tokens are useful in the first place. The core of the paper's argument rests on the penalty-training phase, not the removal phase.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The critic has accepted that this finding was based on a misinterpretation. The paper's goal is to prove that attention is NOT a faithful explanation by showing that performance can be maintained while attention is suppressed. The 'failure mechanism' described by the critic is the exact phenomenon the paper intends to demonstrate.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The critic's concern about input quality degradation is valid for a study on token importance, but the token removal here is a preliminary baseline to establish that the model *can* use the tokens. The primary conclusion regarding attention faithfulness is derived from the comparison between penalized and unpenalized models where tokens remain present in both cases, thus bypassing the 'removal' flaw entirely for the main result.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic has accepted that the design already includes the suggested evidence test (comparing attention distributions before and after penalty training), resolving the concern about silent misconfiguration.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "While token removal causes distribution shift, this step is used only to establish the utility of the tokens. The main hypothesis\u2014that attention weights can be manipulated while preserving information flow\u2014is tested using a penalty term on the existing input, which does not involve token removal or the associated distribution shift.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The critic has accepted that the finding was factually incorrect, as the methodology explicitly employs real-world datasets (SST, occupation prediction, gender identity).",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The critic has accepted that the objective is to investigate the faithfulness of attention as an explanation, not to compete with state-of-the-art debiasing baselines.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been either fully accepted as invalid or adjusted to a severity of 4 or below. The remaining concerns (F2, F4) relate to a preliminary baseline step and do not undermine the primary experimental design used to test the main hypothesis."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=8 \u2265 7, REBUT-SCOPE \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

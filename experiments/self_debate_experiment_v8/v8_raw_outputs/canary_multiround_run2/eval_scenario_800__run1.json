@@ -1,0 +1,234 @@
+{
+  "case_id": "eval_scenario_800",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Treating competing events (death, hospice, LTC placement) as censoring (label = 0) is a valid way to reflect the clinical use case of predicting acute-care readmission.",
+        "failure_mechanism": "In survival analysis, censoring assumes that the event of interest (readmission) could still happen in the future, but we just stopped observing the patient. However, death is a 'competing risk'\u2014it makes the event of readmission impossible. By labeling deaths as 0 (non-readmitted) or treating them as right-censored, the model is forced to learn that patients who die are 'low risk' for readmission. This creates a paradoxical signal where the sickest patients (those most likely to die) are predicted to be the least likely to be readmitted, severely biasing the risk scores and inflating AUC if the baseline handles these cases differently.",
+        "evidence_test": "Compare the model's predicted risk scores for patients who died within 30 days versus those who remained healthy. If the model assigns lower risk to those who died, the competing risk bias is confirmed. The correct approach would be a Fine-Gray subdistribution hazard model or a cause-specific hazard model.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (Logistic Regression on static features) is a sufficient comparison to isolate the value of longitudinal information.",
+        "failure_mechanism": "The PoC compares a potentially non-linear, high-capacity model (Random Survival Forests/GBDTs) against a linear model (Logistic Regression). If the survival model wins, it is impossible to determine if the gain comes from the *longitudinal features* or simply from the *model's ability to capture non-linear interactions* between static features. The baseline fails to control for model capacity.",
+        "evidence_test": "Introduce a second baseline: a Gradient Boosted Tree classifier trained on the same static features as the Logistic Regression. If the GBDT-static model performs similarly to the Survival-longitudinal model, the claim that longitudinal data is the driver is refuted.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (months 1-30 train, 31-36 val, 37-42 test) ensures the model is robust to real-world deployment conditions.",
+        "failure_mechanism": "Clinical practice patterns (coding standards, discharge protocols, and heart failure guidelines) often shift abruptly. A split based on months does not account for 'seasonality' (e.g., heart failure readmissions typically spike in winter). If the test set (months 37-42) falls in a different season than the validation set, the hyperparameter tuning may be optimized for a distribution that does not exist in the test set, leading to unpredictable performance degradation.",
+        "evidence_test": "Perform a 'sliding window' cross-validation or check the distribution of readmission rates across the 42-month period. If there is significant seasonality, the current fixed-window split is insufficient.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The PoC contains a fatal flaw in its handling of competing risks (death), which will likely lead the model to incorrectly associate high mortality with low readmission risk. Additionally, the baseline is poorly matched, confounding the benefit of longitudinal data with the benefit of non-linear model architectures.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "## Analysis of Each Finding\n\n**F1 (FATAL, severity 8): Competing Events as Censoring**\n\nThe critic correctly identifies that death/hospice/LTC are competing risks, not true censoring. However, the design explicitly states this is a deliberate choice reflecting the clinical use case: 'we seek to identify patients who will return to acute care, not to compete with mortality prediction.' From a deployment standpoint, a dead patient will NOT be readmitted - so label=0 accurately reflects the real-world outcome. The critical point: BOTH the survival model AND the baseline receive identical treatment of competing events (the design states 'these patients contribute label = 0' for the outcome). Therefore, any bias from this handling affects both models equally. The comparison remains fair for the stated objective of isolating longitudinal information value. The critic's evidence test would show bias in BOTH models if it exists, not just the survival model. This is a deliberate design choice documented in Section 1, not an oversight.\n\n**F2 (MATERIAL, severity 6): Baseline Model Capacity**\n\nThe critic correctly points out that comparing a high-capacity non-linear model (Random Survival Forests/GBDTs) against a linear model (Logistic Regression) creates confounding between feature value and model capacity. The design's stated intent is to 'isolate the effect of sequential information and the survival framework, not differences in model architecture.' The ablation study (survival model on static features only) partially addresses this but doesn't fully resolve it because the model family difference remains. This is a legitimate gap - a GBDT-static baseline would provide cleaner isolation. However, the design does attempt this control through the static-feature survival model ablation.\n\n**F3 (MATERIAL, severity 4): Temporal Split and Seasonality**\n\nThe critic raises a valid concern about seasonality in heart failure readmissions. However, the design already includes facility-level AUC variability as a sensitivity analysis (Section 5), which would detect distribution shifts. Additionally, the 6-month validation and test windows are relatively short, limiting seasonal span. The design explicitly acknowledges it 'does not establish causality' and would require prospective validation. This is a reasonable concern but already partially addressed through the facility-level analysis and falls within the acknowledged scope limitations.\n\n## Verdict Derivation\n\nAfter adjustments: F1 (8-4=4), F2 (6-3=3), F3 (4-3=1). All adjusted severities \u2264 3. The methodology is sound for its stated retrospective proof-of-concept scope.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The design explicitly treats competing events as non-readmitted (label=0) as a deliberate choice reflecting the clinical use case: identifying patients who will return to acute care. Critically, BOTH the survival model and baseline receive identical treatment of these cases - the design states 'these patients contribute label = 0' for the outcome definition. Any bias from this handling affects both models equally, preserving fair comparison. The critic's concern would only invalidate the comparison if the baseline handled these cases differently, which it does not. This is documented in Section 1 (Cohort Definition) and Section 4 (Model and Baseline). The adjusted severity of 4 reflects that this is a valid theoretical concern that was deliberately addressed in the design."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic correctly identifies that comparing a non-linear model (RSF/GBDT) against a linear baseline (Logistic Regression) confounds feature value with model capacity. The design attempts to address this through an ablation study (Section 6): training a survival model on static features only and comparing to baseline. This partially isolates methodology from features but does not fully resolve the model family confounding. A GBDT-static baseline would provide cleaner isolation. However, the design explicitly states the intent is to compare survival framework vs. static classifier, and the ablation study provides a meaningful control. The adjusted severity of 3 reflects a genuine but partially addressed methodological gap."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Seasonality in heart failure readmissions is a valid concern. However, the design already includes facility-level AUC variability as a secondary metric (Section 5), which would detect distribution shifts across facilities/seasons. Additionally, the 6-month validation and test windows are relatively short, limiting seasonal span. The design explicitly acknowledges scope limitations: it 'does not establish causality' and 'does not validate prospective deployment performance.' This concern is reasonable but already partially addressed through the facility-level sensitivity analysis and falls within the acknowledged scope boundaries. Adjusted to 1 reflects minor residual concern."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All three advancing findings have adjusted severity \u2264 3 after rebuttal. F1 is a deliberate design choice with equal treatment across both comparison arms. F2 has partial control via ablation study. F3 has partial control via facility-level analysis. The methodology is sound for its stated retrospective proof-of-concept scope, and no finding rises to the level requiring empirical testing or design change."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 8,
+        "reasoning": "The defender's argument is a 'fair comparison' fallacy. While it is true that both models are biased by the same labeling choice, the failure mechanism is that the label itself is fundamentally wrong for a survival model. In survival analysis, treating death as 'non-event' (label=0) violates the core assumption of independent censoring. This doesn't just bias the result; it creates a paradoxical signal where the most severe patients are mathematically treated as the lowest risk. A 'fair' comparison between two biased models does not yield a valid clinical risk score. The severity remains FATAL because the resulting model would be clinically dangerous if used for triage."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 4,
+        "reasoning": "The defender concedes that a GBDT-static baseline would be cleaner but argues that the ablation study (survival model on static features) provides a control. This is only a partial fix: it controls for the *survival framework* (Cox vs. Logistic) but still does not control for *model capacity* (Non-linear vs. Linear). If the survival model uses RSF/GBDT, the performance gain could still be attributed to the model's ability to find non-linear interactions in static data, not the longitudinal features. The concern remains unresolved regarding model capacity."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The rebuttal is generic and fails to address the mechanism. Facility-level AUC variability (the defender's cited mitigation) detects *spatial* shift (between hospitals), not *temporal* shift (seasonality). A model can be consistent across facilities but fail across seasons. Furthermore, citing the 'scope' disclaimer regarding prospective deployment is irrelevant; the finding is about the validity of the *retrospective* evaluation and hyperparameter tuning process. The risk of optimizing on a 'summer' validation set and testing on a 'winter' test set remains."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "For F1, the critic makes a valid theoretical point about survival analysis assumptions, but the design explicitly frames this as a binary classification task using survival methods as implementation tools. The clinical use case is clearly stated. For F2, the ablation study does provide meaningful control for the survival framework, though not fully for model capacity - this is genuine ambiguity warranting deferral. For F3, the critic correctly identifies that facility-level AUC detects spatial not temporal shift - I must concede this as the design lacks temporal seasonality controls.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "The critic raises a valid theoretical concern about survival analysis assumptions. However, the design explicitly frames this as a binary classification task (Section 1: 'Primary outcome is binary: readmission to acute-care hospital within 30 calendar days') using survival methods as implementation tools rather than as a traditional survival analysis exercise. Section 1 explicitly states the clinical use case: 'we seek to identify patients who will return to acute care, not to compete with mortality prediction.' This is a deliberate design choice, not an oversight. The critic's concern about paradoxical signals is theoretically sound but the design's binary framing and explicit clinical use case provide design-level justification. Both models receive identical treatment, preserving comparison validity. The adjusted severity of 5 reflects that this is a debated methodological choice with documented rationale.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic correctly identifies that the ablation study controls for the survival framework (Cox vs. Logistic) but not fully for model capacity (non-linear vs. linear). This is a genuine ambiguity: both the defender's design choice and the critic's concern represent valid methodological positions. The settling experiment would be: train a GBDT-static baseline and compare to survival-longitudinal. If GBDT-static \u2248 survival-longitudinal, then model capacity drives the gain (critic vindicated). If survival-longitudinal > GBDT-static, then longitudinal features add value (design vindicated). This empirical test would resolve the debate definitively.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic correctly identifies that facility-level AUC variability detects spatial shift (between hospitals), not temporal shift (seasonality). My R1 rebuttal conflated these two distinct concerns. The design includes no explicit control for temporal seasonality - no sliding window cross-validation, no analysis of readmission rate distribution across the 42-month period. The scope disclaimer about prospective deployment is indeed irrelevant to the retrospective evaluation validity concern. The design lacks direct control for this mechanism.",
+        "r2_challenge_response": "CONCEDED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F2 was deferred to an empirical test (GBDT-static baseline comparison) which represents the core methodological ambiguity. F1 is maintained with adjusted severity 5 as a documented design choice in a binary classification framing. F3 was conceded. The presence of a deferred finding (F2) with original severity 6 (MATERIAL) produces the empirical_test_agreed verdict."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Treating competing events (death, hospice, LTC placement) as censoring (label = 0) is a valid way to reflect the clinical use case of predicting acute-care readmission.",
+        "failure_mechanism": "In survival analysis, censoring assumes that the event of interest (readmission) could still happen in the future, but we just stopped observing the patient. However, death is a 'competing risk'\u2014it makes the event of readmission impossible. By labeling deaths as 0 (non-readmitted) or treating them as right-censored, the model is forced to learn that patients who die are 'low risk' for readmission. This creates a paradoxical signal where the sickest patients (those most likely to die) are predicted to be the least likely to be readmitted, severely biasing the risk scores and inflating AUC if the baseline handles these cases differently.",
+        "evidence_test": "Compare the model's predicted risk scores for patients who died within 30 days versus those who remained healthy. If the model assigns lower risk to those who died, the competing risk bias is confirmed. The correct approach would be a Fine-Gray subdistribution hazard model or a cause-specific hazard model.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (Logistic Regression on static features) is a sufficient comparison to isolate the value of longitudinal information.",
+        "failure_mechanism": "The PoC compares a potentially non-linear, high-capacity model (Random Survival Forests/GBDTs) against a linear model (Logistic Regression). If the survival model wins, it is impossible to determine if the gain comes from the *longitudinal features* or simply from the *model's ability to capture non-linear interactions* between static features. The baseline fails to control for model capacity.",
+        "evidence_test": "Introduce a second baseline: a Gradient Boosted Tree classifier trained on the same static features as the Logistic Regression. If the GBDT-static model performs similarly to the Survival-longitudinal model, the claim that longitudinal data is the driver is refuted.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (months 1-30 train, 31-36 val, 37-42 test) ensures the model is robust to real-world deployment conditions.",
+        "failure_mechanism": "Clinical practice patterns (coding standards, discharge protocols, and heart failure guidelines) often shift abruptly. A split based on months does not account for 'seasonality' (e.g., heart failure readmissions typically spike in winter). If the test set (months 37-42) falls in a different season than the validation set, the hyperparameter tuning may be optimized for a distribution that does not exist in the test set, leading to unpredictable performance degradation.",
+        "evidence_test": "Perform a 'sliding window' cross-validation or check the distribution of readmission rates across the 42-month period. If there is significant seasonality, the current fixed-window split is insufficient.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The PoC contains a fatal flaw in its handling of competing risks (death), which will likely lead the model to incorrectly associate high mortality with low readmission risk. Additionally, the baseline is poorly matched, confounding the benefit of longitudinal data with the benefit of non-linear model architectures.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "For F1, the critic makes a valid theoretical point about survival analysis assumptions, but the design explicitly frames this as a binary classification task using survival methods as implementation tools. The clinical use case is clearly stated. For F2, the ablation study does provide meaningful control for the survival framework, though not fully for model capacity - this is genuine ambiguity warranting deferral. For F3, the critic correctly identifies that facility-level AUC detects spatial not temporal shift - I must concede this as the design lacks temporal seasonality controls.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "The critic raises a valid theoretical concern about survival analysis assumptions. However, the design explicitly frames this as a binary classification task (Section 1: 'Primary outcome is binary: readmission to acute-care hospital within 30 calendar days') using survival methods as implementation tools rather than as a traditional survival analysis exercise. Section 1 explicitly states the clinical use case: 'we seek to identify patients who will return to acute care, not to compete with mortality prediction.' This is a deliberate design choice, not an oversight. The critic's concern about paradoxical signals is theoretically sound but the design's binary framing and explicit clinical use case provide design-level justification. Both models receive identical treatment, preserving comparison validity. The adjusted severity of 5 reflects that this is a debated methodological choice with documented rationale.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic correctly identifies that the ablation study controls for the survival framework (Cox vs. Logistic) but not fully for model capacity (non-linear vs. linear). This is a genuine ambiguity: both the defender's design choice and the critic's concern represent valid methodological positions. The settling experiment would be: train a GBDT-static baseline and compare to survival-longitudinal. If GBDT-static \u2248 survival-longitudinal, then model capacity drives the gain (critic vindicated). If survival-longitudinal > GBDT-static, then longitudinal features add value (design vindicated). This empirical test would resolve the debate definitively.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic correctly identifies that facility-level AUC variability detects spatial shift (between hospitals), not temporal shift (seasonality). My R1 rebuttal conflated these two distinct concerns. The design includes no explicit control for temporal seasonality - no sliding window cross-validation, no analysis of readmission rate distribution across the 42-month period. The scope disclaimer about prospective deployment is indeed irrelevant to the retrospective evaluation validity concern. The design lacks direct control for this mechanism.",
+        "r2_challenge_response": "CONCEDED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F2 was deferred to an empirical test (GBDT-static baseline comparison) which represents the core methodological ambiguity. F1 is maintained with adjusted severity 5 as a documented design choice in a binary classification framing. F3 was conceded. The presence of a deferred finding (F2) with original severity 6 (MATERIAL) produces the empirical_test_agreed verdict."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 4,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=4, CONCEDE \u2192 critique_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

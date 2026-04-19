@@ -1,0 +1,352 @@
+{
+  "case_id": "eval_scenario_hyp132",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Any performance gain of the enhanced model over the baseline is attributable solely to the addition of ticket text features.",
+        "failure_mechanism": "The enhanced model also incorporates customer history embeddings (derived from prior tickets) that are not present in the baseline, which only uses aggregated metadata features. This asymmetry means the observed improvement could stem from the richer customer\u2011history representation rather than from the ticket body text, confounding the causal claim about text.",
+        "evidence_test": "Train a baseline that includes the same customer history embeddings (or an equivalent representation) as the enhanced model, keeping all other aspects identical. If the performance gap disappears or diminishes substantially, the original claim is refuted; if the gap remains, the claim gains support.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Features such as prior customer SLA compliance rate and prior ticket count are computed using only historical information available at ticket creation time, ensuring no temporal leakage.",
+        "failure_mechanism": "The description does not specify how these rolling\u2011window statistics are calculated. If the computation inadvertently uses future tickets (e.g., by aggregating over a fixed calendar window that includes later tickets), the model would gain access to outcome\u2011related information, inflating performance artificially.",
+        "evidence_test": "Audit the feature generation code to verify that for each ticket the 90\u2011day compliance rate and 30\u2011day ticket count are calculated exclusively from tickets with timestamps strictly earlier than the ticket\u2019s creation timestamp. A simple unit test that checks the max timestamp used in each window would confirm or refute the claim.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding tickets that were auto\u2011closed or never received a response does not introduce bias because those tickets are missing at random with respect to SLA breach risk.",
+        "failure_mechanism": "Tickets that are auto\u2011closed or never answered may systematically differ (e.g., lower priority, trivial issues) and thus have a different breach probability. Removing them changes the effective population and can bias performance estimates, limiting generalizability to the full ticket stream.",
+        "evidence_test": "Compare the breach rate and feature distributions of the excluded tickets against the included set. If significant differences exist, the exclusion introduces bias; if they are statistically indistinguishable, the claim holds.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Using a static, customer\u2011tier\u2011specific SLA threshold (e.g., 4\u202fh for Premium) yields a stable binary label across the 36\u2011month period.",
+        "failure_mechanism": "SLA configurations can evolve over time (e.g., policy changes, contract renegotiations). If the threshold shifts during the observation window, the label becomes noisy and may not reflect the true operational target, degrading model validity and causing apparent performance shifts unrelated to predictive ability.",
+        "evidence_test": "Extract the SLA target per ticket from the ticketing system\u2019s configuration at the time of ticket creation and examine its variation over the 36 months. Any systematic drift would indicate label instability; stability would support the claim.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Stratified splits by customer tier and channel guarantee adequate representation of all segments in training, validation, and test sets.",
+        "failure_mechanism": "When a segment is very small (e.g., Free\u2011tier API tickets), stratification within each 6\u2011month window may still result in very few samples, leading to high variance in segment\u2011specific metrics and potentially unreliable estimates of robustness.",
+        "evidence_test": "Report the absolute counts of tickets per (tier, channel) combination in each split. If any combination falls below a reasonable threshold (e.g., <30 samples), the stratification claim is weakened; adequate counts would support it.",
+        "flaw_category": "uncertain_significance"
+      }
+    ],
+    "summary": "The PoC presents several methodological concerns that threaten the validity of its central claim: the enhanced model\u2019s performance gain may be confounded by extra customer\u2011history features, potential leakage in historical feature computation, selection bias from excluded tickets, possible SLA target drift, and limited representation of rare segments. The most critical issue is the feature asymmetry, which could entirely explain the observed improvement.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 claims a confounding variable because the enhanced model uses 'customer history embeddings' while the baseline uses 'aggregated metadata features'. Looking at Section 3, the baseline already includes 'prior customer SLA compliance rate' and 'prior ticket count'. The 'embeddings' in the enhanced model are the vector representations of this same history. The core difference is the model architecture (Transformer vs Logistic Regression) and the addition of text. However, the critic is correct that if the 'embeddings' contain information not captured by the two aggregated scalars in the baseline, the gain isn't solely from text. But the design intent was to compare 'structured metadata' (baseline) vs 'text + metadata' (enhanced). The embeddings are the transformer's way of consuming that metadata. This is a material point regarding the 'solely' claim, but the baseline is intended to be a representative 'metadata-only' approach.\n\nF2 concerns temporal leakage in rolling windows. Section 3 explicitly states 'All transformers... are fit on the training set only' and 'text features are extracted strictly at ticket creation time'. While it doesn't explicitly describe the SQL join for the rolling window, the 'Preprocessing fit point' and 'Temporal leakage' control in Section 7 indicate a design intent to prevent this. This is a standard implementation detail, not a design flaw.\n\nF3 argues that excluding auto-closed/unanswered tickets introduces bias. The objective is to predict 'first-response SLA breaches'. A ticket that is never answered or auto-closed by a system cannot, by definition, have a 'first-response' timestamp to measure against an SLA. Including them would require a different label (e.g., 'will this ever be answered?'), which is outside the scope of predicting the response time of tickets that actually enter the agent queue.\n\nF4 suggests SLA thresholds might change over 36 months. Section 1 states the SLA target is 'sourced from the ticketing system's SLA configuration'. In production B2B systems, the SLA is typically a property of the ticket record at the time of creation based on the contract. The design uses the configuration, which inherently tracks the target applicable to that specific ticket, not a global constant.\n\nF5 is a minor concern about sample size in small strata. This is an inherent property of the data distribution. Stratification is the correct mitigation; the variance in small segments is a reporting issue, not a methodology flaw.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The baseline includes the primary signals of customer history (compliance rate and ticket count). The 'embeddings' in the enhanced model are the representation of these same structured history features for the transformer architecture. The experiment compares a metadata-only approach (Logistic Regression) against a text-augmented approach (Transformer). While the representation differs, the information source (customer history) is present in both. The gain is primarily attributed to the addition of the ticket body text."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "Section 7 ('Confound Controls') explicitly lists 'Temporal leakage' as a controlled factor, and Section 3 specifies that features are extracted 'strictly at ticket creation time'. The critic is asking for implementation details (the specific SQL/code) rather than identifying a design flaw."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The objective is specifically to predict 'first-response SLA breaches'. Tickets that are auto-closed or never receive a response do not have a first-response event and therefore cannot be evaluated for an SLA breach of the first response. They are outside the operational scope of the hypothesis."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "Section 1 specifies that the SLA target is 'sourced from the ticketing system's SLA configuration'. This means the target is retrieved per-ticket based on the configuration active at the time of the event, automatically accounting for any policy shifts over the 36-month window."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Stratification is the standard method to handle minority segments. High variance in very small subgroups is an expected statistical property and does not invalidate the overall PR-AUC conclusion for the general population."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Most findings were rebutted as either out-of-scope or already addressed by design controls. However, F1 remains at an adjusted severity of 4 because the difference between 'aggregated metadata' and 'history embeddings' could potentially introduce a signal gap that requires empirical verification to fully isolate the impact of text."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 5,
+        "reasoning": "The defender argues that the baseline already captures customer history signals (compliance rate, ticket count) and that the enhanced model's embeddings are merely a different representation of the same information. This partially addresses the concern by acknowledging that the information source is present in both models. However, it does not demonstrate that the embedding representation does not provide additional predictive power beyond the aggregated statistics. The failure mechanism\u2014that the enhanced model might gain from a richer, sequential representation of prior tickets\u2014remains unresolved."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The defender points to design statements that temporal leakage is controlled and that features are extracted 'strictly at ticket creation time,' but does not address the specific failure mechanism: how the rolling-window statistics (90\u2011day compliance rate, 30\u2011day ticket count) are actually computed. Without verifying that the aggregation uses only timestamps strictly earlier than the ticket under consideration, the concern about inadvertent use of future tickets remains unaddressed. The rebuttal is generic and does not provide the needed mechanistic clarification."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender correctly notes that the experiment's objective is to predict first\u2011response SLA breaches. Tickets that are auto\u2011closed or never receive a response lack a first\u2011response event and therefore cannot be evaluated for the target outcome. Hence they are outside the operational scope of the hypothesis, and their exclusion does not introduce bias with respect to the intended prediction task. This directly resolves the failure mechanism."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The defender clarifies that the SLA target is retrieved per ticket from the ticketing system's SLA configuration at the time of the event, rather than using a static threshold. This design accounts for any policy shifts over the 36\u2011month window, eliminating the label instability concern. The rebuttal directly addresses the failure mechanism."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 2,
+        "reasoning": "The defender states that high variance in very small subgroups is an expected statistical property and does not invalidate the overall PR\u2011AUC conclusion. This does not address the specific failure mechanism: when a segment (e.g., Free\u2011tier API tickets) is extremely small, stratification may still yield too few samples to produce reliable segment\u2011specific estimates of robustness. The rebuttal is generic and leaves the concern about insufficient sample size for minority segments unresolved."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I am maintaining my positions on F3, F4, and F5. For F1, I am switching to DEFER because the critic has correctly identified a nuance regarding 'representation' vs 'information source' that cannot be resolved by design description alone. For F2, I am strengthening the REBUT-DESIGN argument by clarifying that the design's explicit 'creation time' constraint is the mechanistic control, and the critic's demand for implementation code exceeds the scope of design review.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic argues that 'customer history embeddings' may capture sequential or richer patterns than the aggregated statistics (compliance rate/count) used in the baseline. This is a genuine ambiguity: does the transformer's ability to represent history differently provide a gain independent of the ticket text? To settle this, we would run an ablation study: a model with history embeddings + metadata but NO ticket text. If this ablation performs similarly to the baseline, the design is vindicated (the gain is text-driven). If it performs similarly to the enhanced model, the critique is validated (the gain is representation-driven), and we would need to update the baseline to include embeddings.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The critic claims the rebuttal is 'generic,' but the design is explicit: Section 3 states all features are extracted 'strictly at ticket creation time.' In a design review, this is the mechanistic control. The failure mechanism (using future tickets) is logically impossible if the extraction constraint is followed. Requesting the specific SQL implementation to 'verify' the constraint is a request for an audit, not a critique of the design's logic. The design as written explicitly forbids the leakage mechanism described.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The critic accepted the R1 rebuttal. The objective is to predict first-response SLA breaches; tickets without a first response are logically outside the scope of the target variable.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic accepted the R1 rebuttal. Sourcing the SLA target per-ticket from the system configuration at the time of the event accounts for any temporal policy shifts.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critic's concern is that minority segment metrics may have high variance. This is a known property of small sample sizes, not a design flaw. The primary objective is the overall PR-AUC. While segment-specific robustness is a secondary metric, the inability to reach high statistical power in a tiny subgroup (e.g., Free-tier API) does not invalidate the primary finding or the methodology's validity.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Most findings were resolved or rebutted, but F1 remains a genuine point of contention regarding whether the gain comes from text or the representation of history. This has been deferred to an ablation experiment to provide a definitive answer."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Any performance gain of the enhanced model over the baseline is attributable solely to the addition of ticket text features.",
+        "failure_mechanism": "The enhanced model also incorporates customer history embeddings (derived from prior tickets) that are not present in the baseline, which only uses aggregated metadata features. This asymmetry means the observed improvement could stem from the richer customer\u2011history representation rather than from the ticket body text, confounding the causal claim about text.",
+        "evidence_test": "Train a baseline that includes the same customer history embeddings (or an equivalent representation) as the enhanced model, keeping all other aspects identical. If the performance gap disappears or diminishes substantially, the original claim is refuted; if the gap remains, the claim gains support.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Features such as prior customer SLA compliance rate and prior ticket count are computed using only historical information available at ticket creation time, ensuring no temporal leakage.",
+        "failure_mechanism": "The description does not specify how these rolling\u2011window statistics are calculated. If the computation inadvertently uses future tickets (e.g., by aggregating over a fixed calendar window that includes later tickets), the model would gain access to outcome\u2011related information, inflating performance artificially.",
+        "evidence_test": "Audit the feature generation code to verify that for each ticket the 90\u2011day compliance rate and 30\u2011day ticket count are calculated exclusively from tickets with timestamps strictly earlier than the ticket\u2019s creation timestamp. A simple unit test that checks the max timestamp used in each window would confirm or refute the claim.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding tickets that were auto\u2011closed or never received a response does not introduce bias because those tickets are missing at random with respect to SLA breach risk.",
+        "failure_mechanism": "Tickets that are auto\u2011closed or never answered may systematically differ (e.g., lower priority, trivial issues) and thus have a different breach probability. Removing them changes the effective population and can bias performance estimates, limiting generalizability to the full ticket stream.",
+        "evidence_test": "Compare the breach rate and feature distributions of the excluded tickets against the included set. If significant differences exist, the exclusion introduces bias; if they are statistically indistinguishable, the claim holds.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Using a static, customer\u2011tier\u2011specific SLA threshold (e.g., 4\u202fh for Premium) yields a stable binary label across the 36\u2011month period.",
+        "failure_mechanism": "SLA configurations can evolve over time (e.g., policy changes, contract renegotiations). If the threshold shifts during the observation window, the label becomes noisy and may not reflect the true operational target, degrading model validity and causing apparent performance shifts unrelated to predictive ability.",
+        "evidence_test": "Extract the SLA target per ticket from the ticketing system\u2019s configuration at the time of ticket creation and examine its variation over the 36 months. Any systematic drift would indicate label instability; stability would support the claim.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Stratified splits by customer tier and channel guarantee adequate representation of all segments in training, validation, and test sets.",
+        "failure_mechanism": "When a segment is very small (e.g., Free\u2011tier API tickets), stratification within each 6\u2011month window may still result in very few samples, leading to high variance in segment\u2011specific metrics and potentially unreliable estimates of robustness.",
+        "evidence_test": "Report the absolute counts of tickets per (tier, channel) combination in each split. If any combination falls below a reasonable threshold (e.g., <30 samples), the stratification claim is weakened; adequate counts would support it.",
+        "flaw_category": "uncertain_significance"
+      }
+    ],
+    "summary": "The PoC presents several methodological concerns that threaten the validity of its central claim: the enhanced model\u2019s performance gain may be confounded by extra customer\u2011history features, potential leakage in historical feature computation, selection bias from excluded tickets, possible SLA target drift, and limited representation of rare segments. The most critical issue is the feature asymmetry, which could entirely explain the observed improvement.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I am maintaining my positions on F3, F4, and F5. For F1, I am switching to DEFER because the critic has correctly identified a nuance regarding 'representation' vs 'information source' that cannot be resolved by design description alone. For F2, I am strengthening the REBUT-DESIGN argument by clarifying that the design's explicit 'creation time' constraint is the mechanistic control, and the critic's demand for implementation code exceeds the scope of design review.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic argues that 'customer history embeddings' may capture sequential or richer patterns than the aggregated statistics (compliance rate/count) used in the baseline. This is a genuine ambiguity: does the transformer's ability to represent history differently provide a gain independent of the ticket text? To settle this, we would run an ablation study: a model with history embeddings + metadata but NO ticket text. If this ablation performs similarly to the baseline, the design is vindicated (the gain is text-driven). If it performs similarly to the enhanced model, the critique is validated (the gain is representation-driven), and we would need to update the baseline to include embeddings.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The critic claims the rebuttal is 'generic,' but the design is explicit: Section 3 states all features are extracted 'strictly at ticket creation time.' In a design review, this is the mechanistic control. The failure mechanism (using future tickets) is logically impossible if the extraction constraint is followed. Requesting the specific SQL implementation to 'verify' the constraint is a request for an audit, not a critique of the design's logic. The design as written explicitly forbids the leakage mechanism described.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The critic accepted the R1 rebuttal. The objective is to predict first-response SLA breaches; tickets without a first response are logically outside the scope of the target variable.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic accepted the R1 rebuttal. Sourcing the SLA target per-ticket from the system configuration at the time of the event accounts for any temporal policy shifts.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critic's concern is that minority segment metrics may have high variance. This is a known property of small sample sizes, not a design flaw. The primary objective is the overall PR-AUC. While segment-specific robustness is a secondary metric, the inability to reach high statistical power in a tiny subgroup (e.g., Free-tier API) does not invalidate the primary finding or the methodology's validity.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Most findings were resolved or rebutted, but F1 remains a genuine point of contention regarding whether the gain comes from text or the representation of history. This has been deferred to an ablation experiment to provide a definitive answer."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=8, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

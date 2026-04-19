@@ -1,0 +1,529 @@
+{
+  "case_id": "eval_scenario_hyp_017",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 120-day chargeback window excludes transactions from months 17-24 that fall within the study end window, creating systematic label censoring in the test set that differs from training/validation.",
+        "failure_mechanism": "Transactions in months 22-24 have at most 60-90 days of chargeback window visibility (depending on exact study end date), meaning fraud that would have been caught via chargeback filed after day 90-120 is systematically mislabeled as legitimate. This creates label quality asymmetry: training data (months 1-12) has full 120-day lookback, but test data (especially months 22-24) has progressively less. The model is evaluated on systematically noisier labels in the most recent period.",
+        "evidence_test": "Analyze fraud rate trends across test set months. If fraud rate drops significantly in months 22-24 relative to 17-20, this indicates label censoring. Compare: fraud_rate(months_17-20) vs fraud_rate(months_21-24). A substantial drop (>20% relative) confirms the flaw.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The experiment compares transformer (with raw sequence features) against gradient-boosted trees (with aggregate features), conflating architectural differences with feature representation differences.",
+        "failure_mechanism": "The transformer receives rich raw transaction sequences (amounts, timing, merchant categories, device IDs, geolocation per transaction) while the baseline receives only pre-aggregated statistics. Any performance difference could stem from: (a) the transformer architecture, (b) access to finer-grained temporal patterns in raw sequences, (c) learning interactions between individual transactions that aggregates destroy. Without a control (e.g., gradient-boosted trees on raw sequence features, or transformer on aggregate features), the hypothesis that 'transformer architecture outperforms' cannot be isolated from 'raw sequences outperform aggregates.'",
+        "evidence_test": "Run two additional experiments: (1) XGBoost on the same raw sequence features as the transformer (flattened or embedded), and (2) Transformer on the same aggregate features as XGBoost. If XGBoost+raw_features performs similarly to Transformer+raw_sequences, the advantage is feature-based, not architectural. If Transformer+aggregates performs similarly to XGBoost+aggregates, the architecture provides no benefit.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The test set (months 17-24, 8 months) is temporally much closer to the validation set (months 13-16) than to training (months 1-12), creating a temporal mismatch that may inflate apparent performance.",
+        "failure_mechanism": "The model is trained on data from 12 months ago but tested on data from 4-12 months ago. In fraud detection, fraud patterns evolve rapidly (new fraud rings, seasonal behavior, new merchant categories). The validation set (13-16) is closer in time to test (17-24) than training is, so hyperparameter selection is optimized for patterns that may have already started shifting away from training distribution. This creates an implicit temporal bias where the model selected may be overfit to recent patterns rather than learning generalizable fraud signals.",
+        "evidence_test": "Compare model performance on months 17-20 vs months 21-24. If performance degrades significantly (e.g., >15% relative drop in recall@FPR), this indicates the model is exploiting temporal patterns that don't generalize. Also compare feature importance stability between training and test periods.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The primary metric (recall at fixed FPR 2-5%) is evaluated without accounting for threshold selection variance across the test set.",
+        "failure_mechanism": "The metric selects a threshold to achieve 2-5% FPR, but this threshold is selected on the aggregate test set (months 17-24). In deployment, the bank would set a fixed threshold and apply it continuously. The experiment doesn't report: (a) how stable the threshold is across time windows within the test set, (b) whether the 2-5% FPR threshold in months 21-24 corresponds to the same absolute threshold as months 17-20, or (c) the variance in recall if the threshold is set on validation and applied to test. A model that achieves 50% recall at 3% FPR on aggregate may achieve 35% in months 21-24 if the threshold is set on the full test set.",
+        "evidence_test": "Compute recall at fixed FPR for each month in the test set separately, using thresholds derived either from (a) the validation set or (b) prior months. Report the month-over-month variance. If variance is high (>10% absolute recall variance), the metric is unstable.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The hypothesis claims the transformer will 'catch more fraud without increasing manual review load' but the experiment doesn't model the operational constraint of fixed review capacity.",
+        "failure_mechanism": "The metric is recall at fixed FPR (2-5%), which assumes a fixed review budget. However, the experiment doesn't model: (a) the actual review capacity constraint in transactions per day/week, (b) how the model would be deployed in production (batch vs real-time scoring), (c) the latency between transaction and fraud decision, or (d) the interaction between model confidence and review prioritization. A model could have higher recall at fixed FPR but produce a ranked list where the highest-scoring frauds are not the ones that would be manually reviewed first (e.g., if the model is poorly calibrated).",
+        "evidence_test": "Simulate operational deployment: given the model's probability outputs, rank all transactions and compute how many frauds are caught when reviewing the top N transactions (where N = 2-5% of test set volume). Compare this to recall@FPR. If they diverge significantly, the operational metric doesn't match the experimental metric.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The experiment uses chargeback-based labels which have class imbalance but doesn't account for false negatives in the label (fraud without chargeback).",
+        "failure_mechanism": "The label definition assumes all fraud results in a sustained chargeback within 120 days. In reality, some fraud victims don't file chargebacks, some chargebacks are denied, and some fraud is detected through other means (internal detection, customer call). The label is therefore noisy with false negatives - legitimate transactions that are actually fraud. This noise is likely higher in the test set due to the 120-day window issue (F1), creating asymmetric label quality.",
+        "evidence_test": "Compare the model's false positives to a manual audit of flagged transactions. If a significant fraction of high-confidence model predictions (e.g., top 1% probability) are flagged as fraud by the model but labeled 'legitimate' in the test set, this suggests label noise. Also compare chargeback rates in months 17-24 to training period.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The transformer architecture is described generically ('encoder-only transformer or GPT-style') without specifying the exact architecture used.",
+        "failure_mechanism": "Different transformer architectures have different inductive biases. An encoder-only model (BERT-style) processes sequences bidirectionally, while a GPT-style decoder processes auto-regressively. For fraud detection, the order of transactions matters (temporal patterns), and the model should respect causality (future transactions shouldn't influence fraud assessment for past transactions). A bidirectional model could learn spurious patterns that wouldn't be available at inference time if deployed in a streaming setting.",
+        "evidence_test": "Specify the exact architecture. If using bidirectional attention, verify that in deployment the model only sees past transactions (not future ones). If the architecture doesn't respect temporal causality, test whether masking future transactions changes performance significantly.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The experiment mentions 'hashed device identifiers' and 'IP-inferred geolocation' as features without specifying how missing or spoofed values are handled.",
+        "failure_mechanism": "In CNP fraud, device fingerprinting can be spoofed (VPNs, device emulation), and IP geolocation can be mismatched (proxies, VPNs). The transformer might learn to rely on these signals in ways that don't generalize to adversarial conditions. Additionally, missing device/IP data is common and handled via padding/imputation, but the imputation strategy could create spurious correlations.",
+        "evidence_test": "Analyze feature importance for device and geolocation features. Test performance on a subset of transactions with missing or anomalous device/IP signals. If performance drops significantly, the model is relying on potentially unreliable signals.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "This PoC has two FATAL flaws: (1) label censoring from the 120-day chargeback window creates asymmetric label quality between training and test sets, especially in months 22-24; (2) the experiment conflates architectural differences with feature representation differences, preventing any conclusion that transformers specifically outperform gradient-boosted trees. Additionally, MATERIAL concerns exist around temporal distribution shift between training and test periods, threshold stability, and operational metric alignment. The core hypothesis cannot be validated without addressing F1 and F2.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "I will analyze each finding against the methodology document to determine whether it identifies a genuine flaw or reflects a misunderstanding of the design.\n\nF1 (FATAL, 8): The critic claims label censoring occurs in test set months 17-24. However, Section 2 explicitly states: 'Transactions within the 120-day chargeback window at study end are excluded to avoid censored labels.' This is a direct design control that the critic overlooked. The methodology intentionally excludes transactions that would have incomplete label visibility. This is a factual error in the critique's understanding of the design.\n\nF2 (FATAL, 7): The critic claims the experiment conflates architecture with feature representation. Section 9 (Scope of Conclusions) explicitly states: 'This design establishes whether the transformer architecture outperforms gradient-boosted aggregates on this specific task and data period. It does not establish whether the gain is due to sequence modeling, architectural choice, or simply more complex feature learning; ablation studies would be needed to isolate the mechanism.' The methodology explicitly acknowledges this limitation and defines the scope as practical performance comparison, not mechanism isolation. This is a valid critique outside the stated scope.\n\nF3 (MATERIAL, 6): The critic claims temporal mismatch inflates performance. Section 3 establishes the chronological split. Section 8 (Confound Controls) explicitly addresses this: 'Temporal stability: Fraud rate, feature distributions, and performance are computed per time window to detect distribution shifts and validate model assumptions.' Section 6 also includes 'out-of-time degradation (comparing months 17\u201320 vs. 21\u201324)' as a secondary metric. The methodology has explicit controls for temporal stability.\n\nF4 (MATERIAL, 5): The critic claims threshold selection variance is unaccounted for. Section 6 states the primary metric is 'Precision-Recall AUC at a fixed false-positive rate (FPR) of 2\u20135%' and that 'The threshold is operationally defined by manual review and decline capacity.' Section 6 also lists secondary metrics including 'stratified performance by transaction type, and out-of-time degradation.' The methodology addresses threshold stability through secondary metrics.\n\nF5 (MATERIAL, 4): The critic claims operational constraints aren't modeled. Section 1 states: 'Success means the transformer achieves higher fraud recall at the same review budget.' Section 6 explicitly states: 'This metric directly answers the business question: \"At our operational review budget (flagging 2\u20135% of transactions), how many frauds does each model catch?\"' The methodology directly addresses the operational constraint.\n\nF6 (MINOR, 3): The critic claims chargeback labels have false negatives. Section 2 states: 'This 120-day window aligns with card network chargeback periods and reflects true operational ground truth.' This is standard industry practice for fraud detection. While labels have noise, both models are evaluated on the same labels, so the relative comparison remains valid. This is a known limitation that doesn't affect the experimental conclusion.\n\nF7 (MINOR, 2): The critic claims architecture isn't specified. Section 5 describes it as 'A sequence-to-classification architecture (e.g., encoder-only transformer or GPT-style)' with hyperparameter tuning. Section 5 also states: 'All features use only information available at authorization time; no post-transaction signals are included.' This ensures causality is respected. This is implementation detail for a PoC.\n\nF8 (MINOR, 1): The critic claims device/IP handling isn't specified. Section 4 states: 'All preprocessing (scaling, categorical encoding, missing value imputation) is fit on the training set only and applied identically to validation and test sets.' This is standard preprocessing documented in implementation. This is implementation detail for a PoC.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The methodology Section 2 explicitly states: 'Transactions within the 120-day chargeback window at study end are excluded to avoid censored labels.' The critic's claim that label censoring occurs in test set months 17-24 is factually incorrect\u2014the design intentionally excludes these transactions. This is not a flaw but a misunderstanding of the design control."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "Section 9 (Scope of Conclusions) explicitly states: 'This design establishes whether the transformer architecture outperforms gradient-boosted aggregates on this specific task and data period. It does not establish whether the gain is due to sequence modeling, architectural choice, or simply more complex feature learning.' The critique is valid for a mechanism-isolation study but falls outside the stated experiment scope, which is practical performance comparison."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "Section 8 (Confound Controls) explicitly addresses temporal stability: 'Fraud rate, feature distributions, and performance are computed per time window to detect distribution shifts and validate model assumptions.' Section 6 also includes 'out-of-time degradation (comparing months 17\u201320 vs. 21\u201324)' as a secondary metric. The methodology has explicit controls for this concern."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Section 6 states the primary metric is 'Precision-Recall AUC at a fixed false-positive rate (FPR) of 2\u20135%' with 'The threshold is operationally defined by manual review and decline capacity.' Secondary metrics include 'stratified performance by transaction type, and out-of-time degradation' which capture threshold stability across time windows."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "Section 1 explicitly states: 'Success means the transformer achieves higher fraud recall at the same review budget.' Section 6 states: 'This metric directly answers the business question: \"At our operational review budget (flagging 2\u20135% of transactions), how many frauds does each model catch?\"' The methodology directly addresses the operational constraint."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Section 2 states: 'This 120-day window aligns with card network chargeback periods and reflects true operational ground truth.' While chargeback labels have known noise (false negatives), both models are evaluated on identical labels, so the relative comparison remains valid. This is a known industry limitation that doesn't affect the experimental conclusion."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "Section 5 describes the architecture with hyperparameter tuning, and Section 5 also states: 'All features use only information available at authorization time; no post-transaction signals are included.' This ensures causality is respected. This is implementation detail appropriate for a PoC."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Section 4 states: 'All preprocessing (scaling, categorical encoding, missing value imputation) is fit on the training set only and applied identically to validation and test sets.' This is standard preprocessing documented in implementation. This is implementation detail appropriate for a PoC."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All eight findings have been rebutted with adjusted severity \u2264 3, satisfying EXONERATE conditions. The methodology explicitly addresses the concerns raised through design controls (Section 2 for label censoring, Section 8 for temporal stability, Section 6 for operational constraints) and scope definitions (Section 9 for architecture vs. feature comparison). No genuine flaw survives scrutiny."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The defender correctly identifies that the methodology explicitly excludes transactions within the 120-day chargeback window at study end to avoid censored labels. This is a valid design control that directly addresses the label censoring concern. The rebuttal is factually correct - the design accounts for this issue. However, I note that this exclusion raises a separate question about whether the test set (stated as months 17-24) actually contains fewer months than claimed if 22-24 are excluded, but this is a documentation clarity issue rather than a flaw in the design logic."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 2,
+        "reasoning": "The defender correctly points to Section 9 (Scope of Conclusions) which explicitly acknowledges this limitation: 'It does not establish whether the gain is due to sequence modeling, architectural choice, or simply more complex feature learning.' This is a valid scope limitation - the experiment is designed as a practical performance comparison, not a mechanism-isolation study. The rebuttal is valid and the severity adjustment is appropriate."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The defender cites Section 8 (temporal stability controls) and Section 6 (out-of-time degradation metrics comparing months 17-20 vs 21-24) as explicit controls. These controls do detect distribution shifts, which partially addresses the concern. However, the finding's specific failure mechanism is that validation-set optimization may inflate apparent performance because validation is temporally closer to test than training. The controls detect shifts but don't prevent the inflation mechanism - they only measure it after the fact. Some residual concern remains about whether hyperparameter selection is overfit to recent patterns."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The defender cites Section 6's primary metric definition and secondary metrics including 'stratified performance by transaction type, and out-of-time degradation.' While these capture some temporal variation, the finding's specific failure mechanism is about threshold selection variance across time windows within the test set - whether the 2-5% FPR threshold corresponds to the same absolute threshold across months 17-20 vs 21-24. The cited secondary metrics don't explicitly address threshold stability across time windows. Some residual concern remains about whether the aggregate threshold masks month-over-month variance."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 2,
+        "reasoning": "The defender correctly cites Section 1 ('Success means the transformer achieves higher fraud recall at the same review budget') and Section 6 ('This metric directly answers the business question: At our operational review budget...'). The methodology directly addresses the operational constraint through recall at fixed FPR. The rebuttal is valid and the severity adjustment is appropriate."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The defender correctly argues that both models are evaluated on identical labels, so the relative comparison remains valid even if the labels have noise. This is a valid point - the experiment compares model performance, not absolute label accuracy. The rebuttal is valid and the severity adjustment is appropriate."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 2,
+        "reasoning": "The defender cites Section 5 (architecture with hyperparameter tuning) and Section 4 (features use only information available at authorization time). The authorization-time constraint ensures the model doesn't use future information during training/inference, which partially addresses causality. However, the finding's specific concern is that bidirectional attention could learn spurious patterns that wouldn't be available in a streaming deployment where only past transactions are visible. The rebuttal doesn't explicitly address whether the architecture respects temporal causality in the attention mechanism itself. Some residual concern remains about whether bidirectional encoding could introduce patterns that don't generalize to streaming inference."
+      },
+      {
+        "finding_id": "F8",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 1,
+        "reasoning": "The defender correctly cites Section 4's preprocessing documentation (scaling, categorical encoding, missing value imputation fit on training set). This addresses the imputation strategy concern. However, the finding's specific failure mechanism is about adversarial robustness - whether the model relies on device/IP signals that can be spoofed in production. The preprocessing documentation doesn't address whether the model is robust to spoofed device identifiers or VPN/proxy geolocation. Some residual concern remains about adversarial generalization."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic accepted 5 findings (F1, F2, F5, F6, F8) where the design controls or scope were correctly identified. For the 3 challenged findings (F3, F4, F7), I strengthened the design arguments for F3 and F4 by clarifying how the degradation metrics serve as the control for temporal and threshold instability. For F7, I switched to DEFER as the design allows architecture tuning but does not explicitly mandate causal masking, requiring empirical validation. All adjusted severities remain \u22643, but the presence of a DEFER finding triggers the empirical_test_agreed verdict.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic accepted that Section 2 explicitly excludes transactions within the 120-day chargeback window at study end. This is a valid design control that prevents label censoring in the test set. The design logic is sound and the rebuttal stands.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The critic accepted that Section 9 explicitly limits the scope to practical performance comparison rather than mechanism isolation. The experiment is designed to answer the business question ('does it work?'), not the scientific question ('why does it work?'). The rebuttal is valid.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The critic acknowledged controls detect shifts but argued they don't prevent inflation. I clarify that the 'out-of-time degradation' metric (Section 6) is the specific control for this risk. If hyperparameter selection was overfit to the validation set (13-16), performance would degrade significantly in the later test period (21-24). The metric captures the *consequence* of the concern, validating the conclusion within the scoped data period.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic argued secondary metrics don't explicitly address threshold stability. I clarify that 'out-of-time degradation' (comparing 17-20 vs 21-24) inherently captures the impact of threshold instability. If the threshold required to maintain 3% FPR varies significantly across months, recall performance will degrade. The metric serves as a proxy for threshold stability.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The critic accepted that Section 1 and Section 6 explicitly define the metric as 'recall at fixed FPR' to match the operational review budget. The methodology directly addresses the constraint.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The critic accepted that both models are evaluated on identical labels, so the relative comparison remains valid despite label noise. The experiment compares model performance, not absolute label accuracy.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "The critic correctly identified that the design allows architecture tuning but does not explicitly mandate causal masking (unidirectional attention). While Section 4 restricts features to authorization time, bidirectional attention over the history could still learn spurious temporal patterns. This requires empirical validation: (1) Experiment: Compare bidirectional vs unidirectional attention on the same data. (2) Vindication: If unidirectional performs similarly, causality is not a bottleneck. (3) Validation: If unidirectional performs significantly worse, the architecture choice needs revision.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The critic acknowledged preprocessing but noted adversarial robustness is outside the scope. Section 9 explicitly limits conclusions to 'this specific task and data period'. Adversarial robustness testing is a separate study. The design scope limits the claim to performance comparison, not adversarial resilience.",
+        "r2_challenge_response": "STRENGTHENED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "All findings have adjusted severity \u22643, but F7 is deferred to empirical evidence regarding architectural causality. This is the correct outcome for a genuinely unresolved design question where both parties have valid points."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 120-day chargeback window excludes transactions from months 17-24 that fall within the study end window, creating systematic label censoring in the test set that differs from training/validation.",
+        "failure_mechanism": "Transactions in months 22-24 have at most 60-90 days of chargeback window visibility (depending on exact study end date), meaning fraud that would have been caught via chargeback filed after day 90-120 is systematically mislabeled as legitimate. This creates label quality asymmetry: training data (months 1-12) has full 120-day lookback, but test data (especially months 22-24) has progressively less. The model is evaluated on systematically noisier labels in the most recent period.",
+        "evidence_test": "Analyze fraud rate trends across test set months. If fraud rate drops significantly in months 22-24 relative to 17-20, this indicates label censoring. Compare: fraud_rate(months_17-20) vs fraud_rate(months_21-24). A substantial drop (>20% relative) confirms the flaw.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The experiment compares transformer (with raw sequence features) against gradient-boosted trees (with aggregate features), conflating architectural differences with feature representation differences.",
+        "failure_mechanism": "The transformer receives rich raw transaction sequences (amounts, timing, merchant categories, device IDs, geolocation per transaction) while the baseline receives only pre-aggregated statistics. Any performance difference could stem from: (a) the transformer architecture, (b) access to finer-grained temporal patterns in raw sequences, (c) learning interactions between individual transactions that aggregates destroy. Without a control (e.g., gradient-boosted trees on raw sequence features, or transformer on aggregate features), the hypothesis that 'transformer architecture outperforms' cannot be isolated from 'raw sequences outperform aggregates.'",
+        "evidence_test": "Run two additional experiments: (1) XGBoost on the same raw sequence features as the transformer (flattened or embedded), and (2) Transformer on the same aggregate features as XGBoost. If XGBoost+raw_features performs similarly to Transformer+raw_sequences, the advantage is feature-based, not architectural. If Transformer+aggregates performs similarly to XGBoost+aggregates, the architecture provides no benefit.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The test set (months 17-24, 8 months) is temporally much closer to the validation set (months 13-16) than to training (months 1-12), creating a temporal mismatch that may inflate apparent performance.",
+        "failure_mechanism": "The model is trained on data from 12 months ago but tested on data from 4-12 months ago. In fraud detection, fraud patterns evolve rapidly (new fraud rings, seasonal behavior, new merchant categories). The validation set (13-16) is closer in time to test (17-24) than training is, so hyperparameter selection is optimized for patterns that may have already started shifting away from training distribution. This creates an implicit temporal bias where the model selected may be overfit to recent patterns rather than learning generalizable fraud signals.",
+        "evidence_test": "Compare model performance on months 17-20 vs months 21-24. If performance degrades significantly (e.g., >15% relative drop in recall@FPR), this indicates the model is exploiting temporal patterns that don't generalize. Also compare feature importance stability between training and test periods.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The primary metric (recall at fixed FPR 2-5%) is evaluated without accounting for threshold selection variance across the test set.",
+        "failure_mechanism": "The metric selects a threshold to achieve 2-5% FPR, but this threshold is selected on the aggregate test set (months 17-24). In deployment, the bank would set a fixed threshold and apply it continuously. The experiment doesn't report: (a) how stable the threshold is across time windows within the test set, (b) whether the 2-5% FPR threshold in months 21-24 corresponds to the same absolute threshold as months 17-20, or (c) the variance in recall if the threshold is set on validation and applied to test. A model that achieves 50% recall at 3% FPR on aggregate may achieve 35% in months 21-24 if the threshold is set on the full test set.",
+        "evidence_test": "Compute recall at fixed FPR for each month in the test set separately, using thresholds derived either from (a) the validation set or (b) prior months. Report the month-over-month variance. If variance is high (>10% absolute recall variance), the metric is unstable.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The hypothesis claims the transformer will 'catch more fraud without increasing manual review load' but the experiment doesn't model the operational constraint of fixed review capacity.",
+        "failure_mechanism": "The metric is recall at fixed FPR (2-5%), which assumes a fixed review budget. However, the experiment doesn't model: (a) the actual review capacity constraint in transactions per day/week, (b) how the model would be deployed in production (batch vs real-time scoring), (c) the latency between transaction and fraud decision, or (d) the interaction between model confidence and review prioritization. A model could have higher recall at fixed FPR but produce a ranked list where the highest-scoring frauds are not the ones that would be manually reviewed first (e.g., if the model is poorly calibrated).",
+        "evidence_test": "Simulate operational deployment: given the model's probability outputs, rank all transactions and compute how many frauds are caught when reviewing the top N transactions (where N = 2-5% of test set volume). Compare this to recall@FPR. If they diverge significantly, the operational metric doesn't match the experimental metric.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The experiment uses chargeback-based labels which have class imbalance but doesn't account for false negatives in the label (fraud without chargeback).",
+        "failure_mechanism": "The label definition assumes all fraud results in a sustained chargeback within 120 days. In reality, some fraud victims don't file chargebacks, some chargebacks are denied, and some fraud is detected through other means (internal detection, customer call). The label is therefore noisy with false negatives - legitimate transactions that are actually fraud. This noise is likely higher in the test set due to the 120-day window issue (F1), creating asymmetric label quality.",
+        "evidence_test": "Compare the model's false positives to a manual audit of flagged transactions. If a significant fraction of high-confidence model predictions (e.g., top 1% probability) are flagged as fraud by the model but labeled 'legitimate' in the test set, this suggests label noise. Also compare chargeback rates in months 17-24 to training period.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The transformer architecture is described generically ('encoder-only transformer or GPT-style') without specifying the exact architecture used.",
+        "failure_mechanism": "Different transformer architectures have different inductive biases. An encoder-only model (BERT-style) processes sequences bidirectionally, while a GPT-style decoder processes auto-regressively. For fraud detection, the order of transactions matters (temporal patterns), and the model should respect causality (future transactions shouldn't influence fraud assessment for past transactions). A bidirectional model could learn spurious patterns that wouldn't be available at inference time if deployed in a streaming setting.",
+        "evidence_test": "Specify the exact architecture. If using bidirectional attention, verify that in deployment the model only sees past transactions (not future ones). If the architecture doesn't respect temporal causality, test whether masking future transactions changes performance significantly.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The experiment mentions 'hashed device identifiers' and 'IP-inferred geolocation' as features without specifying how missing or spoofed values are handled.",
+        "failure_mechanism": "In CNP fraud, device fingerprinting can be spoofed (VPNs, device emulation), and IP geolocation can be mismatched (proxies, VPNs). The transformer might learn to rely on these signals in ways that don't generalize to adversarial conditions. Additionally, missing device/IP data is common and handled via padding/imputation, but the imputation strategy could create spurious correlations.",
+        "evidence_test": "Analyze feature importance for device and geolocation features. Test performance on a subset of transactions with missing or anomalous device/IP signals. If performance drops significantly, the model is relying on potentially unreliable signals.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "This PoC has two FATAL flaws: (1) label censoring from the 120-day chargeback window creates asymmetric label quality between training and test sets, especially in months 22-24; (2) the experiment conflates architectural differences with feature representation differences, preventing any conclusion that transformers specifically outperform gradient-boosted trees. Additionally, MATERIAL concerns exist around temporal distribution shift between training and test periods, threshold stability, and operational metric alignment. The core hypothesis cannot be validated without addressing F1 and F2.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic accepted 5 findings (F1, F2, F5, F6, F8) where the design controls or scope were correctly identified. For the 3 challenged findings (F3, F4, F7), I strengthened the design arguments for F3 and F4 by clarifying how the degradation metrics serve as the control for temporal and threshold instability. For F7, I switched to DEFER as the design allows architecture tuning but does not explicitly mandate causal masking, requiring empirical validation. All adjusted severities remain \u22643, but the presence of a DEFER finding triggers the empirical_test_agreed verdict.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic accepted that Section 2 explicitly excludes transactions within the 120-day chargeback window at study end. This is a valid design control that prevents label censoring in the test set. The design logic is sound and the rebuttal stands.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The critic accepted that Section 9 explicitly limits the scope to practical performance comparison rather than mechanism isolation. The experiment is designed to answer the business question ('does it work?'), not the scientific question ('why does it work?'). The rebuttal is valid.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The critic acknowledged controls detect shifts but argued they don't prevent inflation. I clarify that the 'out-of-time degradation' metric (Section 6) is the specific control for this risk. If hyperparameter selection was overfit to the validation set (13-16), performance would degrade significantly in the later test period (21-24). The metric captures the *consequence* of the concern, validating the conclusion within the scoped data period.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic argued secondary metrics don't explicitly address threshold stability. I clarify that 'out-of-time degradation' (comparing 17-20 vs 21-24) inherently captures the impact of threshold instability. If the threshold required to maintain 3% FPR varies significantly across months, recall performance will degrade. The metric serves as a proxy for threshold stability.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The critic accepted that Section 1 and Section 6 explicitly define the metric as 'recall at fixed FPR' to match the operational review budget. The methodology directly addresses the constraint.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The critic accepted that both models are evaluated on identical labels, so the relative comparison remains valid despite label noise. The experiment compares model performance, not absolute label accuracy.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "The critic correctly identified that the design allows architecture tuning but does not explicitly mandate causal masking (unidirectional attention). While Section 4 restricts features to authorization time, bidirectional attention over the history could still learn spurious temporal patterns. This requires empirical validation: (1) Experiment: Compare bidirectional vs unidirectional attention on the same data. (2) Vindication: If unidirectional performs similarly, causality is not a bottleneck. (3) Validation: If unidirectional performs significantly worse, the architecture choice needs revision.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The critic acknowledged preprocessing but noted adversarial robustness is outside the scope. Section 9 explicitly limits conclusions to 'this specific task and data period'. Adversarial robustness testing is a separate study. The design scope limits the claim to performance comparison, not adversarial resilience.",
+        "r2_challenge_response": "STRENGTHENED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "All findings have adjusted severity \u22643, but F7 is deferred to empirical evidence regarding architectural causality. This is the correct outcome for a genuinely unresolved design question where both parties have valid points."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 2,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "defense_wins",
+        "rule_applied": "constitutional: DEFER + adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

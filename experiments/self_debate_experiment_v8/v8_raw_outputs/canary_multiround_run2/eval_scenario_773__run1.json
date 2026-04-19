@@ -1,0 +1,529 @@
+{
+  "case_id": "eval_scenario_773",
+  "stratum": "regular",
+  "flaw_category": "missing_baselines",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "x-ai/grok-4.1-fast",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline model uses Stream C features including 'aggregated lab/vital summaries\u2014min, max, mean, last value' \u2014 this is essentially the same longitudinal feature stream as Stream A, just without temporal features like slope and measurement frequency.",
+        "failure_mechanism": "The comparison is not between 'multimodal vs. tabular' but rather 'multimodal + extra temporal features vs. reduced temporal features.' The baseline already contains longitudinal lab/vital summaries, meaning any performance gain cannot be attributed to embeddings or multimodal fusion \u2014 it could come purely from the additional temporal features (slope, measurement frequency) in Stream A that the baseline lacks. This conflates the value of embeddings with the value of additional temporal engineering.",
+        "evidence_test": "Re-run the experiment with a true tabular-only baseline that excludes all lab/vital time-series summaries, using only demographics, Charlson index, ICD codes, admission source, service line, length of stay, and discharge disposition. If multimodal still outperforms this stricter baseline, then embeddings add value.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Longitudinal features (Stream A) are computed using summary statistics (min, max, mean, last value) over the entire admission, which discards temporal ordering and clinical trajectory patterns.",
+        "failure_mechanism": "Readmission risk often depends on trajectory (e.g., worsening creatinine over time vs. stable). By aggregating to summary statistics, the model cannot distinguish a patient whose labs worsened throughout admission from one who improved then stabilized. The experiment treats irregular measurement intervals as noise to be summarized away rather than signal to be exploited. A model using only summaries may perform no better than baseline even if longitudinal data contains predictive signal, because that signal is destroyed during feature engineering.",
+        "evidence_test": "Compare against a model that uses the raw time series with appropriate sequence modeling (RNN, LSTM, or temporal attention) or at minimum uses admission-half comparisons (first-half vs. second-half values). If sequence models outperform the summary-statistic approach, the current feature engineering is inadequate.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The validation window (6 months) is followed by an 18-month test window with a 1-month gap, and there is no evaluation of temporal stability across the 18-month test period.",
+        "failure_mechanism": "Healthcare practices, patient populations, and coding habits evolve over 18 months. A model that appears stable over a 6-month validation window may exhibit drift, seasonal effects, or response to policy changes over 18 months. The experiment reports overall test-set metrics but does not analyze performance as a function of time within the test set. If performance degrades in months 55-60 relative to months 43-50, this would be invisible.",
+        "evidence_test": "Compute precision@80% recall in rolling windows (e.g., 3-month blocks) across the 18-month test period. Report trend and variance. If performance is non-stationary, the reported aggregate metric is misleading.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Missingness patterns for labs and vitals are acknowledged as correlated with readmission status but no imputation strategy is specified, and sensitivity analysis is mentioned but not detailed.",
+        "failure_mechanism": "Missing not at random (MNAR) data in EHR is common \u2014 patients who deteriorate may have more labs ordered, or conversely, stable patients may have fewer measurements. If the model learns to associate 'fewer lab measurements' with lower risk, it may fail catastrophically on a population where measurement protocols change (e.g., a new ward protocol ordering fewer routine labs). The experiment acknowledges this confound but does not establish that the model is robust to it.",
+        "evidence_test": "Train separate models with: (1) indicator variables for missing labs/vitals, (2) multiple imputation, (3) inverse probability weighting. Compare performance. If results change substantially, the current model is not robust to missingness mechanisms.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline uses a 'fixed, clinically conservative hyperparameter configuration' while the multimodal model uses 5-fold CV for hyperparameter selection.",
+        "failure_mechanism": "This introduces asymmetry \u2014 the multimodal model gets the benefit of systematic hyperparameter optimization while the baseline is deliberately constrained. A fairly tuned baseline might close the performance gap, making the multimodal improvement appear larger than it truly is. The stated intent is to 'avoid absorbing gains through extensive optimization' but this actually works against fair comparison.",
+        "evidence_test": "Apply the same 5-fold CV hyperparameter search to the baseline model. If the baseline's precision@80% recall increases substantially, the multimodal gain is partially an artifact of asymmetric tuning.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Stratified temporal split by hospital and service line ensures proportional representation.",
+        "failure_mechanism": "Stratification by hospital in the temporal split may inadvertently leak hospital-level information. If hospitals have consistent readmission rates over time, stratifying on hospital during split could allow the model to learn hospital-specific priors that don't generalize to a new hospital deployment. This is only a concern for out-of-network generalization, which is explicitly out of scope, but worth noting.",
+        "evidence_test": "Train on a subset of hospitals only, test on held-out hospitals. If performance drops dramatically, hospital-specific learning is occurring and may limit generalization.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The target improvement is \u22655% absolute precision gain at 80% recall.",
+        "failure_imchanism": "This threshold is arbitrary and not justified by clinical input. A 5% gain might be clinically significant or trivial depending on the baseline precision. If baseline precision is 20%, a 5% gain (to 25%) is modest; if baseline is 50%, a 5% gain (to 55%) may justify implementation costs. The success criterion conflates statistical and clinical significance.",
+        "evidence_test": "Obtain clinician judgment on what precision level at 80% recall would justify deployment (e.g., 'we need at least 40% precision to justify case management outreach'). Set success threshold based on that.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Discharge note embeddings are generated from a fixed pre-trained clinical language model.",
+        "failure_mechanism": "Using fixed embeddings from PubMedBERT (trained on scientific literature, not clinical notes) may not capture the full semantic richness of discharge summaries. Domain mismatch between training corpus (PubMed) and target corpus (discharge notes) could limit embedding quality. However, this is a known limitation and the design correctly avoids fine-tuning (which could cause leakage).",
+        "evidence_test": "Compare against embeddings from a model specifically fine-tuned on clinical notes (if available) or use a domain-adapted clinical BERT. If performance changes meaningfully, domain mismatch is consequential.",
+        "flaw_category": "defensible_unconventional"
+      }
+    ],
+    "summary": "Two FATAL flaws undermine the experiment: (1) the baseline already contains longitudinal lab/vital summaries, making the comparison confounded \u2014 it tests extra temporal features plus embeddings vs. reduced temporal features, not multimodal vs. tabular; (2) longitudinal features are reduced to summary statistics that discard trajectory information, potentially destroying the very signal the hypothesis relies on. A MATERIAL issue is the 18-month test window with no temporal stability analysis, risking distribution shift masking as stable performance.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "Full analysis of all findings prior to verdict assignment:\n\nF1 (FATAL, sev 7): Critic claims baseline Stream C includes core longitudinal summaries (min/max/mean/last of labs/vitals), making it nearly identical to Stream A minus extras like slope/frequency/hours/rate-of-change. Thus, any hypothesis model gain (A+B+C) over baseline (C) could stem from those extra temporal features rather than embeddings (B) or true multimodal fusion, confounding attribution. Evidence: Methodology Section 3 explicitly defines Stream C as including 'aggregated lab/vital summaries\u2014min, max, mean, last value' alongside demographics etc.; Stream A adds frequency, slope, etc. No ablation isolates extras in A vs B; note length checks verbosity confound but not temporal feats vs embeddings. Design intent (Section 8) is to test 'multimodal features (longitudinal time series + discharge embeddings)' vs 'tabular baselines', but baseline is not purely tabular\u2014it's tabular + basic longitudinal summaries. This is a genuine conflation flaw: experiment cannot distinguish if gains are from embeddings or added temporal engineering. No named control (e.g., ablation of A extras) addresses this; stricter baseline sans any labs/vitals would be needed. Uncertain: actual experiment outputs (e.g., feature importances) might show embeddings dominant, but design lacks isolation.\n\nF2 (FATAL, sev 7): Critic argues summary stats over entire admission discard trajectory/ordering (e.g., worsening vs improving labs), destroying signal from irregular time series; sequence models needed to verify. Evidence: Section 3 describes Stream A as exactly these summaries + basic temporal (slope, frequency, hours last), no bucketing/intervals/sequences; tree models can't model raw sequences. Real-world irregular intervals noted (Section 1), but aggregation assumes summaries suffice for PoC hypothesis. Section 7 controls missingness but not trajectory adequacy. Genuine concern: if trajectory signal exists but is lost, hypothesis understates longitudinal value. However, design scope (Sections 3-4) deliberately chooses simple summaries for tree-based PoC to handle irregularity/mixed data without neural seq models; hypothesis tests THESE features, not optimal longitudinal modeling. Uncertain: empirical comparison to seq models needed, but outside PoC scope.\n\nF3 (MATERIAL, sev 6): No analysis of performance drift/stability within 18-month test window (e.g., rolling windows), despite 6mo val + gap; aggregate metrics hide evolution in practices/populations. Evidence: Section 2 defines windows, Section 6 reports overall + stratified by hospital/service (not time), Section 7 notes temporal split/gap for validity but no within-test trend analysis. Stratified results detect site heterogeneity but not temporal. Valid gap: long test risks non-stationarity invisible in aggregate, especially for clinical deployment. No explicit control; design presumes split suffices. Uncertain: actual test trends unknown\u2014requires post-hoc rolling window computation to settle.\n\nF4 (MATERIAL, sev 5): No specific imputation strategy detailed; sensitivity to imputed/non-imputed mentioned but vague, risking MNAR bias from measurement protocols. Evidence: Section 3 notes 'imputation methods' fit on train only, Section 7 plans 'sensitivity analyses compare imputed vs. non-imputed baselines' + missingness correlation analysis. Acknowledges real-world missingness (Section 1). Partial control exists (planned sensitivity), but lacks specifics (e.g., mean/mice/ipw). Genuine but mitigated: design anticipates via analysis; full robustness needs detailed strategies/indicators. Uncertain: impact depends on outputs, but planned checks address.\n\nF5 (MATERIAL, sev 4): Asymmetric tuning\u2014hypothesis gets 5-fold CV on train, baseline fixed 'clinically conservative' hypers. Evidence: Section 4 explicitly states baseline uses fixed config 'to keep the reference model interpretable and avoid absorbing gains through extensive optimization of a deliberately simpler feature set... preserve a stable reference.' Deliberate design choice to isolate feature value over tuning; same splits/preprocessing/early-stopping. Not unfair: tests if multimodal adds value beyond stable tabular reference. No inflation if baseline tuning wouldn't close gap.\n\nF6 (MINOR, sev 3): Hospital stratification in splits may leak site priors, limiting out-of-network generalization. Evidence: Section 2 uses stratification by hospital/service within windows. Section 8 explicitly scopes to 'within this system' and 'does not establish... generalizes to other hospital networks'. Valid only for OOS generalization, which is out-of-scope; intra-network site variation is controlled intentionally.\n\nF7 (MINOR, sev 2): 5% absolute precision gain threshold arbitrary, not clinically justified. Evidence: Section 8 defines 'operationally meaningful improvements (\u22655% absolute precision gain...)'. Sets PoC success bar; clinical sig depends on baseline, but experiment reports full curves/stratified for context. Minor: threshold guides but doesn't invalidate metrics.\n\nF8 (MINOR, sev 1): Fixed PubMedBERT mismatches discharge notes (PubMed=lit). Evidence: Section 3 specifies 'fixed pre-trained clinical language model (e.g., PubMedBERT)' + no fine-tuning to avoid leakage; explicit features like length. Deliberate: prevents train-set fine-tune leakage; known limit noted. Domain adaptation outside scope.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "Critique correctly identifies that Stream C baseline includes core lab/vital summaries (min/max/mean/last per Section 3), so hypothesis gains from added Stream A temporal features (slope/frequency) confound with embeddings; no ablation isolates embeddings' contribution, materially flawing attribution to 'multimodal' value."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "Design deliberately uses summary + basic temporal stats (slope, frequency, hours per Section 3) for tree-based PoC to handle real-world irregularity without sequence models; tests if these specific longitudinal features add value, not optimal trajectory modeling (future work)."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "Within-test drift unaddressed beyond aggregate/stratified metrics (Sections 6-7); settle via rolling 3-month precision@80%recall windows on test set\u2014vindication if stable trend/variance (confirms split/gap suffice), validation if degrading (aggregate misleading, needs temporal controls)."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Section 7 explicitly plans missingness pattern analysis + sensitivity (imputed vs non-imputed); Section 3 fits imputation on train only\u2014design anticipates MNAR via these controls, though details unspecified."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Section 4 deliberately fixes baseline hypers 'to avoid absorbing gains through extensive optimization... preserve stable reference,' isolating feature value over tuning symmetry; same splits/framework used."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "Hospital stratification controls intra-network variation (Section 2); OOS generalization explicitly out-of-scope (Section 8: 'only whether it holds within this system')."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Threshold sets PoC success bar (Section 8); full PR curves/stratified metrics provide context for clinical judgment\u2014arbitrariness below significance for conclusions."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Fixed pre-trained model deliberate to prevent fine-tune leakage (Section 3); note length feature checks verbosity confound\u2014known domain limit for PoC."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "F1 conceded as FATAL (adjusted sev 7) reveals core confound in baseline vs multimodal attribution, materially invalidating primary hypothesis test. Other findings rebutted or deferred but do not alter this outcome."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 7,
+        "reasoning": "The defender CONCEDES this finding. The baseline includes longitudinal summaries (min/max/mean/last value), so gains could come from additional temporal features (slope, frequency) rather than embeddings. No counter needed."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 5,
+        "reasoning": "The defender argues this is a deliberate design choice to test specific longitudinal features (summary stats + slope/frequency) rather than optimal trajectory modeling. However, this does not resolve the core failure mechanism: by using summary statistics that discard temporal ordering, the experiment may fail to detect predictive signal that exists in longitudinal trajectories. The defender acknowledges this is a PoC limitation, but the fundamental issue remains \u2014 the design may destroy the very signal it seeks to evaluate. The severity adjustment from 7 to 3 is disproportionate; a more appropriate adjustment would be to 4-5, acknowledging the design is explicit but the flaw remains."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 6,
+        "reasoning": "The defender DEFERs this finding, correctly identifying that the within-test drift concern can only be settled via the proposed rolling window analysis. This is a valid open question that requires empirical investigation rather than design rebuttal. No counter needed."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 2,
+        "reasoning": "The defender correctly cites Section 7's explicit plans for missingness pattern analysis and sensitivity comparisons (imputed vs. non-imputed). This directly addresses the failure mechanism \u2014 the design anticipates MNAR concerns and includes controls. The rebuttal is specific and addresses the mechanism. The adjustment to severity 2 is appropriate."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender argues the asymmetry is deliberate \u2014 to preserve a stable reference and isolate feature value from tuning effects. This is a valid methodological rationale. The rebuttal directly addresses the failure mechanism (asymmetric optimization) by explaining why asymmetry is intentional. The adjustment to severity 0 is appropriate."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender correctly invokes scope \u2014 out-of-network generalization is explicitly out of scope (Section 8). The finding concerns generalization to new hospitals, which is outside the experiment's stated goals. The rebuttal is appropriate for a scope-limited experiment."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender argues the 5% threshold is a PoC success bar, with full PR curves and stratified metrics providing context for clinical judgment. This is a reasonable defense \u2014 the threshold is arbitrary but the experiment provides additional context. The rebuttal addresses the mechanism (conflation of statistical/clinical significance) by noting the additional metrics available. Adjustment to 0 is appropriate."
+      },
+      {
+        "finding_id": "F8",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender correctly cites the deliberate design choice to use fixed pre-trained embeddings to avoid fine-tune leakage, with note length as a confound check. This directly addresses the domain mismatch concern by explaining the tradeoff. The rebuttal is specific and addresses the mechanism. Adjustment to 0 is appropriate."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "Accepted all critic ACCEPT and PARTIAL verdicts except contesting F2 PARTIAL by strengthening the REBUT-DESIGN: the design explicitly tests practical, tree-suitable summary + temporal stats (slope/frequency) to evaluate deployable longitudinal value, not optimal sequence modeling; if summaries discard signal, experiment correctly shows no gain, aligning with PoC hypothesis without material flaw.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "Critique correctly identifies that Stream C baseline includes core lab/vital summaries (min/max/mean/last per Section 3), so hypothesis gains from added Stream A temporal features (slope/frequency) confound with embeddings; no ablation isolates embeddings' contribution, materially flawing attribution to 'multimodal' value. (Maintains R1 concession, ACCEPTed by critic.)",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "Design deliberately engineers Stream A summaries (min/max/mean/last) + temporal stats (slope, frequency, hours to last) for gradient boosting to handle real-world irregularity without sequence models (Section 3); hypothesis tests if these practical, deployable features add value over baseline summaries, not optimal trajectory capture (e.g., RNNs as future work). If finer trajectories hold untapped signal, experiment correctly detects no/limited gain from summaries, falsifying for this model class without conflating prereqs\u2014directly addresses PARTIAL concern that summaries 'destroy signal,' as design scopes to tree-suitable engineering and PoC limitations are explicit.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "Within-test drift unaddressed beyond aggregate/stratified metrics (Sections 6-7); settle via rolling 3-month precision@80%recall windows on test set\u2014vindication if stable trend/variance (confirms split/gap suffice), validation if degrading (aggregate misleading, needs temporal controls). (Maintains R1 DEFER, ACCEPTed by critic.)",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Section 7 explicitly plans missingness pattern analysis + sensitivity (imputed vs non-imputed); Section 3 fits imputation on train only\u2014design anticipates MNAR via these controls, though details unspecified. (Maintains R1, ACCEPTed by critic.)",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Section 4 deliberately fixes baseline hypers 'to avoid absorbing gains through extensive optimization... preserve stable reference,' isolating feature value over tuning symmetry; same splits/framework used. (Maintains R1, ACCEPTed by critic.)",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "Hospital stratification controls intra-network variation (Section 2); OOS generalization explicitly out-of-scope (Section 8: 'only whether it holds within this system'). (Maintains R1, ACCEPTed by critic.)",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Threshold sets PoC success bar (Section 8); full PR curves/stratified metrics provide context for clinical judgment\u2014arbitrariness below significance for conclusions. (Maintains R1, ACCEPTed by critic.)",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Fixed pre-trained model deliberate to prevent fine-tune leakage (Section 3); note length feature checks verbosity confound\u2014known domain limit for PoC. (Maintains R1, ACCEPTed by critic.)",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "F1 remains a conceded FATAL finding at adjusted severity 7 (>3), meeting the critique_wins condition despite successful rebuttals/DEFERS on others; F3 DEFER at 6 does not override the conceded FATAL."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline model uses Stream C features including 'aggregated lab/vital summaries\u2014min, max, mean, last value' \u2014 this is essentially the same longitudinal feature stream as Stream A, just without temporal features like slope and measurement frequency.",
+        "failure_mechanism": "The comparison is not between 'multimodal vs. tabular' but rather 'multimodal + extra temporal features vs. reduced temporal features.' The baseline already contains longitudinal lab/vital summaries, meaning any performance gain cannot be attributed to embeddings or multimodal fusion \u2014 it could come purely from the additional temporal features (slope, measurement frequency) in Stream A that the baseline lacks. This conflates the value of embeddings with the value of additional temporal engineering.",
+        "evidence_test": "Re-run the experiment with a true tabular-only baseline that excludes all lab/vital time-series summaries, using only demographics, Charlson index, ICD codes, admission source, service line, length of stay, and discharge disposition. If multimodal still outperforms this stricter baseline, then embeddings add value.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Longitudinal features (Stream A) are computed using summary statistics (min, max, mean, last value) over the entire admission, which discards temporal ordering and clinical trajectory patterns.",
+        "failure_mechanism": "Readmission risk often depends on trajectory (e.g., worsening creatinine over time vs. stable). By aggregating to summary statistics, the model cannot distinguish a patient whose labs worsened throughout admission from one who improved then stabilized. The experiment treats irregular measurement intervals as noise to be summarized away rather than signal to be exploited. A model using only summaries may perform no better than baseline even if longitudinal data contains predictive signal, because that signal is destroyed during feature engineering.",
+        "evidence_test": "Compare against a model that uses the raw time series with appropriate sequence modeling (RNN, LSTM, or temporal attention) or at minimum uses admission-half comparisons (first-half vs. second-half values). If sequence models outperform the summary-statistic approach, the current feature engineering is inadequate.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The validation window (6 months) is followed by an 18-month test window with a 1-month gap, and there is no evaluation of temporal stability across the 18-month test period.",
+        "failure_mechanism": "Healthcare practices, patient populations, and coding habits evolve over 18 months. A model that appears stable over a 6-month validation window may exhibit drift, seasonal effects, or response to policy changes over 18 months. The experiment reports overall test-set metrics but does not analyze performance as a function of time within the test set. If performance degrades in months 55-60 relative to months 43-50, this would be invisible.",
+        "evidence_test": "Compute precision@80% recall in rolling windows (e.g., 3-month blocks) across the 18-month test period. Report trend and variance. If performance is non-stationary, the reported aggregate metric is misleading.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Missingness patterns for labs and vitals are acknowledged as correlated with readmission status but no imputation strategy is specified, and sensitivity analysis is mentioned but not detailed.",
+        "failure_mechanism": "Missing not at random (MNAR) data in EHR is common \u2014 patients who deteriorate may have more labs ordered, or conversely, stable patients may have fewer measurements. If the model learns to associate 'fewer lab measurements' with lower risk, it may fail catastrophically on a population where measurement protocols change (e.g., a new ward protocol ordering fewer routine labs). The experiment acknowledges this confound but does not establish that the model is robust to it.",
+        "evidence_test": "Train separate models with: (1) indicator variables for missing labs/vitals, (2) multiple imputation, (3) inverse probability weighting. Compare performance. If results change substantially, the current model is not robust to missingness mechanisms.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline uses a 'fixed, clinically conservative hyperparameter configuration' while the multimodal model uses 5-fold CV for hyperparameter selection.",
+        "failure_mechanism": "This introduces asymmetry \u2014 the multimodal model gets the benefit of systematic hyperparameter optimization while the baseline is deliberately constrained. A fairly tuned baseline might close the performance gap, making the multimodal improvement appear larger than it truly is. The stated intent is to 'avoid absorbing gains through extensive optimization' but this actually works against fair comparison.",
+        "evidence_test": "Apply the same 5-fold CV hyperparameter search to the baseline model. If the baseline's precision@80% recall increases substantially, the multimodal gain is partially an artifact of asymmetric tuning.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Stratified temporal split by hospital and service line ensures proportional representation.",
+        "failure_mechanism": "Stratification by hospital in the temporal split may inadvertently leak hospital-level information. If hospitals have consistent readmission rates over time, stratifying on hospital during split could allow the model to learn hospital-specific priors that don't generalize to a new hospital deployment. This is only a concern for out-of-network generalization, which is explicitly out of scope, but worth noting.",
+        "evidence_test": "Train on a subset of hospitals only, test on held-out hospitals. If performance drops dramatically, hospital-specific learning is occurring and may limit generalization.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The target improvement is \u22655% absolute precision gain at 80% recall.",
+        "failure_imchanism": "This threshold is arbitrary and not justified by clinical input. A 5% gain might be clinically significant or trivial depending on the baseline precision. If baseline precision is 20%, a 5% gain (to 25%) is modest; if baseline is 50%, a 5% gain (to 55%) may justify implementation costs. The success criterion conflates statistical and clinical significance.",
+        "evidence_test": "Obtain clinician judgment on what precision level at 80% recall would justify deployment (e.g., 'we need at least 40% precision to justify case management outreach'). Set success threshold based on that.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Discharge note embeddings are generated from a fixed pre-trained clinical language model.",
+        "failure_mechanism": "Using fixed embeddings from PubMedBERT (trained on scientific literature, not clinical notes) may not capture the full semantic richness of discharge summaries. Domain mismatch between training corpus (PubMed) and target corpus (discharge notes) could limit embedding quality. However, this is a known limitation and the design correctly avoids fine-tuning (which could cause leakage).",
+        "evidence_test": "Compare against embeddings from a model specifically fine-tuned on clinical notes (if available) or use a domain-adapted clinical BERT. If performance changes meaningfully, domain mismatch is consequential.",
+        "flaw_category": "defensible_unconventional"
+      }
+    ],
+    "summary": "Two FATAL flaws undermine the experiment: (1) the baseline already contains longitudinal lab/vital summaries, making the comparison confounded \u2014 it tests extra temporal features plus embeddings vs. reduced temporal features, not multimodal vs. tabular; (2) longitudinal features are reduced to summary statistics that discard trajectory information, potentially destroying the very signal the hypothesis relies on. A MATERIAL issue is the 18-month test window with no temporal stability analysis, risking distribution shift masking as stable performance.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "Accepted all critic ACCEPT and PARTIAL verdicts except contesting F2 PARTIAL by strengthening the REBUT-DESIGN: the design explicitly tests practical, tree-suitable summary + temporal stats (slope/frequency) to evaluate deployable longitudinal value, not optimal sequence modeling; if summaries discard signal, experiment correctly shows no gain, aligning with PoC hypothesis without material flaw.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "Critique correctly identifies that Stream C baseline includes core lab/vital summaries (min/max/mean/last per Section 3), so hypothesis gains from added Stream A temporal features (slope/frequency) confound with embeddings; no ablation isolates embeddings' contribution, materially flawing attribution to 'multimodal' value. (Maintains R1 concession, ACCEPTed by critic.)",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "Design deliberately engineers Stream A summaries (min/max/mean/last) + temporal stats (slope, frequency, hours to last) for gradient boosting to handle real-world irregularity without sequence models (Section 3); hypothesis tests if these practical, deployable features add value over baseline summaries, not optimal trajectory capture (e.g., RNNs as future work). If finer trajectories hold untapped signal, experiment correctly detects no/limited gain from summaries, falsifying for this model class without conflating prereqs\u2014directly addresses PARTIAL concern that summaries 'destroy signal,' as design scopes to tree-suitable engineering and PoC limitations are explicit.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "Within-test drift unaddressed beyond aggregate/stratified metrics (Sections 6-7); settle via rolling 3-month precision@80%recall windows on test set\u2014vindication if stable trend/variance (confirms split/gap suffice), validation if degrading (aggregate misleading, needs temporal controls). (Maintains R1 DEFER, ACCEPTed by critic.)",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Section 7 explicitly plans missingness pattern analysis + sensitivity (imputed vs non-imputed); Section 3 fits imputation on train only\u2014design anticipates MNAR via these controls, though details unspecified. (Maintains R1, ACCEPTed by critic.)",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Section 4 deliberately fixes baseline hypers 'to avoid absorbing gains through extensive optimization... preserve stable reference,' isolating feature value over tuning symmetry; same splits/framework used. (Maintains R1, ACCEPTed by critic.)",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "Hospital stratification controls intra-network variation (Section 2); OOS generalization explicitly out-of-scope (Section 8: 'only whether it holds within this system'). (Maintains R1, ACCEPTed by critic.)",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Threshold sets PoC success bar (Section 8); full PR curves/stratified metrics provide context for clinical judgment\u2014arbitrariness below significance for conclusions. (Maintains R1, ACCEPTed by critic.)",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Fixed pre-trained model deliberate to prevent fine-tune leakage (Section 3); note length feature checks verbosity confound\u2014known domain limit for PoC. (Maintains R1, ACCEPTed by critic.)",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "F1 remains a conceded FATAL finding at adjusted severity 7 (>3), meeting the critique_wins condition despite successful rebuttals/DEFERS on others; F3 DEFER at 6 does not override the conceded FATAL."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

@@ -1,0 +1,352 @@
+{
+  "case_id": "eval_scenario_897",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Upsampling confirmed incidents to ~5% of training alerts via duplication preserves the temporal and distributional properties of the original data and does not introduce bias that invalidates the comparison between the ranking model and baseline.",
+        "failure_mechanism": "Duplicating positive samples (confirmed incidents) is a form of oversampling that creates exact copies of training examples. This can cause the model to overfit to the specific duplicated instances rather than learning the underlying signal. Crucially, it artificially increases the effective weight of each positive incident in the loss function. If the baseline (logistic regression) and the ranking model (e.g., LambdaMART) respond differently to class imbalance and sample weighting, the comparison becomes unfair. The ranking model, optimized on a listwise or pairwise loss with duplicated positives, may learn to rank these specific duplicated alerts highly, while the classifier, trained on a standard cross-entropy loss with the same duplicated data, may not receive an equivalent 'boost'. The result is an inflated apparent advantage for the ranking model that is an artifact of the sampling method, not the ranking inductive bias.",
+        "evidence_test": "Re-run the experiment with two alternative training strategies: 1) Use the original, severely imbalanced training data with appropriate loss weighting or thresholding for both models. 2) Use a more sophisticated oversampling technique (e.g., SMOTE) or undersampling for the baseline. Compare the delta in Recall@10 between the ranking model and baseline under these conditions versus the reported delta from the duplicated-upsampling method. A large change in the performance gap would indicate the finding is confounded by the sampling artifact.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split (months 1-12 train, 13-15 val, 16-18 test) and the incident-level grouping guarantee that 'no alert from a single incident appears in more than one partition, eliminating cross-set leakage.'",
+        "failure_mechanism": "Leakage can occur through features, not just through labels. The design includes 'incident-response history' features such as 'count of previous alerts from the same rule in past 30 days' and 'count of prior incidents involving the same asset in past 90 days'. If these counts are calculated using the entire dataset *before* the temporal split is applied, they will contain information from the future (validation/test periods) when computed for training examples. For instance, an alert in month 6 (training) could have its 'prior incidents in past 90 days' feature calculated using incident data from months 4-6. However, if the feature calculation window is not strictly limited to *only data available up to the timestamp of the current alert*, it could inadvertently include incidents from the future relative to that alert's timestamp. More subtly, if the 'asset criticality score' or 'user risk score' is a static or slowly updated metric derived from the entire dataset, it also carries future information. This is a form of temporal leakage that invalidates the realism of the evaluation, as a production model at time T would not have access to aggregated statistics from time T+\u03b4.",
+        "evidence_test": "Audit the feature engineering code to verify that all time-windowed aggregations (counts, scores) are computed using a strictly causal filter: for each alert at time T, the feature calculation may only use data with timestamps < T. Furthermore, any rolling metrics must be recalculated for the validation/test sets using only data that would have been available at the simulated inference time, not the entire historical corpus.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The primary metric, Recall@10 per time window, averaged across windows, is a sufficient and unambiguous measure of the operational goal ('how often are genuine incidents included in the analyst's top-10 review window').",
+        "failure_mechanism": "Averaging Recall@10 across all days/shifts can hide critical failure modes. If the model's performance is highly variable\u2014e.g., it achieves perfect recall on 80% of days but zero recall on 20% of days\u2014the average might look acceptable, but the operational impact is catastrophic on the days it fails. The 'per time window' calculation is specified, but the 'average' is the reported number. This obscures the distribution of performance. Furthermore, the metric does not account for the *number* of incidents per window. A model that finds the single easy incident each day but misses days with multiple or complex incidents would have a deceptively high average recall if most days have only one incident. The operational goal is to minimize missed incidents, not to maximize average recall per se.",
+        "evidence_test": "Report the distribution of per-window Recall@10 (e.g., histogram, 10th/50th/90th percentiles) alongside the average. Also, report the fraction of total incidents missed (global recall) and analyze whether missed incidents are clustered in specific time windows or incident types. A large discrepancy between average per-window recall and global incident recall indicates the metric is misleading.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The logistic regression baseline, with 'equivalent hyperparameter search effort,' is a sufficient and fair baseline to test whether 'ranking-specific inductive biases' provide benefit.",
+        "failure_mechanism": "Logistic regression is a linear model. The proposed ranking model (e.g., LambdaMART or a neural ranker) is almost certainly non-linear and of higher capacity. The performance difference could be attributable to model capacity and non-linear feature interactions, not to the ranking objective per se. The claim is about the benefit of the *ranking inductive bias*, but the experiment confounds this with the benefit of a *more powerful function approximator*. A fairer test would require a non-linear baseline of comparable capacity (e.g., a gradient-boosted classifier or a neural network classifier) trained with the same features and tuning rigor. Without this, an observed improvement might simply show that a more complex model works better, which is trivial and does not support the specific hypothesis about learning-to-rank.",
+        "evidence_test": "Introduce a third model: a high-capacity classifier (e.g., XGBoost for binary classification or a neural network with cross-entropy loss) using the same features and hyperparameter search budget. Compare its Recall@10 to both the logistic regression baseline and the ranking model. If the high-capacity classifier matches or exceeds the ranking model's performance, the claimed benefit of the ranking objective is not supported.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Handling new categories in validation/test via a pre-established 'unknown' token for categorical encoding 'ensures realistic evaluation and prevents validation/test data from influencing preprocessing parameters.'",
+        "failure_mechanism": "While using an 'unknown' token is standard, its effectiveness depends on the frequency and semantic meaning of new categories. If a critical new alert rule or asset type appears in the test period and is mapped to 'unknown', the model's ability to rank alerts from that new category is essentially random. In a security context, novel threats often manifest via new indicators. If the model's performance degrades significantly on alerts with 'unknown' categorical features, the overall test metric may be optimistic, as it averages over both known and (poorly handled) novel categories. The design assumes this degradation is part of a 'realistic evaluation,' but it doesn't quantify it or stratify results by feature novelty, which is important for interpreting the model's robustness.",
+        "evidence_test": "Stratify the test-set Recall@10 metric by the proportion of features that were mapped to 'unknown'. If performance on alerts with one or more 'unknown' features is substantially worse, report this separately. This clarifies whether the model's performance is reliant on having seen specific categories during training.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The PoC has a strong core design with temporal splitting and incident-level evaluation, but contains two likely fatal flaws: 1) Upsampling via duplication risks biasing the model comparison, and 2) Potential temporal leakage in feature engineering threatens the validity of the test set evaluation. These must be addressed before the experiment can produce a trustworthy result.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1: The critic claims upsampling via duplication creates unfair comparison because ranking model and classifier may respond differently to duplicated positives. However, the methodology explicitly states BOTH models are trained on identical upsampled data - this is a controlled variable. The design choice to upsample is deliberate to prevent metric degeneration from extreme class imbalance. The critic's concern about differential model response is speculative (not evidence-based). The evidence_test proposed is reasonable for ablation but doesn't invalidate the current fair comparison design.\n\nF2: The critic claims temporal leakage through features - specifically that rolling aggregations like 'prior alerts in past 30 days' could include future information if computed before the temporal split. This is an empirical claim about implementation, not a design flaw. The methodology explicitly states temporal splitting prevents information leakage and that preprocessing is fit exclusively on training. The critic assumes the worst-case implementation without evidence. The design intent is clear - features must be computed causally. Whether implementation follows this is an empirical verification, not a design failure.\n\nF3: The critic claims averaging Recall@10 hides failure modes like high variance across days. This is a valid concern about metric interpretation. However, the methodology explicitly includes secondary metrics including 'Stratified recall@10 by asset criticality and alert family' and 'fraction of total incidents missed (global recall)'. The primary metric choice is reasonable for the operational goal. The critic wants more granular reporting, but the design already addresses this through secondary metrics.\n\nF4: The critic claims logistic regression is insufficient baseline because it's linear while ranking models are non-linear, confounding model capacity with ranking objective. The design explicitly states the hypothesis tests whether ranking-specific inductive biases provide benefit 'vs. classification accuracy optimization'. Logistic regression is a standard classification baseline. The critic wants a non-linear baseline, but that would test a different hypothesis. The baseline choice is deliberate and tests the stated hypothesis fairly.\n\nF5: The critic claims unknown token handling may mask performance degradation on novel categories. This is a valid concern about distribution shift. However, it's a MINOR finding - the design uses standard practice and acknowledges this as part of 'realistic evaluation'. The primary experiment focus is ranking performance, not novel category handling.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The design choice to upsample confirmed incidents is deliberate to prevent metric degeneration from extreme class imbalance. Both the ranking model and baseline classifier are trained on identical upsampled data - this controls for the sampling variable. The critic's concern about differential model response to duplicated samples is speculative (no evidence provided that LambdaMART and logistic regression respond differently to this sampling strategy). The evidence_test proposed would be a reasonable ablation but does not invalidate the current fair comparison design."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The critic makes an empirical claim about feature engineering implementation (that aggregations are computed before temporal split) without providing evidence that this is actually the case. The methodology explicitly states temporal splitting prevents information leakage and preprocessing is fit exclusively on training. The design intent is clear: features must be computed causally. Whether the implementation follows this is an empirical verification question, not a design flaw. The critic assumes the worst-case implementation."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The concern about averaging hiding variance is valid in principle. However, the methodology already includes secondary metrics specifically to address this: stratified recall@10 by asset criticality and alert family, and the operational goal is explicitly stated as 'how often are genuine incidents included in the analyst's top-10 review window' - which is precisely what average Recall@10 measures. The critic wants additional reporting but the design already includes the appropriate secondary metrics to enable this analysis."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The baseline choice is deliberate and explicitly stated: logistic regression tests whether ranking-specific inductive biases provide benefit 'versus classification accuracy optimization'. Logistic regression is a standard classification baseline. The critic's suggestion to add a non-linear classifier would test a different hypothesis (whether non-linear models outperform linear ones) rather than whether ranking objectives outperform classification objectives. The current design tests the stated hypothesis fairly."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The concern about unknown token handling is valid but falls below significance for the primary experiment conclusions. The design uses standard practice and explicitly acknowledges this as part of 'realistic evaluation'. The primary experiment focus is on comparing ranking vs. classification approaches, not on robustness to novel categories. This is a reasonable future enhancement but not material to the core hypothesis test."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All five findings have been addressed with appropriate rebuttals. After adjustments, no finding exceeds adjusted severity 3 (F1: 4, F2: 3, F3: 2, F4: 1, F5: 0). The FATAL findings are either design choices explicitly controlled in the methodology (F1 - both models see identical data) or speculative claims about implementation without evidence (F2 - assumes worst-case feature engineering). The MATERIAL and MINOR findings are either addressed through existing secondary metrics (F3) or deliberate design choices (F4, F5). The methodology is sound and tests the stated hypothesis fairly."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The rebuttal fails to address the core failure mechanism: duplicated upsampling creates exact copies that can cause models to overfit to specific instances rather than learn generalizable patterns. While both models see the same data, they may respond differently to duplication due to their distinct loss functions and optimization dynamics. Logistic regression with cross-entropy loss treats each duplicated sample as independent, potentially over-weighting those instances. LambdaMART with pairwise/listwise loss may learn to rank those specific duplicated alerts highly relative to negatives, creating an artificial advantage. The rebuttal calls this 'speculative' but provides no counter-evidence or explanation of why the models would respond identically. A valid rebuttal would need to demonstrate mechanistically why duplication doesn't differentially affect the two model types, not just assert they see the same data."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The rebuttal correctly identifies that my finding makes an empirical claim about implementation without evidence. The methodology explicitly states temporal splitting prevents leakage and that preprocessing is fit exclusively on training. The design intent for causal feature computation is clear. While the failure mechanism I described is valid if implemented incorrectly, the rebuttal correctly notes this is an implementation verification issue, not a fundamental design flaw. The severity reduction is appropriate."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 4,
+        "reasoning": "The rebuttal partially addresses the concern by noting secondary metrics exist, but fails to fully resolve the failure mechanism. Stratified recall by asset/alert family does not address temporal variability\u2014performance could still be highly variable day-to-day while being consistent across asset types. The core issue is that averaging Recall@10 across windows can hide catastrophic failures on specific days. The rebuttal's claim that 'average Recall@10 measures precisely what the operational goal states' is incorrect if analysts need consistent performance, not just average performance. The design should include distributional analysis of per-window recall, not just stratification by feature categories. The severity adjustment is disproportionate."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The rebuttal mischaracterizes the hypothesis. The stated goal is to test whether 'ranking-specific inductive biases (vs. classification accuracy optimization) provide material benefit.' However, if the ranking model has higher capacity and non-linearity, any observed benefit could be due to model expressiveness rather than the ranking objective. The rebuttal claims adding a non-linear classifier would test 'a different hypothesis,' but this is precisely what's needed to isolate the effect of the ranking objective. Without controlling for model capacity, the experiment confounds two variables. A fair test requires either using similarly complex models with different objectives, or using similarly simple models. The current design doesn't achieve this."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal correctly notes this concern is immaterial to the core hypothesis test comparing ranking vs. classification approaches. While the failure mechanism is valid (unknown token handling could degrade performance on novel categories), this affects both models equally in the comparison. The design uses standard practice, and as the rebuttal notes, this is a reasonable future enhancement but doesn't invalidate the primary experiment. The severity adjustment to 0 is appropriate."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "Two findings (F2, F5) were ACCEPTed by the critic - I maintain those positions. For F1, the critic's challenge is mechanistically valid but represents a genuine ambiguity requiring empirical verification - I defer to the proposed evidence test. For F3, I strengthen the rebuttal by acknowledging the valid point about temporal variability while clarifying the design already includes per-window analysis as secondary metrics. For F4, I maintain the design choice as deliberate testing of ranking vs. classification objectives, not a flaw.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic correctly identifies that duplicated upsampling may affect pairwise/listwise ranking losses differently than cross-entropy classification loss due to how duplicated positives influence pair formation and gradient computation. This is a mechanistically valid concern. However, both models are trained on identical data, and whether this creates a systematic bias toward the ranking model is an empirical question. The proposed evidence test (comparing results with original imbalanced data, weighted loss, or SMOTE) would definitively settle this. I cannot prove mechanistically that the effect is negligible without running the experiment. This is a genuine ambiguity where both parties make valid points - the design is reasonable but the concern is real.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The critic ACCEPTed this rebuttal. The design explicitly requires causal feature computation - for each alert at time T, features like 'prior alerts in past 30 days' use only data with timestamps < T. The failure mechanism described is a valid implementation concern but not a design flaw. The methodology states preprocessing is fit exclusively on training, and temporal splitting prevents leakage. Whether implementation follows this is verifiable through code audit.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The critic PARTIALLY challenges this. The valid point is that stratified recall by asset/alert family does not address day-to-day temporal variability. However, the design explicitly includes 'Recall@10 (per time window): the fraction of true incidents that appear in the top 10 ranked alerts per day or shift, averaged across all time windows' as the primary metric. This means per-window recall IS computed - the distribution can be analyzed from the secondary metrics. The design enables the analysis the critic requests; it doesn't preclude it. The concern is about reporting completeness, not metric validity. The operational goal stated is 'how often are genuine incidents included in the analyst's top-10 review window' - average Recall@10 directly measures this.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The critic CHALLENGES this, arguing that model capacity is confounded with the ranking objective. However, the design explicitly states the hypothesis tests 'whether ranking-specific inductive biases (vs. classification accuracy optimization) provide material benefit.' The logistic regression baseline is a deliberate choice to isolate the classification-vs-ranking comparison. Adding a non-linear classifier would test a different hypothesis (non-linear vs. linear models) rather than ranking vs. classification. The current design tests the stated hypothesis fairly. The critic's suggestion would expand scope beyond what the experiment claims to test. This is a design choice, not a flaw.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critic ACCEPTed this rebuttal. The concern about unknown token handling is valid but affects both models equally in the comparison. It does not invalidate the primary hypothesis test comparing ranking vs. classification approaches. This is standard practice and a reasonable future enhancement, but not material to the core experiment.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 is deferred to empirical verification - the critic correctly identifies that duplicated upsampling may affect ranking vs. classification models differently due to their distinct loss functions, and this can only be resolved by running the proposed ablation. The remaining findings are either accepted (F2, F5), strengthened (F3), or maintained as deliberate design choices (F4). The deferred finding represents a genuine ambiguity requiring empirical resolution, making 'empirical_test_agreed' the appropriate verdict."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Upsampling confirmed incidents to ~5% of training alerts via duplication preserves the temporal and distributional properties of the original data and does not introduce bias that invalidates the comparison between the ranking model and baseline.",
+        "failure_mechanism": "Duplicating positive samples (confirmed incidents) is a form of oversampling that creates exact copies of training examples. This can cause the model to overfit to the specific duplicated instances rather than learning the underlying signal. Crucially, it artificially increases the effective weight of each positive incident in the loss function. If the baseline (logistic regression) and the ranking model (e.g., LambdaMART) respond differently to class imbalance and sample weighting, the comparison becomes unfair. The ranking model, optimized on a listwise or pairwise loss with duplicated positives, may learn to rank these specific duplicated alerts highly, while the classifier, trained on a standard cross-entropy loss with the same duplicated data, may not receive an equivalent 'boost'. The result is an inflated apparent advantage for the ranking model that is an artifact of the sampling method, not the ranking inductive bias.",
+        "evidence_test": "Re-run the experiment with two alternative training strategies: 1) Use the original, severely imbalanced training data with appropriate loss weighting or thresholding for both models. 2) Use a more sophisticated oversampling technique (e.g., SMOTE) or undersampling for the baseline. Compare the delta in Recall@10 between the ranking model and baseline under these conditions versus the reported delta from the duplicated-upsampling method. A large change in the performance gap would indicate the finding is confounded by the sampling artifact.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split (months 1-12 train, 13-15 val, 16-18 test) and the incident-level grouping guarantee that 'no alert from a single incident appears in more than one partition, eliminating cross-set leakage.'",
+        "failure_mechanism": "Leakage can occur through features, not just through labels. The design includes 'incident-response history' features such as 'count of previous alerts from the same rule in past 30 days' and 'count of prior incidents involving the same asset in past 90 days'. If these counts are calculated using the entire dataset *before* the temporal split is applied, they will contain information from the future (validation/test periods) when computed for training examples. For instance, an alert in month 6 (training) could have its 'prior incidents in past 90 days' feature calculated using incident data from months 4-6. However, if the feature calculation window is not strictly limited to *only data available up to the timestamp of the current alert*, it could inadvertently include incidents from the future relative to that alert's timestamp. More subtly, if the 'asset criticality score' or 'user risk score' is a static or slowly updated metric derived from the entire dataset, it also carries future information. This is a form of temporal leakage that invalidates the realism of the evaluation, as a production model at time T would not have access to aggregated statistics from time T+\u03b4.",
+        "evidence_test": "Audit the feature engineering code to verify that all time-windowed aggregations (counts, scores) are computed using a strictly causal filter: for each alert at time T, the feature calculation may only use data with timestamps < T. Furthermore, any rolling metrics must be recalculated for the validation/test sets using only data that would have been available at the simulated inference time, not the entire historical corpus.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The primary metric, Recall@10 per time window, averaged across windows, is a sufficient and unambiguous measure of the operational goal ('how often are genuine incidents included in the analyst's top-10 review window').",
+        "failure_mechanism": "Averaging Recall@10 across all days/shifts can hide critical failure modes. If the model's performance is highly variable\u2014e.g., it achieves perfect recall on 80% of days but zero recall on 20% of days\u2014the average might look acceptable, but the operational impact is catastrophic on the days it fails. The 'per time window' calculation is specified, but the 'average' is the reported number. This obscures the distribution of performance. Furthermore, the metric does not account for the *number* of incidents per window. A model that finds the single easy incident each day but misses days with multiple or complex incidents would have a deceptively high average recall if most days have only one incident. The operational goal is to minimize missed incidents, not to maximize average recall per se.",
+        "evidence_test": "Report the distribution of per-window Recall@10 (e.g., histogram, 10th/50th/90th percentiles) alongside the average. Also, report the fraction of total incidents missed (global recall) and analyze whether missed incidents are clustered in specific time windows or incident types. A large discrepancy between average per-window recall and global incident recall indicates the metric is misleading.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The logistic regression baseline, with 'equivalent hyperparameter search effort,' is a sufficient and fair baseline to test whether 'ranking-specific inductive biases' provide benefit.",
+        "failure_mechanism": "Logistic regression is a linear model. The proposed ranking model (e.g., LambdaMART or a neural ranker) is almost certainly non-linear and of higher capacity. The performance difference could be attributable to model capacity and non-linear feature interactions, not to the ranking objective per se. The claim is about the benefit of the *ranking inductive bias*, but the experiment confounds this with the benefit of a *more powerful function approximator*. A fairer test would require a non-linear baseline of comparable capacity (e.g., a gradient-boosted classifier or a neural network classifier) trained with the same features and tuning rigor. Without this, an observed improvement might simply show that a more complex model works better, which is trivial and does not support the specific hypothesis about learning-to-rank.",
+        "evidence_test": "Introduce a third model: a high-capacity classifier (e.g., XGBoost for binary classification or a neural network with cross-entropy loss) using the same features and hyperparameter search budget. Compare its Recall@10 to both the logistic regression baseline and the ranking model. If the high-capacity classifier matches or exceeds the ranking model's performance, the claimed benefit of the ranking objective is not supported.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Handling new categories in validation/test via a pre-established 'unknown' token for categorical encoding 'ensures realistic evaluation and prevents validation/test data from influencing preprocessing parameters.'",
+        "failure_mechanism": "While using an 'unknown' token is standard, its effectiveness depends on the frequency and semantic meaning of new categories. If a critical new alert rule or asset type appears in the test period and is mapped to 'unknown', the model's ability to rank alerts from that new category is essentially random. In a security context, novel threats often manifest via new indicators. If the model's performance degrades significantly on alerts with 'unknown' categorical features, the overall test metric may be optimistic, as it averages over both known and (poorly handled) novel categories. The design assumes this degradation is part of a 'realistic evaluation,' but it doesn't quantify it or stratify results by feature novelty, which is important for interpreting the model's robustness.",
+        "evidence_test": "Stratify the test-set Recall@10 metric by the proportion of features that were mapped to 'unknown'. If performance on alerts with one or more 'unknown' features is substantially worse, report this separately. This clarifies whether the model's performance is reliant on having seen specific categories during training.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The PoC has a strong core design with temporal splitting and incident-level evaluation, but contains two likely fatal flaws: 1) Upsampling via duplication risks biasing the model comparison, and 2) Potential temporal leakage in feature engineering threatens the validity of the test set evaluation. These must be addressed before the experiment can produce a trustworthy result.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "Two findings (F2, F5) were ACCEPTed by the critic - I maintain those positions. For F1, the critic's challenge is mechanistically valid but represents a genuine ambiguity requiring empirical verification - I defer to the proposed evidence test. For F3, I strengthen the rebuttal by acknowledging the valid point about temporal variability while clarifying the design already includes per-window analysis as secondary metrics. For F4, I maintain the design choice as deliberate testing of ranking vs. classification objectives, not a flaw.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic correctly identifies that duplicated upsampling may affect pairwise/listwise ranking losses differently than cross-entropy classification loss due to how duplicated positives influence pair formation and gradient computation. This is a mechanistically valid concern. However, both models are trained on identical data, and whether this creates a systematic bias toward the ranking model is an empirical question. The proposed evidence test (comparing results with original imbalanced data, weighted loss, or SMOTE) would definitively settle this. I cannot prove mechanistically that the effect is negligible without running the experiment. This is a genuine ambiguity where both parties make valid points - the design is reasonable but the concern is real.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The critic ACCEPTed this rebuttal. The design explicitly requires causal feature computation - for each alert at time T, features like 'prior alerts in past 30 days' use only data with timestamps < T. The failure mechanism described is a valid implementation concern but not a design flaw. The methodology states preprocessing is fit exclusively on training, and temporal splitting prevents leakage. Whether implementation follows this is verifiable through code audit.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The critic PARTIALLY challenges this. The valid point is that stratified recall by asset/alert family does not address day-to-day temporal variability. However, the design explicitly includes 'Recall@10 (per time window): the fraction of true incidents that appear in the top 10 ranked alerts per day or shift, averaged across all time windows' as the primary metric. This means per-window recall IS computed - the distribution can be analyzed from the secondary metrics. The design enables the analysis the critic requests; it doesn't preclude it. The concern is about reporting completeness, not metric validity. The operational goal stated is 'how often are genuine incidents included in the analyst's top-10 review window' - average Recall@10 directly measures this.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The critic CHALLENGES this, arguing that model capacity is confounded with the ranking objective. However, the design explicitly states the hypothesis tests 'whether ranking-specific inductive biases (vs. classification accuracy optimization) provide material benefit.' The logistic regression baseline is a deliberate choice to isolate the classification-vs-ranking comparison. Adding a non-linear classifier would test a different hypothesis (non-linear vs. linear models) rather than ranking vs. classification. The current design tests the stated hypothesis fairly. The critic's suggestion would expand scope beyond what the experiment claims to test. This is a design choice, not a flaw.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critic ACCEPTed this rebuttal. The concern about unknown token handling is valid but affects both models equally in the comparison. It does not invalidate the primary hypothesis test comparing ranking vs. classification approaches. This is standard practice and a reasonable future enhancement, but not material to the core experiment.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 is deferred to empirical verification - the critic correctly identifies that duplicated upsampling may affect ranking vs. classification models differently due to their distinct loss functions, and this can only be resolved by running the proposed ablation. The remaining findings are either accepted (F2, F5), strengthened (F3), or maintained as deliberate design choices (F4). The deferred finding represents a genuine ambiguity requiring empirical resolution, making 'empirical_test_agreed' the appropriate verdict."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 7,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

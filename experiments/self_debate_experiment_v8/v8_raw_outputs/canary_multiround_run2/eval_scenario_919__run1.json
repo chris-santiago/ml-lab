@@ -1,0 +1,234 @@
+{
+  "case_id": "eval_scenario_919",
+  "stratum": "mixed",
+  "flaw_category": "context_dependent",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The procedure of removing exact duplicates before splitting and grouping near-duplicates using normalized URL sets and subject hashes ensures no variant copies of the same campaign appear across train/validation/test splits without introducing leakage.",
+        "failure_mechanism": "Performing grouping 'before splitting' on the chronologically ordered full dataset requires global similarity computations (e.g., hashing or clustering across all 18 months), allowing test-set campaign variants to retroactively influence train-set group assignments or normalizations, leaking future campaign signatures into train preprocessing and model fitting.",
+        "evidence_test": "Document the exact grouping algorithm (e.g., global clustering vs. train-first filtering of val/test); report the fraction of val/test messages matched to train groups and how they are handled (e.g., dropped or reassigned); verify no shared groups exist post-processing by auditing cluster spans across splits.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Imposing a 21-day maturation window before extraction and using only messages with finalized case outcomes provides representative, unbiased labels for phishing vs. non-phishing.",
+        "failure_mechanism": "Phishing incidents requiring extended investigation (e.g., delayed credential theft confirmation or analyst overload) are systematically excluded if not finalized within 21 days, enriching the dataset with faster-maturing 'easy' phishing that all models detect readily, while slow-burn phishing\u2014representative of stealthier real threats\u2014are absent, biasing all performance upward.",
+        "evidence_test": "Report time-to-finalization distributions (histograms/CDFs) separately for confirmed phishing and benign messages; quantify fraction of total confirmed phishing excluded (>21 days) and compare excluded vs. included phishing on features like sender age or attachment type.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Fine-tuning a pretrained transformer on concatenated subject plus body text, followed by pooled embeddings concatenated to structured features, effectively leverages raw-text representation learning for phishing detection.",
+        "failure_mechanism": "Standard transformer defaults (e.g., BERT-like 512-token limit) truncate long emails, discarding tail-end content where phishing lures, obfuscated instructions, or attachment details often reside; pooled embeddings from truncated input yield plausible aggregate metrics on short/benign emails but systematically degrade on long-phishing cases, silently masking the hypothesis's text-understanding value.",
+        "evidence_test": "Report email length statistics (% truncated, avg tokens pre/post-truncation); stratify all metrics by email length quantiles or truncated vs. non-truncated; ablate with longer-context models (e.g., Longformer) or hierarchical processing if truncation affects >20% of phishing.",
+        "flaw_category": "silent_misconfig"
+      }
+    ],
+    "summary": "The PoC design is rigorous with chronological splits, strong baselines, and confounds controls, but harbors critical risks in data preparation (leakage from global dedup, label bias from maturation) and model configuration (truncation), which could invalidate claims of text-driven gains under drift.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 (FATAL, 9): The critic claims that grouping near-duplicates before the chronological split inherently leaks future information into training preprocessing. This claim assumes a specific implementation (global clustering where test data dictates train group membership) that is not mandated by the methodology. The methodology specifies 'strictly chronological' splits and the goal to prevent duplicates across splits. The design intent is to prevent leakage, and standard temporal deduplication (keeping the earliest instance) achieves this without using future data to curate training. The critique's assertion that the procedure 'requires global similarity computations' is an assumption not supported by the methodology text.\n\nF2 (MATERIAL, 6): The critic argues the 21-day maturation window biases the dataset toward 'easy' phishing by excluding slow-burn cases. However, the methodology explicitly defines the scope as 'messages whose case outcome is finalized'. The 21-day window is a design control for label validity within this scope, not a data selection bias. The critique attacks the scope definition (all threats vs. finalized threats) rather than the internal validity of the comparison. The performance metric is valid for the stated operational goal.\n\nF3 (MATERIAL, 5): The critic claims standard transformers (512-token limit) truncate long emails, masking text-understanding value. The methodology states 'Fine-tune a pretrained transformer' without mandating a specific model or token limit. The critique assumes a default (BERT 512) that is not specified. The design allows for model selection (e.g., Longformer, larger context) to accommodate email length. The critique's claim about truncation is based on an unsupported assumption about the model choice.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 3,
+        "justification": "The critique asserts that grouping before splitting 'requires global similarity computations' and 'allows test-set campaign signatures into train preprocessing'. The methodology document does not mandate global clustering or specify that test data influences train group assignments. It only specifies the goal ('variant copies... do not appear in both') and the constraint ('strictly chronological'). The critique's claim about the mechanism is an assumption not supported by the methodology text."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The 21-day maturation window is a deliberate design control to ensure label validity in an environment where labels mature slowly. The experiment scope is explicitly defined as 'messages whose case outcome is finalized'. The critique's concern about slow-burn phishing applies to a different scope (all potential threats) rather than the stated scope (finalized threats)."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critique assumes a specific model architecture (BERT-like 512-token limit) which is not specified in the methodology. The methodology states 'Fine-tune a pretrained transformer' without mandating a token limit. The design allows for selection of models with longer context windows, and the critique's claim about truncation is based on an unsupported assumption about the model choice."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have been rebutted to adjusted severity \u2264 3 (F1: 3, F2: 3, F3: 1). The critique relies on assumptions about implementation details and scope that are not supported by the methodology text or design intent."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 8,
+        "reasoning": "REBUT-EVIDENCE fails: the defender claims no mandate for global computations, but the methodology explicitly instructs to 'remove exact duplicates before splitting and group near-duplicates... so variant copies of the same campaign do not appear in both training and evaluation windows.' Achieving this goal pre-split on a chronological full-dataset requires cross-temporal similarity computations (e.g., hashing/clustering URLs/subjects across 18 months), enabling test variants to influence train preprocessing unless a train-first mechanism is specified\u2014which it is not. No error in the factual premise; mechanism remains unresolved."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "REBUT-DESIGN is generic scope disclaimer: it restates the maturation window as 'deliberate' for 'finalized' cases but does not address the failure mechanism. The claim is that labels are 'representative, unbiased' for phishing vs. non-phishing; excluding slow-maturing (stealthier) phishing systematically overrepresents 'easy' cases detected by all models, biasing PR-AUC upward regardless of scope. No mechanistic rebuttal (e.g., evidence that time-to-finalization is uniform across phishing types); representativeness concern persists."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "REBUT-EVIDENCE correctly notes no mandated BERT-like 512-token limit, allowing long-context models (reducing truncation risk). However, residual issue: methodology specifies 'pretrained transformer' defaults (commonly 512-token) without requiring long-context selection or length stratification in tuning/metrics; val PR-AUC optimization could select suboptimal short-context model if aggregate metrics mask per-email truncation harm, leaving silent degradation on long-phishing unresolved."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "All three findings present genuine ambiguities where the methodology text is either silent or ambiguous on critical implementation details. F1 requires clarification on whether grouping occurs pre-split (leakage risk) or post-split (no leakage). F2 requires empirical evidence on time-to-finalization distributions to assess representativeness bias. F3 requires length-stratified evaluation to determine if truncation harms long-phishing detection. None of these can be resolved by argument alone\u2014each requires specific measurements or experiments to settle.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The methodology states 'remove exact duplicates before splitting and group near-duplicates... so variant copies of the same campaign do not appear in both training and evaluation windows' but does not specify whether grouping occurs on the full 18-month dataset pre-split or on train data only post-split. This is a genuine ambiguity: if pre-split global grouping is used, test signatures leak into train preprocessing; if train-first grouping is used, no leakage occurs. The design does not mandate either approach, making this empirically unresolved.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The 21-day maturation window is a deliberate design control for label validity, but the methodology does not provide evidence that time-to-finalization is uniform across phishing types. Excluding slow-maturing phishing systematically biases the evaluation toward 'easy' cases, which could inflate PR-AUC regardless of scope. The critic's concern about representativeness cannot be resolved by scope argument alone\u2014empirical measurement of excluded vs. included phishing characteristics is required.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "While the methodology does not mandate a 512-token limit and allows long-context transformers, it also does not require length-stratified evaluation or explicit long-context model selection. The risk that aggregate PR-AUC optimization could favor short-context models that perform poorly on long-phishing cases is real but unresolved. This requires empirical testing via length-stratified metrics and ablation with long-context models.",
+        "r2_challenge_response": "DEFERRED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "All three findings have been deferred to empirical resolution rather than conceded or maintained, as each involves genuine ambiguities in the methodology that require specific measurements or experiments to settle. This is the correct outcome when reasonable people can disagree and empirical evidence is the right arbiter."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The procedure of removing exact duplicates before splitting and grouping near-duplicates using normalized URL sets and subject hashes ensures no variant copies of the same campaign appear across train/validation/test splits without introducing leakage.",
+        "failure_mechanism": "Performing grouping 'before splitting' on the chronologically ordered full dataset requires global similarity computations (e.g., hashing or clustering across all 18 months), allowing test-set campaign variants to retroactively influence train-set group assignments or normalizations, leaking future campaign signatures into train preprocessing and model fitting.",
+        "evidence_test": "Document the exact grouping algorithm (e.g., global clustering vs. train-first filtering of val/test); report the fraction of val/test messages matched to train groups and how they are handled (e.g., dropped or reassigned); verify no shared groups exist post-processing by auditing cluster spans across splits.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Imposing a 21-day maturation window before extraction and using only messages with finalized case outcomes provides representative, unbiased labels for phishing vs. non-phishing.",
+        "failure_mechanism": "Phishing incidents requiring extended investigation (e.g., delayed credential theft confirmation or analyst overload) are systematically excluded if not finalized within 21 days, enriching the dataset with faster-maturing 'easy' phishing that all models detect readily, while slow-burn phishing\u2014representative of stealthier real threats\u2014are absent, biasing all performance upward.",
+        "evidence_test": "Report time-to-finalization distributions (histograms/CDFs) separately for confirmed phishing and benign messages; quantify fraction of total confirmed phishing excluded (>21 days) and compare excluded vs. included phishing on features like sender age or attachment type.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Fine-tuning a pretrained transformer on concatenated subject plus body text, followed by pooled embeddings concatenated to structured features, effectively leverages raw-text representation learning for phishing detection.",
+        "failure_mechanism": "Standard transformer defaults (e.g., BERT-like 512-token limit) truncate long emails, discarding tail-end content where phishing lures, obfuscated instructions, or attachment details often reside; pooled embeddings from truncated input yield plausible aggregate metrics on short/benign emails but systematically degrade on long-phishing cases, silently masking the hypothesis's text-understanding value.",
+        "evidence_test": "Report email length statistics (% truncated, avg tokens pre/post-truncation); stratify all metrics by email length quantiles or truncated vs. non-truncated; ablate with longer-context models (e.g., Longformer) or hierarchical processing if truncation affects >20% of phishing.",
+        "flaw_category": "silent_misconfig"
+      }
+    ],
+    "summary": "The PoC design is rigorous with chronological splits, strong baselines, and confounds controls, but harbors critical risks in data preparation (leakage from global dedup, label bias from maturation) and model configuration (truncation), which could invalidate claims of text-driven gains under drift.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "All three findings present genuine ambiguities where the methodology text is either silent or ambiguous on critical implementation details. F1 requires clarification on whether grouping occurs pre-split (leakage risk) or post-split (no leakage). F2 requires empirical evidence on time-to-finalization distributions to assess representativeness bias. F3 requires length-stratified evaluation to determine if truncation harms long-phishing detection. None of these can be resolved by argument alone\u2014each requires specific measurements or experiments to settle.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The methodology states 'remove exact duplicates before splitting and group near-duplicates... so variant copies of the same campaign do not appear in both training and evaluation windows' but does not specify whether grouping occurs on the full 18-month dataset pre-split or on train data only post-split. This is a genuine ambiguity: if pre-split global grouping is used, test signatures leak into train preprocessing; if train-first grouping is used, no leakage occurs. The design does not mandate either approach, making this empirically unresolved.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The 21-day maturation window is a deliberate design control for label validity, but the methodology does not provide evidence that time-to-finalization is uniform across phishing types. Excluding slow-maturing phishing systematically biases the evaluation toward 'easy' cases, which could inflate PR-AUC regardless of scope. The critic's concern about representativeness cannot be resolved by scope argument alone\u2014empirical measurement of excluded vs. included phishing characteristics is required.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "While the methodology does not mandate a 512-token limit and allows long-context transformers, it also does not require length-stratified evaluation or explicit long-context model selection. The risk that aggregate PR-AUC optimization could favor short-context models that perform poorly on long-phishing cases is real but unresolved. This requires empirical testing via length-stratified metrics and ablation with long-context models.",
+        "r2_challenge_response": "DEFERRED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "All three findings have been deferred to empirical resolution rather than conceded or maintained, as each involves genuine ambiguities in the methodology that require specific measurements or experiments to settle. This is the correct outcome when reasonable people can disagree and empirical evidence is the right arbiter."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=9, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "3 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

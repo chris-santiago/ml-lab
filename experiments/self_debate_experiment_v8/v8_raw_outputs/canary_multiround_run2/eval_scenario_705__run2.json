@@ -1,0 +1,411 @@
+{
+  "case_id": "eval_scenario_705",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 10,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The PoC assumes that excluding host identifiers from the baseline ensures a fair comparison by preventing identity-based shortcuts.",
+        "failure_mechanism": "The baseline's exclusion of host identifiers does not guarantee fairness because the transformer's inclusion of host identifiers may still encode identity information indirectly (e.g., via protocol markers, port usage patterns, or session metadata that correlate with specific hosts). The 'identity leakage' control (training a transformer variant without host identifiers) is insufficient to rule out all forms of identity-based learning, as other features may act as proxies for host identity.",
+        "evidence_test": "Train a transformer variant with all host-identifying features (including protocol markers, port usage, and session metadata) removed and compare its performance to the baseline. If performance remains superior, the advantage is likely due to sequence modeling rather than identity proxies. Alternatively, perform a feature ablation study to quantify the contribution of each host-identifying feature to the transformer's performance.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The PoC assumes that the 24-hour labeling window for malicious sessions aligns with realistic detection latency and does not introduce label contamination.",
+        "failure_mechanism": "The 24-hour window may not reflect real-world detection latency, which can vary significantly (e.g., some intrusions may be detected days or weeks later). If the transformer is better at exploiting short-term patterns within this window, it may appear superior without generalizing to longer detection latencies. Additionally, retrospective labeling risks hindsight bias: analysts may retroactively label sessions as malicious based on later evidence, contaminating the training data with future information.",
+        "evidence_test": "Evaluate the models using a range of labeling windows (e.g., 1 hour, 6 hours, 24 hours, 72 hours) and compare performance. If the transformer's advantage shrinks or disappears with shorter windows, its superiority may be an artifact of the labeling window. Alternatively, simulate real-time labeling by delaying labels until analysts would have confirmed them in practice.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The PoC assumes that the temporal split (months 1\u201310 train, 11\u201313 validation, 14\u201318 test) is sufficient to prevent distribution shift and ensure generalization to future attack campaigns.",
+        "failure_mechanism": "The 18-month window may not capture long-term drift in attack patterns or network infrastructure changes (e.g., new protocols, device types, or user behavior). If the test set (months 14\u201318) contains shifts not present in earlier months, the transformer's performance may degrade due to overfitting to recent patterns rather than generalizing to future ones. The per-month analysis in the test set is a good start but does not address systemic shifts across the entire 18-month period.",
+        "evidence_test": "Perform a domain adaptation experiment by training the models on the first 12 months and testing on the last 6 months, then compare to training on the first 10 months and testing on the last 8 months. If performance drops significantly in the longer gap, the temporal split may not be sufficient. Alternatively, use a rolling window evaluation (e.g., train on months 1\u20136, test on 7\u201312, then train on 2\u20137, test on 8\u201313, etc.) to assess robustness to drift.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The PoC assumes that the pAUC-ROC over the 0\u20135% FPR region is the correct metric for operational alignment.",
+        "failure_mechanism": "pAUC-ROC is sensitive to the choice of FPR range and may not reflect real-world performance if the 0\u20135% region is not representative of actual alert budgets. For example, if most false positives occur in a narrow FPR band (e.g., 0.1\u20130.5%), the pAUC-ROC may miss critical differences. Additionally, pAUC-ROC does not account for the cost of false negatives, which may vary by intrusion type.",
+        "evidence_test": "Compare models using a cost-sensitive metric (e.g., expected cost of misclassification, where false positives and false negatives are weighted by their operational costs). Alternatively, evaluate performance at fixed alert volumes (e.g., top 100 alerts per day) to reflect analyst workload more directly.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The PoC assumes that the transformer's sequence modeling of packet-level features provides a meaningful advantage over aggregated flow statistics.",
+        "failure_mechanism": "The transformer's input (packet sequences truncated to 100 packets) may not capture the full temporal dynamics of advanced persistent threats, which often involve long, sparse interactions. Aggregated flow statistics (e.g., session duration, packet counts) may already encode sufficient information for detection, making the transformer's advantage marginal or nonexistent.",
+        "evidence_test": "Compare the transformer to a baseline that uses the same packet-level features but aggregated into fixed-length vectors (e.g., mean inter-packet delay, packet size statistics). If the transformer's advantage disappears, the benefit is likely due to sequence modeling rather than raw feature quality.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The PoC assumes that the 2% data exclusion rate (for incomplete sessions) does not bias the results.",
+        "failure_mechanism": "Excluding incomplete sessions may disproportionately affect malicious sessions, as adversaries may use techniques to evade detection (e.g., session truncation, encryption). If malicious sessions are more likely to be incomplete, the exclusion could artificially inflate performance metrics by removing hard-to-detect cases.",
+        "evidence_test": "Compare the distribution of incomplete sessions between malicious and benign classes. If malicious sessions are overrepresented in the excluded data, retrain the models on the full dataset (with imputation for missing values) and compare performance.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC contains multiple FATAL flaws that invalidate its core claims: identity leakage risks, labeling window assumptions, and temporal distribution shift concerns. These must be addressed before the hypothesis can be meaningfully evaluated.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "The critic raises several significant concerns about the methodology, primarily focusing on potential flaws in the assumptions made regarding identity leakage, labeling windows, temporal splits, metric selection, and data exclusion. Each finding is evaluated for its validity against the design intent and controls established in the methodology. \n\n1. **F1**: The critique regarding identity leakage is valid in that the transformer could potentially exploit indirect identity information. However, the design includes a control for this by comparing the transformer with a variant that excludes host identifiers. This approach directly addresses the concern raised. \n\n2. **F2**: The critique about the 24-hour labeling window raises a valid point regarding potential contamination and the realism of detection latency. However, the methodology's retrospective labeling is designed to mitigate this risk. While the suggestion to evaluate different labeling windows is interesting, it does not fundamentally undermine the hypothesis as stated. \n\n3. **F3**: The concern about the temporal split is valid, as it may not capture long-term shifts in attack patterns. However, the methodology includes a per-month evaluation of test set performance, which provides insight into potential distribution shifts. The critique suggests additional robustness checks, which could be beneficial but do not invalidate the existing design. \n\n4. **F4**: The critique regarding the pAUC-ROC metric is valid, as it may not capture all operational realities. However, the choice of this metric is justified based on the specific operational context outlined in the hypothesis. The suggestion to use cost-sensitive metrics is valuable but does not negate the appropriateness of the chosen primary metric. \n\n5. **F5**: The critique about the transformer's advantage is valid, as it raises the possibility that aggregated flow statistics may suffice for detection. However, the design is focused on demonstrating the unique benefits of sequence modeling, and the proposed alternative baseline would not directly address the hypothesis as stated. \n\n6. **F6**: The critique about the exclusion of incomplete sessions is valid, as it raises concerns about potential bias. However, the exclusion rate is low, and the methodology does not suggest that this exclusion significantly impacts the overall findings. The suggestion to compare distributions is useful but does not fundamentally undermine the design. \n\nOverall, while the critiques raise important points, the methodology has been designed with controls and considerations that address many of these concerns. The findings do not collectively warrant a concession, as the methodology remains sound in its intent and execution.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 10,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 6,
+        "justification": "The methodology includes a control for identity leakage by training a transformer variant without host identifiers. This directly addresses the concern raised about the potential for indirect identity information influencing results."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 10,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 7,
+        "justification": "The retrospective labeling approach is designed to mitigate contamination risks. While exploring different labeling windows could provide additional insights, it does not fundamentally undermine the validity of the current labeling strategy."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 10,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 7,
+        "justification": "The methodology includes a per-month evaluation of test set performance, which helps identify potential distribution shifts. While additional robustness checks could enhance the analysis, they do not invalidate the existing temporal split design."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 10,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 7,
+        "justification": "The choice of pAUC-ROC is justified based on the operational context outlined in the hypothesis. While cost-sensitive metrics are valuable, they do not negate the appropriateness of the primary metric selected for this study."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The design focuses on demonstrating the unique benefits of sequence modeling. While the critique raises a valid point about aggregated flow statistics, the proposed alternative baseline does not directly address the hypothesis as stated."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 4,
+        "justification": "While the concern about excluding incomplete sessions is valid, the low exclusion rate and the overall design intent indicate that this is unlikely to significantly bias the results. The suggestion to compare distributions is useful but does not fundamentally undermine the findings."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been addressed through design rebuttals, and the adjusted severities remain below the critical threshold, indicating that the methodology is sound despite the critiques raised."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 8,
+        "reasoning": "The rebuttal claims the transformer variant without host identifiers 'directly addresses' the identity leakage concern, but this is insufficient. The failure mechanism identified was that *other features* (e.g., protocol markers, port usage) may act as proxies for host identity, not just the explicit host identifiers. The rebuttal does not address whether these proxy features were removed or controlled for in the variant. A valid rebuttal would require evidence that the transformer variant excludes *all* identity-correlated features, not just host identifiers."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 9,
+        "reasoning": "The rebuttal dismisses the concern about the 24-hour labeling window by stating it 'mitigates contamination risks,' but this does not address the core failure mechanism: the window may not reflect real-world detection latency, and retrospective labeling could introduce hindsight bias. The rebuttal does not provide evidence that the window aligns with realistic detection delays or that labels are assigned without future information influencing them. The severity remains high because the rebuttal does not mechanistically address the flaw."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 9,
+        "reasoning": "The rebuttal cites per-month evaluation as sufficient to address distribution shift, but this does not address the systemic shift across the entire 18-month period. The failure mechanism is that long-term drift (e.g., new protocols, infrastructure changes) may not be captured by the temporal split. The rebuttal does not provide evidence that the split is robust to such shifts or that the per-month analysis accounts for systemic changes. The severity remains high because the rebuttal does not mechanistically address the flaw."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 9,
+        "reasoning": "The rebuttal defends the pAUC-ROC metric by stating it is 'justified based on the operational context,' but this does not address the failure mechanism: pAUC-ROC may not reflect real-world performance if the 0\u20135% FPR region is not representative of actual alert budgets. The rebuttal does not provide evidence that the metric aligns with operational costs or alert volumes. The severity remains high because the rebuttal does not mechanistically address the flaw."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The rebuttal argues that the hypothesis focuses on sequence modeling benefits and that the proposed alternative baseline does not directly address the hypothesis. This is a valid scope-based rebuttal. The severity is reduced to 3, as the concern is partially addressed by the design's focus on sequence modeling."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 4,
+        "reasoning": "The rebuttal acknowledges the concern but argues that the low exclusion rate and overall design intent mitigate the risk. This is a valid scope-based rebuttal, as the finding is not fully resolved but the concern is reduced. The severity is adjusted to 4."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I am contesting the challenges raised for findings F1, F2, F3, and F4, as the design does address the concerns raised, albeit imperfectly in R1. I will strengthen my rebuttals to clarify how the design controls for these mechanisms. I accept the challenges for findings F5 and F6, as they are scope-based and the severity has been appropriately adjusted.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 10,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 6,
+        "justification": "While the transformer variant without host identifiers addresses direct identity leakage, I acknowledge that other features may still correlate with host identity. To strengthen the design, we will conduct a feature ablation study to evaluate the contribution of all identity-correlated features, including protocol markers and port usage, to ensure that the transformer's performance is not driven by indirect identity information.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 10,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 6,
+        "justification": "The retrospective labeling approach is designed to mitigate contamination risks, but I recognize the need for further validation. We will evaluate the models using various labeling windows (1 hour, 6 hours, 24 hours, 72 hours) to assess how the transformer's performance varies with different detection latencies. This will help ensure that our labeling strategy aligns with realistic detection scenarios and does not introduce bias.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 10,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 6,
+        "justification": "The per-month evaluation of test set performance is a step towards identifying distribution shifts, but I acknowledge that it does not fully address long-term drift. To strengthen the design, we will conduct a domain adaptation experiment by training on different segments of the data and testing on subsequent months. This will help us understand how well the models generalize across varying attack patterns and infrastructure changes.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 10,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 6,
+        "justification": "The choice of pAUC-ROC is based on the operational context of low false-positive rates, but I recognize that it may not capture all aspects of real-world performance. To address this, we will also evaluate models using cost-sensitive metrics that account for the operational costs of false positives and false negatives. This will provide a more comprehensive assessment of model performance in practical scenarios.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The design focuses on demonstrating the unique benefits of sequence modeling. While the critique raises a valid point about aggregated flow statistics, the proposed alternative baseline does not directly address the hypothesis as stated. The focus remains on the transformer's ability to capture temporal dynamics through sequence modeling.",
+        "r2_challenge_response": "ACCEPTED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 4,
+        "justification": "While the concern about excluding incomplete sessions is valid, the low exclusion rate and the overall design intent indicate that this is unlikely to significantly bias the results. The suggestion to compare distributions is useful but does not fundamentally undermine the findings.",
+        "r2_challenge_response": "ACCEPTED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The rebuttals for findings F1, F2, F3, and F4 have been strengthened to address the critic's concerns, while findings F5 and F6 have been accepted as scope-based issues. The adjustments reflect a commitment to empirical validation of the methodology, leading to an outcome where further testing is warranted."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 10,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The PoC assumes that excluding host identifiers from the baseline ensures a fair comparison by preventing identity-based shortcuts.",
+        "failure_mechanism": "The baseline's exclusion of host identifiers does not guarantee fairness because the transformer's inclusion of host identifiers may still encode identity information indirectly (e.g., via protocol markers, port usage patterns, or session metadata that correlate with specific hosts). The 'identity leakage' control (training a transformer variant without host identifiers) is insufficient to rule out all forms of identity-based learning, as other features may act as proxies for host identity.",
+        "evidence_test": "Train a transformer variant with all host-identifying features (including protocol markers, port usage, and session metadata) removed and compare its performance to the baseline. If performance remains superior, the advantage is likely due to sequence modeling rather than identity proxies. Alternatively, perform a feature ablation study to quantify the contribution of each host-identifying feature to the transformer's performance.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The PoC assumes that the 24-hour labeling window for malicious sessions aligns with realistic detection latency and does not introduce label contamination.",
+        "failure_mechanism": "The 24-hour window may not reflect real-world detection latency, which can vary significantly (e.g., some intrusions may be detected days or weeks later). If the transformer is better at exploiting short-term patterns within this window, it may appear superior without generalizing to longer detection latencies. Additionally, retrospective labeling risks hindsight bias: analysts may retroactively label sessions as malicious based on later evidence, contaminating the training data with future information.",
+        "evidence_test": "Evaluate the models using a range of labeling windows (e.g., 1 hour, 6 hours, 24 hours, 72 hours) and compare performance. If the transformer's advantage shrinks or disappears with shorter windows, its superiority may be an artifact of the labeling window. Alternatively, simulate real-time labeling by delaying labels until analysts would have confirmed them in practice.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The PoC assumes that the temporal split (months 1\u201310 train, 11\u201313 validation, 14\u201318 test) is sufficient to prevent distribution shift and ensure generalization to future attack campaigns.",
+        "failure_mechanism": "The 18-month window may not capture long-term drift in attack patterns or network infrastructure changes (e.g., new protocols, device types, or user behavior). If the test set (months 14\u201318) contains shifts not present in earlier months, the transformer's performance may degrade due to overfitting to recent patterns rather than generalizing to future ones. The per-month analysis in the test set is a good start but does not address systemic shifts across the entire 18-month period.",
+        "evidence_test": "Perform a domain adaptation experiment by training the models on the first 12 months and testing on the last 6 months, then compare to training on the first 10 months and testing on the last 8 months. If performance drops significantly in the longer gap, the temporal split may not be sufficient. Alternatively, use a rolling window evaluation (e.g., train on months 1\u20136, test on 7\u201312, then train on 2\u20137, test on 8\u201313, etc.) to assess robustness to drift.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The PoC assumes that the pAUC-ROC over the 0\u20135% FPR region is the correct metric for operational alignment.",
+        "failure_mechanism": "pAUC-ROC is sensitive to the choice of FPR range and may not reflect real-world performance if the 0\u20135% region is not representative of actual alert budgets. For example, if most false positives occur in a narrow FPR band (e.g., 0.1\u20130.5%), the pAUC-ROC may miss critical differences. Additionally, pAUC-ROC does not account for the cost of false negatives, which may vary by intrusion type.",
+        "evidence_test": "Compare models using a cost-sensitive metric (e.g., expected cost of misclassification, where false positives and false negatives are weighted by their operational costs). Alternatively, evaluate performance at fixed alert volumes (e.g., top 100 alerts per day) to reflect analyst workload more directly.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The PoC assumes that the transformer's sequence modeling of packet-level features provides a meaningful advantage over aggregated flow statistics.",
+        "failure_mechanism": "The transformer's input (packet sequences truncated to 100 packets) may not capture the full temporal dynamics of advanced persistent threats, which often involve long, sparse interactions. Aggregated flow statistics (e.g., session duration, packet counts) may already encode sufficient information for detection, making the transformer's advantage marginal or nonexistent.",
+        "evidence_test": "Compare the transformer to a baseline that uses the same packet-level features but aggregated into fixed-length vectors (e.g., mean inter-packet delay, packet size statistics). If the transformer's advantage disappears, the benefit is likely due to sequence modeling rather than raw feature quality.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The PoC assumes that the 2% data exclusion rate (for incomplete sessions) does not bias the results.",
+        "failure_mechanism": "Excluding incomplete sessions may disproportionately affect malicious sessions, as adversaries may use techniques to evade detection (e.g., session truncation, encryption). If malicious sessions are more likely to be incomplete, the exclusion could artificially inflate performance metrics by removing hard-to-detect cases.",
+        "evidence_test": "Compare the distribution of incomplete sessions between malicious and benign classes. If malicious sessions are overrepresented in the excluded data, retrain the models on the full dataset (with imputation for missing values) and compare performance.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC contains multiple FATAL flaws that invalidate its core claims: identity leakage risks, labeling window assumptions, and temporal distribution shift concerns. These must be addressed before the hypothesis can be meaningfully evaluated.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I am contesting the challenges raised for findings F1, F2, F3, and F4, as the design does address the concerns raised, albeit imperfectly in R1. I will strengthen my rebuttals to clarify how the design controls for these mechanisms. I accept the challenges for findings F5 and F6, as they are scope-based and the severity has been appropriately adjusted.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 10,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 6,
+        "justification": "While the transformer variant without host identifiers addresses direct identity leakage, I acknowledge that other features may still correlate with host identity. To strengthen the design, we will conduct a feature ablation study to evaluate the contribution of all identity-correlated features, including protocol markers and port usage, to ensure that the transformer's performance is not driven by indirect identity information.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 10,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 6,
+        "justification": "The retrospective labeling approach is designed to mitigate contamination risks, but I recognize the need for further validation. We will evaluate the models using various labeling windows (1 hour, 6 hours, 24 hours, 72 hours) to assess how the transformer's performance varies with different detection latencies. This will help ensure that our labeling strategy aligns with realistic detection scenarios and does not introduce bias.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 10,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 6,
+        "justification": "The per-month evaluation of test set performance is a step towards identifying distribution shifts, but I acknowledge that it does not fully address long-term drift. To strengthen the design, we will conduct a domain adaptation experiment by training on different segments of the data and testing on subsequent months. This will help us understand how well the models generalize across varying attack patterns and infrastructure changes.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 10,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 6,
+        "justification": "The choice of pAUC-ROC is based on the operational context of low false-positive rates, but I recognize that it may not capture all aspects of real-world performance. To address this, we will also evaluate models using cost-sensitive metrics that account for the operational costs of false positives and false negatives. This will provide a more comprehensive assessment of model performance in practical scenarios.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The design focuses on demonstrating the unique benefits of sequence modeling. While the critique raises a valid point about aggregated flow statistics, the proposed alternative baseline does not directly address the hypothesis as stated. The focus remains on the transformer's ability to capture temporal dynamics through sequence modeling.",
+        "r2_challenge_response": "ACCEPTED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 4,
+        "justification": "While the concern about excluding incomplete sessions is valid, the low exclusion rate and the overall design intent indicate that this is unlikely to significantly bias the results. The suggestion to compare distributions is useful but does not fundamentally undermine the findings.",
+        "r2_challenge_response": "ACCEPTED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The rebuttals for findings F1, F2, F3, and F4 have been strengthened to address the critic's concerns, while findings F5 and F6 have been accepted as scope-based issues. The adjustments reflect a commitment to empirical validation of the methodology, leading to an outcome where further testing is warranted."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=10 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=10 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=10 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=10 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, orig_sev=5 < 7, REBUT-IMMATERIAL \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "4 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

@@ -1,0 +1,293 @@
+{
+  "case_id": "hyp_003_regular",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "x-ai/grok-4.1-fast",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The gradient-boosted survival model correctly handles right-censoring via Cox partial likelihood loss.",
+        "failure_mechanism": "If the binary label creation step discards censoring information (treating censored accounts as non\u2011events) and feeds that label into the Cox loss, the model receives incorrect event indicators. This biases hazard estimates and can inflate or deflate concordance arbitrarily, yet the reported metrics may still look plausible because the ranking of high\u2011risk accounts can remain partially informative.",
+        "evidence_test": "Inspect the training dataset used for the Cox model: verify whether a separate censoring indicator (0 = censored, 1 = event) is present and used by the loss function. If only the binary churn label is supplied, the censoring handling is flawed. Additionally, fit a standard Cox model with and without the censoring flag and compare concordance; a large discrepancy would confirm the issue.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The logistic\u2011regression baseline isolates the effect of richer features and the survival formulation because it uses only last\u2011month aggregate metrics while the GBM uses the same 90\u2011day look\u2011back window and billing\u2011history features.",
+        "failure_mechanism": "The baseline receives less historical information (only the most recent month) and fewer feature types than the GBM. Any performance gap may stem from this disparity in feature richness or window length rather than from the survival formulation itself. The design does not control for the amount of information available to each model.",
+        "evidence_test": "Train a GBM on exactly the same feature set as the baseline (last\u2011month aggregates only) and compare its concordance to the logistic\u2011regression baseline. If the GBM still outperforms, the gain is due to modeling capacity; if not, the original gap is likely driven by the richer feature set.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The Cox proportional\u2011hazards assumption holds for the data, making the survival model theoretically sound.",
+        "failure_mechanism": "If hazards are not proportional (e.g., the effect of a feature changes over the 90\u2011day window), the Cox model\u2019s parameter estimates are biased, and the concordance index may no longer reflect a valid ranking of risk. The PoC does not verify this assumption, so the model could be misspecified while still producing seemingly reasonable scores.",
+        "evidence_test": "Examine proportional\u2011hazards diagnostics (e.g., Schoenfeld residuals or time\u2011varying coefficient tests) on the training data. A significant violation would indicate the assumption is false. Alternatively, fit a flexible survival model (e.g., random survival forests) and compare concordance; a substantial improvement would suggest the Cox model is misspecified.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The survival formulation itself provides a predictive advantage over a static logistic\u2011regression baseline.",
+        "failure_mechanism": "Without comparing the GBM to a non\u2011survival machine\u2011learning model (e.g., a gradient\u2011boosted classifier trained to predict churn within 90 days using the same features), it is impossible to attribute any observed improvement to the survival approach rather than to the superior expressive power of gradient\u2011boosted trees.",
+        "evidence_test": "Train a GBM classifier (e.g., logistic loss) with the identical feature set used for the survival GBM and evaluate its concordance index on the test set. If the classifier\u2019s performance matches or exceeds that of the survival GBM, the survival formulation does not add value.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "The PoC presents a thoughtful temporal split and attempts to isolate the survival model\u2019s benefit, but it suffers from potentially fatal mishandling of censoring, insufficient baselines to disentangle feature richness from modeling choice, and unverified core assumptions of the Cox model. These issues weaken the causal claim that the survival formulation drives performance gains.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 (FATAL 9): The critic claims the binary label creation discards censoring information, which is then incorrectly fed into the Cox loss, biasing hazard estimates. This assumes the survival model uses only the binary churn label (churn=1 within 90 days, 0 otherwise) without a separate censoring indicator or time-to-event. However, the methodology explicitly describes proper survival inputs: for each monthly snapshot, the outcome uses a 90-day follow-up horizon where churners have event time = days to cancellation/non-renewal and delta=1, while non-churners are right-censored at 90 days (or end of data if earlier) with delta=0 (Section 2). The Cox model (Section 5) 'handles right-censoring correctly' via partial likelihood on these (time, delta) pairs. Section 8 confirms 'censoring alignment' with balanced rates across splits and shared censoring logic with baseline. The binary label is solely for the logistic baseline (treating censored as non-events, standard for binary classification). No evidence of discarded censoring; the critic misreads the design intent. Uncertain: exact code implementation, but design controls (named censoring logic) resolve this.\n\nF2 (MATERIAL 5): Critic argues baseline feature disparity (last-month aggregates vs. 90-day event-level + 12-month billing) confounds attribution to survival formulation, as gap could be from richer info. Methodology deliberately constrains baseline to isolate 'richer features and the survival formulation' (Section 4), testing the full proposed model (hypothesis: gradient-boosted survival with event-level/billing feats > logistic baseline). Crucially, Section 8.3 includes 'sensitivity analysis: a GBM variant trained on only baseline features', directly matching the critic's evidence test (GBM on last-month aggregates vs. logistic). This decomposes: full survival GBM (rich feats) vs. survival GBM (baseline feats) isolates event-level/billing contribution; survival GBM (baseline feats) vs. logistic (baseline feats) isolates GBM/survival vs. logistic on equal info. Section 8.2 documents novel vs. comparable features. No uncontrolled confound; design anticipates and controls. Uncertain: whether 'GBM variant' uses survival loss (likely yes, as primary model context), but resolves via planned analysis.\n\nF3 (MATERIAL 5): Critic notes unverified Cox proportional hazards (PH) assumption, risking biased estimates and invalid rankings if hazards time-vary. Methodology selects Cox as 'theoretically sound' (Section 5) but lacks explicit diagnostics (e.g., no Schoenfeld residuals test mentioned in Sections 6-9 or 8). Short 90-day horizon and snapshot design make approximate PH plausible, and concordance is robust to mild violations (focuses on ranking), with secondary metrics (time-dependent AUC, Brier, top-k recall) and per-month stability (Section 8.4) providing indirect validation. However, no named control addresses PH directly. Uncertain: whether assumption holds, resolvable empirically without changing core design.\n\nF4 (MATERIAL 5): Critic claims inability to attribute improvement to 'survival formulation itself' without GBM classifier (non-survival loss) on rich features. Hypothesis tests full 'gradient-boosted survival model using event-level... outperforms logistic baseline' (Section 1)\u2014bundling boosting, survival, and rich features. No claim of isolating 'survival itself' from boosting power. Controls chain: full survival GBM (rich) > survival GBM (baseline feats, Section 8.3) isolates features; survival GBM (baseline feats) > logistic (baseline feats) isolates survival+boosting vs. logistic. Stratification/stability (Section 8) ensure robustness. Evidence test (GBM classifier on rich feats) would further disentangle but exceeds PoC scope (hypothesis vs. logistic baseline). Uncertain: exact delta from survival vs. boosting, but not required for conclusions.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -6,
+        "adjusted_severity": 3,
+        "justification": "Design uses proper (time-to-event, censoring indicator) inputs for Cox partial likelihood per snapshot (Sections 2, 5), with binary label only for logistic baseline; explicit censoring controls (Section 8) refute assumption of discarded info."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Section 8.3's sensitivity analysis ('GBM variant on only baseline features') exactly implements the critic's evidence test, decomposing feature richness vs. modeling effects on equal footing with logistic baseline."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "No explicit PH diagnostic in design; settle via Schoenfeld residuals test on train data (non-significant p-values vindicate PH via no time-feature interaction; significant p-values + superior concordance from random survival forest validate critique, requiring model switch for unbiased ranking)."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "Valid concern for isolating survival from boosting power, but PoC scope tests full survival GBM package vs. logistic baseline (Section 1); feature sensitivity (Section 8.3) + equal-info modeling comparison suffice for hypothesis."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F3 requires deferred empirical PH verification (adjusted sev 5); all other findings rebutted to \u22643 with no CONCEDEd high-severity issues."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The defender cites specific design sections (2, 5, and 8) asserting that the Cox partial likelihood receives a time-to-event outcome and a separate censoring indicator for each snapshot, directly countering the failure mechanism that censoring information is discarded and replaced by a binary label. This mechanistic explanation addresses the core concern, so the rebuttal is accepted."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender points to Section 8.3's sensitivity analysis, which trains a GBM on exactly the baseline-only feature set. This matches the critic's proposed evidence test and shows the design already isolates feature richness from modeling effects, invalidating the premise of the finding."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 5,
+        "reasoning": "The defender opts to defer resolution to a post-hoc Schoenfeld residuals test. Per instructions, DEFER rebuttals are accepted without further counter."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The defender's rebuttal relies on scope arguments and cites feature sensitivity/equal-info modeling (Section 8.3), which do not address the need to compare the survival GBM to a non-survival GBM with identical features. Thus the failure mechanism\u2014attributing any performance gain to the survival formulation rather than boosting power\u2014remains unresolved."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "All R2 challenges ACCEPTed (F1, F2, F3); maintained positions unchanged. Contested F4 CHALLENGE via STRENGTHENED REBUT-SCOPE, as the design's hypothesis tests the full GBM-survival package (not 'survival formulation itself' in isolation from boosting), with feature sensitivity (8.3) decomposing relevant effects; critic mischaracterizes scope by demanding out-of-scope non-survival GBM control.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -6,
+        "adjusted_severity": 3,
+        "justification": "Design uses proper (time-to-event, censoring indicator) inputs for Cox partial likelihood per snapshot (Sections 2, 5), with binary label only for logistic baseline; explicit censoring controls (Section 8) refute assumption of discarded info. This directly addresses critic's ACCEPT reasoning confirming mechanistic resolution via cited sections.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Section 8.3's sensitivity analysis ('GBM variant on only baseline features') exactly implements the critic's evidence test, decomposing feature richness vs. modeling effects on equal footing with logistic baseline. Matches critic's ACCEPT reasoning that this invalidates the finding premise.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "No explicit PH diagnostic in design; settle via Schoenfeld residuals test on train data (non-significant p-values vindicate PH via no time-feature interaction; significant p-values + superior concordance from random survival forest validate critique, requiring model switch for unbiased ranking). Aligns with critic's ACCEPT of DEFER.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "Hypothesis (Section 1) explicitly tests full 'gradient-boosted survival model using event-level... features' vs. logistic baseline, not isolating 'survival formulation itself' from boosting power as critic assumes. Section 8.3 sensitivity (survival GBM on baseline features) decomposes feature gains, while equal tuning/evaluation controls modeling capacity disparity; non-survival GBM comparator is out-of-scope for this PoC validating deployable end-to-end model, directly refuting challenge that attribution to survival (vs. trees) is required.",
+        "r2_challenge_response": "STRENGTHENED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F3 remains DEFERred for empirical PH diagnostics, surfacing legitimate uncertainty resolvable by experiment; all others rebutted to \u22643, confirming design soundness modulo this test."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The gradient-boosted survival model correctly handles right-censoring via Cox partial likelihood loss.",
+        "failure_mechanism": "If the binary label creation step discards censoring information (treating censored accounts as non\u2011events) and feeds that label into the Cox loss, the model receives incorrect event indicators. This biases hazard estimates and can inflate or deflate concordance arbitrarily, yet the reported metrics may still look plausible because the ranking of high\u2011risk accounts can remain partially informative.",
+        "evidence_test": "Inspect the training dataset used for the Cox model: verify whether a separate censoring indicator (0 = censored, 1 = event) is present and used by the loss function. If only the binary churn label is supplied, the censoring handling is flawed. Additionally, fit a standard Cox model with and without the censoring flag and compare concordance; a large discrepancy would confirm the issue.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The logistic\u2011regression baseline isolates the effect of richer features and the survival formulation because it uses only last\u2011month aggregate metrics while the GBM uses the same 90\u2011day look\u2011back window and billing\u2011history features.",
+        "failure_mechanism": "The baseline receives less historical information (only the most recent month) and fewer feature types than the GBM. Any performance gap may stem from this disparity in feature richness or window length rather than from the survival formulation itself. The design does not control for the amount of information available to each model.",
+        "evidence_test": "Train a GBM on exactly the same feature set as the baseline (last\u2011month aggregates only) and compare its concordance to the logistic\u2011regression baseline. If the GBM still outperforms, the gain is due to modeling capacity; if not, the original gap is likely driven by the richer feature set.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The Cox proportional\u2011hazards assumption holds for the data, making the survival model theoretically sound.",
+        "failure_mechanism": "If hazards are not proportional (e.g., the effect of a feature changes over the 90\u2011day window), the Cox model\u2019s parameter estimates are biased, and the concordance index may no longer reflect a valid ranking of risk. The PoC does not verify this assumption, so the model could be misspecified while still producing seemingly reasonable scores.",
+        "evidence_test": "Examine proportional\u2011hazards diagnostics (e.g., Schoenfeld residuals or time\u2011varying coefficient tests) on the training data. A significant violation would indicate the assumption is false. Alternatively, fit a flexible survival model (e.g., random survival forests) and compare concordance; a substantial improvement would suggest the Cox model is misspecified.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The survival formulation itself provides a predictive advantage over a static logistic\u2011regression baseline.",
+        "failure_mechanism": "Without comparing the GBM to a non\u2011survival machine\u2011learning model (e.g., a gradient\u2011boosted classifier trained to predict churn within 90 days using the same features), it is impossible to attribute any observed improvement to the survival approach rather than to the superior expressive power of gradient\u2011boosted trees.",
+        "evidence_test": "Train a GBM classifier (e.g., logistic loss) with the identical feature set used for the survival GBM and evaluate its concordance index on the test set. If the classifier\u2019s performance matches or exceeds that of the survival GBM, the survival formulation does not add value.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "The PoC presents a thoughtful temporal split and attempts to isolate the survival model\u2019s benefit, but it suffers from potentially fatal mishandling of censoring, insufficient baselines to disentangle feature richness from modeling choice, and unverified core assumptions of the Cox model. These issues weaken the causal claim that the survival formulation drives performance gains.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "All R2 challenges ACCEPTed (F1, F2, F3); maintained positions unchanged. Contested F4 CHALLENGE via STRENGTHENED REBUT-SCOPE, as the design's hypothesis tests the full GBM-survival package (not 'survival formulation itself' in isolation from boosting), with feature sensitivity (8.3) decomposing relevant effects; critic mischaracterizes scope by demanding out-of-scope non-survival GBM control.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -6,
+        "adjusted_severity": 3,
+        "justification": "Design uses proper (time-to-event, censoring indicator) inputs for Cox partial likelihood per snapshot (Sections 2, 5), with binary label only for logistic baseline; explicit censoring controls (Section 8) refute assumption of discarded info. This directly addresses critic's ACCEPT reasoning confirming mechanistic resolution via cited sections.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Section 8.3's sensitivity analysis ('GBM variant on only baseline features') exactly implements the critic's evidence test, decomposing feature richness vs. modeling effects on equal footing with logistic baseline. Matches critic's ACCEPT reasoning that this invalidates the finding premise.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "No explicit PH diagnostic in design; settle via Schoenfeld residuals test on train data (non-significant p-values vindicate PH via no time-feature interaction; significant p-values + superior concordance from random survival forest validate critique, requiring model switch for unbiased ranking). Aligns with critic's ACCEPT of DEFER.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "Hypothesis (Section 1) explicitly tests full 'gradient-boosted survival model using event-level... features' vs. logistic baseline, not isolating 'survival formulation itself' from boosting power as critic assumes. Section 8.3 sensitivity (survival GBM on baseline features) decomposes feature gains, while equal tuning/evaluation controls modeling capacity disparity; non-survival GBM comparator is out-of-scope for this PoC validating deployable end-to-end model, directly refuting challenge that attribution to survival (vs. trees) is required.",
+        "r2_challenge_response": "STRENGTHENED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F3 remains DEFERred for empirical PH diagnostics, surfacing legitimate uncertainty resolvable by experiment; all others rebutted to \u22643, confirming design soundness modulo this test."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

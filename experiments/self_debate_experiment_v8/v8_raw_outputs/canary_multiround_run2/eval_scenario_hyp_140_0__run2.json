@@ -1,0 +1,411 @@
+{
+  "case_id": "eval_scenario_hyp_140_0",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Analyst disposition decisions recorded within 7 days of each alert are a reliable ground truth for malicious vs. benign labels.",
+        "failure_mechanism": "Analyst decisions are not ground truth; they are operational dispositions that may be influenced by incomplete information, analyst bias, or organizational constraints (e.g., alert fatigue, policy changes). False negatives (missed intrusions) may not be labeled as such, and false positives may be labeled as benign if analysts ignore them. The 7-day window may exclude delayed detections (e.g., retrospective IOCs or delayed forensic analysis), introducing label noise that disproportionately affects rare incident classes.",
+        "evidence_test": "Compare model-predicted labels against a gold-standard forensic investigation (e.g., EDR telemetry, network captures, or external threat intelligence) for a subset of alerts. Measure the agreement between analyst dispositions and forensic ground truth. If agreement is low (e.g., <80%), labels are unreliable.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split (months 1\u201312 train, 13\u201315 validation, 16\u201318 test) prevents leakage of future information and reflects deployment conditions.",
+        "failure_mechanism": "The split is at the alert level, but alerts are not independent events. A single incident may generate multiple correlated alerts (e.g., failed logins, endpoint detections, email alerts) across the 18-month window. If any alert in the test set (months 16\u201318) is part of an incident that began earlier (e.g., in months 13\u201315 or even 1\u201312), the model may indirectly learn from training data via shared incident context. This violates the independence assumption of temporal splits and inflates performance.",
+        "evidence_test": "Perform an incident-level split: group alerts by incident ID (if available) or by entity (user/host) and time proximity (e.g., alerts within 7 days of each other). Retrain the model with this split and compare PR-AUC. If performance drops significantly, the original split leaked incident-level information.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 30-day lookback window for both tabular and GNN features ensures fair comparison and reflects deployment constraints.",
+        "failure_mechanism": "The GNN constructs a graph over the 30-day window, but the tabular baseline only uses aggregated statistics (e.g., event counts). Aggregation may lose critical temporal or relational patterns (e.g., sequences of events, co-occurrence of detections across entities) that the GNN exploits. The comparison is not fair because the GNN has access to richer, unaggregated information within the same window. The transformer baseline partially controls for this, but it encodes sequences, not relational structure.",
+        "evidence_test": "Re-engineer the tabular baseline to include temporal features (e.g., time since last event, event sequence embeddings) or relational features (e.g., co-occurrence counts between entity pairs). Compare PR-AUC with the original tabular baseline. If the GNN's advantage disappears, the comparison was unfair.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The PR-AUC metric reflects the operational goal of ranking alerts to minimize analyst effort.",
+        "failure_mechanism": "PR-AUC is sensitive to class imbalance but does not account for the cost of false negatives (missed intrusions) vs. false positives (wasted analyst time). In cybersecurity, a false negative may have catastrophic consequences (e.g., undetected breach), while false positives are costly but less severe. PR-AUC treats both errors equally in its calculation. The secondary metrics (P@R, FP@FPR) partially address this, but the primary metric does not align with the deployment objective.",
+        "evidence_test": "Conduct a cost-benefit analysis using operational data: estimate the cost of a missed intrusion (e.g., average breach cost) and the cost of analyst time per false positive. Compute a weighted metric (e.g., expected cost per alert) and compare models. If the GNN performs worse on this metric, PR-AUC is misleading.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The GNN's advantage, if found, comes from exploiting relational structure rather than temporal modeling or recency bias.",
+        "failure_mechanism": "The transformer baseline controls for temporal modeling but not for recency bias (e.g., the GNN may implicitly learn that recent events are more important). The 30-day window is fixed, but the temporal attention mechanism in the GNN could prioritize recent edges, mimicking recency bias rather than relational structure. Without ablating the graph structure (e.g., removing edges or using a non-graph temporal model), the mechanism of improvement is unclear.",
+        "evidence_test": "Ablate the graph structure: train a GNN variant that ignores edges (i.e., treats the graph as a set of isolated nodes) and compare PR-AUC to the full GNN. If performance is similar, the GNN's advantage comes from temporal modeling or recency bias, not relational structure.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Analyst drift and label noise are controlled by stratified post-hoc analysis on the test set.",
+        "failure_mechanism": "Stratified analysis (e.g., by month, incident type, or analyst) checks for performance stability but does not address the root cause of drift or noise. For example, if analyst behavior changes due to policy updates or tooling changes, the labels themselves may shift, invalidating the model's training objective. The analysis is reactive (detects drift after deployment) rather than proactive (prevents drift during training).",
+        "evidence_test": "Measure label consistency over time: compute the agreement rate between analyst dispositions for duplicate or similar alerts across different time periods. If agreement drops significantly (e.g., >20% decrease), labels are unstable, and the model's performance claims are unreliable.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The PoC has multiple FATAL flaws that invalidate its core claims: unreliable labels (F1), potential signal leakage via incident correlation (F2), and an unfair comparison between GNN and tabular baselines (F3). Material flaws include misaligned metrics (F4), unclear mechanism of improvement (F5), and unaddressed label drift (F6). The experiment cannot produce interpretable results without addressing these issues.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 claims analyst dispositions are not ground truth. However, the design explicitly states that these decisions serve as the ground truth because they are the operational target: the model is designed to automate/assist the triage process (predicting the disposition), not to discover 'hidden' truths that analysts missed. In a triage PoC, the analyst's decision is the definition of the label. F2 claims incident-level leakage. The design uses a strict temporal split at the alert level. While an incident can span boundaries, the model only uses a 30-day lookback. If an alert in month 16 is part of an incident that started in month 12, the model only sees the 30 days prior to that specific alert. It does not have access to the 'future' labels of the training set. The temporal split is the industry standard for this use case. F3 argues the tabular baseline is too weak. The design includes a Transformer/LSTM baseline specifically to control for the 'richness' of unaggregated temporal sequences. If the tGNN beats both the tabular (aggregated) and the Transformer (sequential), the remaining delta is attributable to the graph structure. F4 argues PR-AUC doesn't account for asymmetric costs. This is a general critique of PR-AUC, but the design includes P@R and FP@FPR specifically to provide the operational cost context. PR-AUC is the correct primary metric for ranking performance in imbalanced sets. F5 suggests recency bias. The design uses a Transformer baseline which also processes temporal sequences and can learn recency. If the tGNN outperforms the Transformer, it is exploiting the relational edges, not just the timestamps. F6 claims post-hoc analysis is reactive. For a PoC, detecting stability via stratified analysis is the appropriate control to ensure the model isn't overfitting to a specific month's noise. Proactive drift prevention is a production engineering concern, not a hypothesis validation concern.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The goal of the PoC is to automate 'incident triage' (predicting analyst disposition), not to perform forensic discovery. Therefore, the analyst's disposition is the correct operational ground truth for this specific hypothesis. The 7-day window is a design choice to ensure label availability, which is a standard operational constraint."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The temporal split is applied at the alert level, and the model is restricted to a 30-day lookback. Even if an incident spans the split, the model cannot 'leak' labels from the future because it only sees events prior to the alert timestamp. This design mirrors the real-world deployment where the model scores alerts in real-time."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The design explicitly includes a Transformer/LSTM baseline to control for the 'unaggregated' nature of the data. By comparing the tGNN against both a tabular baseline (aggregated) and a sequence baseline (unaggregated), the experiment isolates the value of the graph structure specifically."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "PR-AUC is the standard for ranking performance in highly imbalanced datasets. The operational cost of FNs vs FPs is explicitly addressed via the secondary metrics (P@R and FP@FPR), which provide the necessary context for the primary ranking metric."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The Transformer baseline also utilizes temporal encoding. If the tGNN provides a lift over the Transformer, that lift is attributable to the relational edges (graph structure), as both models have equal access to the temporal recency of events."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The purpose of the PoC is to validate the hypothesis that graph structure improves triage accuracy. Stratified post-hoc analysis is the correct method to verify that this improvement is stable and not an artifact of a specific time period. Proactive drift mitigation is a deployment concern, not a validation concern."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings were successfully rebutted using design controls or scope clarifications. Every finding's adjusted severity is \u2264 3, meaning the methodology is sound and the original design holds up under scrutiny."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The rebuttal argues that analyst dispositions are the correct ground truth for the PoC's hypothesis of automating incident triage, which is a scope-based defense. However, the failure mechanism is not about the *goal* of the PoC but the *validity* of the labels as ground truth. The rebuttal does not address the core concern: analyst decisions may be influenced by incomplete information, bias, or organizational constraints, leading to unreliable labels. The defender does not provide evidence or mechanism to show that analyst dispositions are sufficiently accurate or consistent with forensic ground truth. The severity remains high because the label noise directly impacts the validity of the entire experiment."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The rebuttal claims that the temporal split prevents leakage because the model only sees events prior to the alert timestamp. However, this ignores the failure mechanism: correlated alerts within the same incident may span the split, and the model could indirectly learn from shared incident context (e.g., via entity behavior patterns) even without explicit future labels. The defender does not address the *incident-level correlation* concern or provide evidence (e.g., incident-level split results) to show that performance is unaffected by this leakage. The severity is reduced slightly but remains high because the independence assumption is violated."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The rebuttal correctly identifies that the design includes a Transformer/LSTM baseline to control for unaggregated temporal data, isolating the value of graph structure. This directly addresses the failure mechanism by ensuring the comparison is fair. The severity is reduced to 3, as the mechanism of improvement can now be attributed to graph structure rather than temporal modeling."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The rebuttal argues that PR-AUC is standard for imbalanced datasets and that secondary metrics address the cost imbalance. This is a valid scope-based defense: the primary metric aligns with the operational goal of ranking alerts, and the secondary metrics provide additional context. The severity is reduced appropriately."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 2,
+        "reasoning": "The rebuttal states that the Transformer baseline also uses temporal encoding, so any lift from the tGNN is attributable to graph structure. This directly addresses the failure mechanism by controlling for temporal modeling. The severity is reduced to 2, as the mechanism of improvement is now clear."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The rebuttal argues that stratified post-hoc analysis is sufficient to verify stability and that proactive drift mitigation is a deployment concern, not a validation concern. This is a valid scope-based defense: the PoC's goal is to validate the graph structure hypothesis, and post-hoc analysis addresses the concern within that scope. The severity is reduced to 1."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I am maintaining my position on F1 and F2. For F1, the critic conflates 'forensic truth' with 'operational truth'; since the hypothesis is specifically about automating the triage process, the analyst's decision is the only relevant ground truth. For F2, the critic's concern about 'shared incident context' is a theoretical possibility that is effectively mitigated by the 30-day lookback and the nature of the temporal split, but since it's a point of fundamental disagreement on the independence of alerts, I will DEFER this to an empirical test to resolve the ambiguity.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The critic's challenge focuses on the difference between analyst decisions and 'forensic ground truth.' However, the experiment's objective is not to discover new threats, but to automate the existing 'incident triage' workflow. In this context, the analyst's disposition is not a proxy for truth\u2014it IS the ground truth. If an analyst labels an alert as benign, the operational goal is for the model to also label it as benign to reduce noise. The validity of the experiment depends on whether the model can replicate the human triage decision, not whether the human is a perfect forensic investigator. Therefore, the design is mechanistically correct for the stated hypothesis.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "There is a genuine disagreement on whether alert-level temporal splits are sufficient when alerts are correlated by incident. To settle this: (1) We will implement an incident-level split where all alerts associated with a single incident ID (or entity-time cluster) are assigned to the same fold. (2) If the PR-AUC remains stable compared to the alert-level split, the design is vindicated as incident-level correlation is not providing a significant leakage path. (3) If PR-AUC drops significantly, the critique is validated, and the incident-level split will be adopted as the new standard for the evaluation.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The design includes a Transformer/LSTM baseline to control for unaggregated temporal data, isolating the value of graph structure.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "PR-AUC is the standard for ranking performance in highly imbalanced datasets, and secondary metrics address the cost imbalance.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The Transformer baseline also utilizes temporal encoding; any lift from the tGNN is attributable to the relational edges.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Stratified post-hoc analysis is the correct method to verify stability for a PoC; proactive drift mitigation is a deployment concern.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "While most findings were successfully rebutted or accepted, F2 remains a point of genuine ambiguity regarding signal leakage that requires an empirical incident-level split to resolve."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Analyst disposition decisions recorded within 7 days of each alert are a reliable ground truth for malicious vs. benign labels.",
+        "failure_mechanism": "Analyst decisions are not ground truth; they are operational dispositions that may be influenced by incomplete information, analyst bias, or organizational constraints (e.g., alert fatigue, policy changes). False negatives (missed intrusions) may not be labeled as such, and false positives may be labeled as benign if analysts ignore them. The 7-day window may exclude delayed detections (e.g., retrospective IOCs or delayed forensic analysis), introducing label noise that disproportionately affects rare incident classes.",
+        "evidence_test": "Compare model-predicted labels against a gold-standard forensic investigation (e.g., EDR telemetry, network captures, or external threat intelligence) for a subset of alerts. Measure the agreement between analyst dispositions and forensic ground truth. If agreement is low (e.g., <80%), labels are unreliable.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split (months 1\u201312 train, 13\u201315 validation, 16\u201318 test) prevents leakage of future information and reflects deployment conditions.",
+        "failure_mechanism": "The split is at the alert level, but alerts are not independent events. A single incident may generate multiple correlated alerts (e.g., failed logins, endpoint detections, email alerts) across the 18-month window. If any alert in the test set (months 16\u201318) is part of an incident that began earlier (e.g., in months 13\u201315 or even 1\u201312), the model may indirectly learn from training data via shared incident context. This violates the independence assumption of temporal splits and inflates performance.",
+        "evidence_test": "Perform an incident-level split: group alerts by incident ID (if available) or by entity (user/host) and time proximity (e.g., alerts within 7 days of each other). Retrain the model with this split and compare PR-AUC. If performance drops significantly, the original split leaked incident-level information.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 30-day lookback window for both tabular and GNN features ensures fair comparison and reflects deployment constraints.",
+        "failure_mechanism": "The GNN constructs a graph over the 30-day window, but the tabular baseline only uses aggregated statistics (e.g., event counts). Aggregation may lose critical temporal or relational patterns (e.g., sequences of events, co-occurrence of detections across entities) that the GNN exploits. The comparison is not fair because the GNN has access to richer, unaggregated information within the same window. The transformer baseline partially controls for this, but it encodes sequences, not relational structure.",
+        "evidence_test": "Re-engineer the tabular baseline to include temporal features (e.g., time since last event, event sequence embeddings) or relational features (e.g., co-occurrence counts between entity pairs). Compare PR-AUC with the original tabular baseline. If the GNN's advantage disappears, the comparison was unfair.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The PR-AUC metric reflects the operational goal of ranking alerts to minimize analyst effort.",
+        "failure_mechanism": "PR-AUC is sensitive to class imbalance but does not account for the cost of false negatives (missed intrusions) vs. false positives (wasted analyst time). In cybersecurity, a false negative may have catastrophic consequences (e.g., undetected breach), while false positives are costly but less severe. PR-AUC treats both errors equally in its calculation. The secondary metrics (P@R, FP@FPR) partially address this, but the primary metric does not align with the deployment objective.",
+        "evidence_test": "Conduct a cost-benefit analysis using operational data: estimate the cost of a missed intrusion (e.g., average breach cost) and the cost of analyst time per false positive. Compute a weighted metric (e.g., expected cost per alert) and compare models. If the GNN performs worse on this metric, PR-AUC is misleading.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The GNN's advantage, if found, comes from exploiting relational structure rather than temporal modeling or recency bias.",
+        "failure_mechanism": "The transformer baseline controls for temporal modeling but not for recency bias (e.g., the GNN may implicitly learn that recent events are more important). The 30-day window is fixed, but the temporal attention mechanism in the GNN could prioritize recent edges, mimicking recency bias rather than relational structure. Without ablating the graph structure (e.g., removing edges or using a non-graph temporal model), the mechanism of improvement is unclear.",
+        "evidence_test": "Ablate the graph structure: train a GNN variant that ignores edges (i.e., treats the graph as a set of isolated nodes) and compare PR-AUC to the full GNN. If performance is similar, the GNN's advantage comes from temporal modeling or recency bias, not relational structure.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Analyst drift and label noise are controlled by stratified post-hoc analysis on the test set.",
+        "failure_mechanism": "Stratified analysis (e.g., by month, incident type, or analyst) checks for performance stability but does not address the root cause of drift or noise. For example, if analyst behavior changes due to policy updates or tooling changes, the labels themselves may shift, invalidating the model's training objective. The analysis is reactive (detects drift after deployment) rather than proactive (prevents drift during training).",
+        "evidence_test": "Measure label consistency over time: compute the agreement rate between analyst dispositions for duplicate or similar alerts across different time periods. If agreement drops significantly (e.g., >20% decrease), labels are unstable, and the model's performance claims are unreliable.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The PoC has multiple FATAL flaws that invalidate its core claims: unreliable labels (F1), potential signal leakage via incident correlation (F2), and an unfair comparison between GNN and tabular baselines (F3). Material flaws include misaligned metrics (F4), unclear mechanism of improvement (F5), and unaddressed label drift (F6). The experiment cannot produce interpretable results without addressing these issues.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I am maintaining my position on F1 and F2. For F1, the critic conflates 'forensic truth' with 'operational truth'; since the hypothesis is specifically about automating the triage process, the analyst's decision is the only relevant ground truth. For F2, the critic's concern about 'shared incident context' is a theoretical possibility that is effectively mitigated by the 30-day lookback and the nature of the temporal split, but since it's a point of fundamental disagreement on the independence of alerts, I will DEFER this to an empirical test to resolve the ambiguity.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The critic's challenge focuses on the difference between analyst decisions and 'forensic ground truth.' However, the experiment's objective is not to discover new threats, but to automate the existing 'incident triage' workflow. In this context, the analyst's disposition is not a proxy for truth\u2014it IS the ground truth. If an analyst labels an alert as benign, the operational goal is for the model to also label it as benign to reduce noise. The validity of the experiment depends on whether the model can replicate the human triage decision, not whether the human is a perfect forensic investigator. Therefore, the design is mechanistically correct for the stated hypothesis.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "There is a genuine disagreement on whether alert-level temporal splits are sufficient when alerts are correlated by incident. To settle this: (1) We will implement an incident-level split where all alerts associated with a single incident ID (or entity-time cluster) are assigned to the same fold. (2) If the PR-AUC remains stable compared to the alert-level split, the design is vindicated as incident-level correlation is not providing a significant leakage path. (3) If PR-AUC drops significantly, the critique is validated, and the incident-level split will be adopted as the new standard for the evaluation.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The design includes a Transformer/LSTM baseline to control for unaggregated temporal data, isolating the value of graph structure.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "PR-AUC is the standard for ranking performance in highly imbalanced datasets, and secondary metrics address the cost imbalance.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The Transformer baseline also utilizes temporal encoding; any lift from the tGNN is attributable to the relational edges.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Stratified post-hoc analysis is the correct method to verify stability for a PoC; proactive drift mitigation is a deployment concern.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "While most findings were successfully rebutted or accepted, F2 remains a point of genuine ambiguity regarding signal leakage that requires an empirical incident-level split to resolve."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 8,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=8, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

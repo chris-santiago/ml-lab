@@ -1,0 +1,292 @@
+{
+  "case_id": "hyp_204_case",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "nvidia/nemotron-3-super-120b-a12b",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The comparison between the Ranking model and the Baseline model isolates the effect of the ranking objective (LambdaMART) versus the classification objective (Logistic Regression).",
+        "failure_mechanism": "The PoC introduces a massive confounder: the Ranking model uses 'Extended features' (TF-IDF text, ticket metadata, analyst behavior) while the Baseline uses only 'Baseline features'. Even with the mentioned ablation (LambdaMART on baseline features), the primary comparison is between a complex non-linear gradient boosted tree model with rich features and a simple linear Logistic Regression model with sparse features. Any performance gain could be attributed to the model architecture (GBDT vs LR) or the feature set, rather than the ranking loss function.",
+        "evidence_test": "Compare the Ranking model against a Gradient Boosted Decision Tree (GBDT) trained with binary cross-entropy (classification) using the exact same 'Extended' feature set.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The model's features reflect information available at triage time and do not contain label leakage.",
+        "failure_mechanism": "The 'Extended features' include 'Incident-response ticket metadata from the past 7 days on the same host: ticket count, median resolution time, median severity assigned'. In a SOC environment, a high-priority incident often triggers a cluster of related tickets on the same host. If a high-priority incident is currently unfolding, the 'ticket count' and 'median severity' for that host will spike *during* the window the model is trying to predict. This creates a feedback loop where the model detects the analyst's reaction to the incident to predict the incident, rather than predicting the incident from the alert itself.",
+        "evidence_test": "Run the model using only alerts that occurred *before* any ticket was opened for that host in the current incident window, or remove host-level ticket metadata and check for a significant drop in Recall@5.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Recall@5 is a robust primary metric for the stakeholder's objective.",
+        "failure_mechanism": "Recall@5 is calculated as the fraction of true high-priority incidents that appear in the top 5. However, the PoC does not define the 'denominator' of the ranking group (e.g., 'all alerts on a host in a 24-hour window'). If a host only has 2 alerts in a window, Recall@5 is trivial. If a host has 1,000 alerts, Recall@5 is extremely difficult. By aggregating these without weighting by group size or considering the total volume of alerts analysts must process, the metric may inflate the perceived utility if the model performs well on 'quiet' hosts but fails on 'noisy' hosts where triage is actually most needed.",
+        "evidence_test": "Calculate Recall@5 stratified by the number of alerts per group (e.g., groups with <10 alerts vs groups with >100 alerts).",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 30-day maturation window eliminates ambiguous cases.",
+        "failure_mechanism": "While this reduces label noise, it introduces a systematic selection bias. Alerts that are 'slow-burn' incidents (where the connection is only realized after 30+ days) are excluded. The model is therefore trained only on 'obvious' or 'fast-acting' high-priority incidents, potentially failing on the most sophisticated threats that the SOC actually struggles to triage.",
+        "evidence_test": "Analyze the distribution of 'time-to-ticket' for the excluded alerts to see if there is a correlation between delay and threat sophistication.",
+        "flaw_category": "synthetic_data_assump"
+      }
+    ],
+    "summary": "The PoC suffers from two fatal flaws: a failure to control for model complexity/feature richness in the baseline comparison and significant signal leakage via host-level ticket metadata. These issues likely inflate the perceived effectiveness of the ranking approach.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "Finding F1 challenges the isolation of the ranking objective, noting that the primary comparison confounds model type (LambdaMART vs Logistic Regression) and feature set (baseline vs extended). The methodology does include an ablation (LambdaMART trained on baseline features only) that directly addresses this concern by holding features constant while varying the loss function, thus allowing a clean ranking vs. classification comparison. \n\nFinding F2 raises a potential signal\u2011leakage issue: the 7\u2011day ticket\u2011history features could capture ongoing incident activity, creating a feedback loop. The description of feature construction does not explicitly state that these historical windows are strictly antecedent to the alert, nor does it name a control that guarantees no future information leaks. An empirical test (e.g., removing alerts that have any ticket in the prediction window or dropping the ticket\u2011history features) would be needed to settle the question. \n\nFinding F3 questions the robustness of Recall@5 when group size varies. The design ranks alerts within predefined groups (e.g., all alerts on a host in a 24\u2011hour window) and computes Recall@5 per group before averaging, which inherently accounts for group size. The critique\u2019s concern about an undefined denominator is therefore misaligned with the actual per\u2011group ranking procedure. \n\nFinding F4 notes that the 30\u2011day maturation window may exclude slow\u2011burn incidents, introducing selection bias. While this is a valid limitation, it is a deliberate design choice to reduce label noise and does not undermine the core comparison between ranking and classification; its impact on the primary metric is expected to be small.\n\nOverall, F1 and F3 are addressed by explicit design controls, F2 requires empirical clarification, and F4 is a minor concern that does not affect the study\u2019s conclusions.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The ablation model (LambdaMART trained on baseline features only) isolates the effect of the ranking loss from feature richness and model complexity by keeping features constant while varying the objective. This directly addresses the confound raised in F1, showing that any performance gain attributable to ranking can be assessed independent of the extended feature set or the non\u2011linear GBDT architecture."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The ticket\u2011history features (count, median severity, median resolution time from the past 7 days) could inadvertently capture ongoing incident activity if the window is not strictly antecedent to the alert. To resolve this, we propose an empirical test: (1) re\u2011run the model after removing any alert that has a ticket opened in the same host within the 7\u2011day window preceding the alert, or (2) drop the ticket\u2011history features entirely and measure the change in Recall@5. If Recall@5 drops significantly, the critique is validated; if it remains unchanged, the design\u2019s temporal safeguard is vindicated."
+      },
+      {
+        "finding_id": "F3",
+        "rebuttal_type": "REBUT-DEFEND",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The methodology ranks alerts within predefined groups (e.g., all alerts on a host in a 24\u2011hour window) and computes Recall@5 per group before averaging across groups. This per\u2011group procedure inherently accounts for varying group sizes, making the metric robust to the concern about an undefined denominator. The critique\u2019s assumption of a flat, unweighted recall across all alerts does not match the actual evaluation procedure."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The 30\u2011day maturation window is a deliberate noise\u2011reduction step that excludes ambiguous labels. While it may omit slow\u2011burn incidents, this is a known and accepted trade\u2011off for obtaining a clean training signal. The impact on the primary Recall@5 metric is expected to be minor, as the model\u2019s ability to prioritize evident high\u2011severity incidents remains the focus of the study."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "One finding (F2) received a DEFER rebuttal, indicating a need for empirical clarification, while no finding was conceded with adjusted severity \u22657. All other findings were successfully mitigated by design arguments, leaving no residual fatal or material flaws that would overturn the study\u2019s conclusions."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The defender's argument is logically flawed. The ablation model (LambdaMART on baseline features) compares 'Ranking Loss' vs 'Classification Loss' ONLY if the baseline is also LambdaMART. However, the primary comparison is Ranking Model (LambdaMART + Extended) vs Baseline (Logistic Regression + Baseline). The ablation only proves that LambdaMART is better than Logistic Regression on baseline features; it does NOT isolate the 'ranking objective' from the 'model architecture' (GBDT vs LR) or the 'feature set' (Extended vs Baseline). To resolve this, the defender needs a GBDT classification model using extended features as a baseline."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 7,
+        "reasoning": "The defender has deferred this finding and proposed a concrete empirical test to validate the leakage mechanism. No counter-challenge is needed for a DEFER."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 4,
+        "reasoning": "The defender clarifies that they average Recall@5 per group. While this defines the denominator, it does not address the core of the failure mechanism: the 'difficulty' variance. A group with 2 alerts is trivial to rank; a group with 1,000 is not. Averaging these equally treats a 'quiet' host as equally important as a 'noisy' host, which may inflate the metric if the model only succeeds on easy, low-volume groups. The concern about stratification by group size remains unresolved."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 2,
+        "reasoning": "The rebuttal is a scope/trade-off statement ('known and accepted trade-off'). However, the finding identifies a systematic selection bias that affects the validity of the claim that the model helps triage 'high-priority incidents' in general. By excluding slow-burn incidents, the model is trained on a biased subset of the problem space. This is a valid methodological critique, not an immaterial detail."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "We concede F1 because the design lacks a control to isolate the ranking objective from model architecture and feature set. We maintain our DEFER for F2 (ticket-history leakage) and switch F3 to DEFER (group-size weighting ambiguity), proposing concrete empirical tests for both. We keep F4 as REBUT-IMMATERIAL, arguing the 30\u2011day maturation window is a scoped, immaterial trade\u2011off.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic correctly points out that our ablation (LambdaMART on baseline features) does not isolate the ranking loss from model architecture (GBDT vs Logistic Regression) or from the extended feature set. The primary comparison confounds ranking objective with both learner type and feature richness, and the design includes no model that holds architecture and features constant while varying only the loss function. Consequently, any observed gain in Recall@5 could stem from the GBDT learner or the extended features rather than the ranking objective itself.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "We proposed an empirical test to resolve the leakage concern: (1) exclude any alert that has a ticket opened on the same host within the 7\u2011day window preceding the alert, or (2) drop the ticket\u2011history features entirely and measure the change in Recall@5. If Recall@5 drops significantly, the critique is validated; if it remains unchanged, the design\u2019s temporal safeguard is vindicated. The critic accepted this DEFER, so we maintain it.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "Averaging Recall@5 per group gives equal weight to groups regardless of size, which may inflate the metric if the model performs well only on small, easy groups while failing on large, noisy groups where triage is most needed. To settle this, we will stratify Recall@5 by group size (e.g., <10, 10\u2011100, >100 alerts per host\u2011day) and also compute a weighted Recall@5 (weighted by the number of high\u2011priority incidents per group). If the ranking model\u2019s advantage persists across strata and in the weighted metric, the design is vindicated; if the advantage disappears in large groups or the weighted metric shows no improvement, the critique is validated.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The 30\u2011day maturation window is a deliberate scoping decision to exclude ambiguous labels and reduce noise. While it does omit slow\u2011burn incidents, this is a known limitation that does not materially affect the primary Recall@5 metric for the subset of fast\u2011acting, high\u2011severity incidents that constitute the majority of actionable alerts in the SOC. The study\u2019s conclusions are scoped to detectable incidents within the maturation window, and the bias does not invalidate the claim for that scope.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "We conceded F1 due to a fatal lack of design control isolating the ranking objective from model architecture and feature set; although we deferred F2 and F3 for empirical resolution and treated F4 as immaterial, the conceded fatal flaw drives the overall outcome."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The comparison between the Ranking model and the Baseline model isolates the effect of the ranking objective (LambdaMART) versus the classification objective (Logistic Regression).",
+        "failure_mechanism": "The PoC introduces a massive confounder: the Ranking model uses 'Extended features' (TF-IDF text, ticket metadata, analyst behavior) while the Baseline uses only 'Baseline features'. Even with the mentioned ablation (LambdaMART on baseline features), the primary comparison is between a complex non-linear gradient boosted tree model with rich features and a simple linear Logistic Regression model with sparse features. Any performance gain could be attributed to the model architecture (GBDT vs LR) or the feature set, rather than the ranking loss function.",
+        "evidence_test": "Compare the Ranking model against a Gradient Boosted Decision Tree (GBDT) trained with binary cross-entropy (classification) using the exact same 'Extended' feature set.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The model's features reflect information available at triage time and do not contain label leakage.",
+        "failure_mechanism": "The 'Extended features' include 'Incident-response ticket metadata from the past 7 days on the same host: ticket count, median resolution time, median severity assigned'. In a SOC environment, a high-priority incident often triggers a cluster of related tickets on the same host. If a high-priority incident is currently unfolding, the 'ticket count' and 'median severity' for that host will spike *during* the window the model is trying to predict. This creates a feedback loop where the model detects the analyst's reaction to the incident to predict the incident, rather than predicting the incident from the alert itself.",
+        "evidence_test": "Run the model using only alerts that occurred *before* any ticket was opened for that host in the current incident window, or remove host-level ticket metadata and check for a significant drop in Recall@5.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Recall@5 is a robust primary metric for the stakeholder's objective.",
+        "failure_mechanism": "Recall@5 is calculated as the fraction of true high-priority incidents that appear in the top 5. However, the PoC does not define the 'denominator' of the ranking group (e.g., 'all alerts on a host in a 24-hour window'). If a host only has 2 alerts in a window, Recall@5 is trivial. If a host has 1,000 alerts, Recall@5 is extremely difficult. By aggregating these without weighting by group size or considering the total volume of alerts analysts must process, the metric may inflate the perceived utility if the model performs well on 'quiet' hosts but fails on 'noisy' hosts where triage is actually most needed.",
+        "evidence_test": "Calculate Recall@5 stratified by the number of alerts per group (e.g., groups with <10 alerts vs groups with >100 alerts).",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 30-day maturation window eliminates ambiguous cases.",
+        "failure_mechanism": "While this reduces label noise, it introduces a systematic selection bias. Alerts that are 'slow-burn' incidents (where the connection is only realized after 30+ days) are excluded. The model is therefore trained only on 'obvious' or 'fast-acting' high-priority incidents, potentially failing on the most sophisticated threats that the SOC actually struggles to triage.",
+        "evidence_test": "Analyze the distribution of 'time-to-ticket' for the excluded alerts to see if there is a correlation between delay and threat sophistication.",
+        "flaw_category": "synthetic_data_assump"
+      }
+    ],
+    "summary": "The PoC suffers from two fatal flaws: a failure to control for model complexity/feature richness in the baseline comparison and significant signal leakage via host-level ticket metadata. These issues likely inflate the perceived effectiveness of the ranking approach.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "We concede F1 because the design lacks a control to isolate the ranking objective from model architecture and feature set. We maintain our DEFER for F2 (ticket-history leakage) and switch F3 to DEFER (group-size weighting ambiguity), proposing concrete empirical tests for both. We keep F4 as REBUT-IMMATERIAL, arguing the 30\u2011day maturation window is a scoped, immaterial trade\u2011off.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic correctly points out that our ablation (LambdaMART on baseline features) does not isolate the ranking loss from model architecture (GBDT vs Logistic Regression) or from the extended feature set. The primary comparison confounds ranking objective with both learner type and feature richness, and the design includes no model that holds architecture and features constant while varying only the loss function. Consequently, any observed gain in Recall@5 could stem from the GBDT learner or the extended features rather than the ranking objective itself.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "We proposed an empirical test to resolve the leakage concern: (1) exclude any alert that has a ticket opened on the same host within the 7\u2011day window preceding the alert, or (2) drop the ticket\u2011history features entirely and measure the change in Recall@5. If Recall@5 drops significantly, the critique is validated; if it remains unchanged, the design\u2019s temporal safeguard is vindicated. The critic accepted this DEFER, so we maintain it.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "Averaging Recall@5 per group gives equal weight to groups regardless of size, which may inflate the metric if the model performs well only on small, easy groups while failing on large, noisy groups where triage is most needed. To settle this, we will stratify Recall@5 by group size (e.g., <10, 10\u2011100, >100 alerts per host\u2011day) and also compute a weighted Recall@5 (weighted by the number of high\u2011priority incidents per group). If the ranking model\u2019s advantage persists across strata and in the weighted metric, the design is vindicated; if the advantage disappears in large groups or the weighted metric shows no improvement, the critique is validated.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The 30\u2011day maturation window is a deliberate scoping decision to exclude ambiguous labels and reduce noise. While it does omit slow\u2011burn incidents, this is a known limitation that does not materially affect the primary Recall@5 metric for the subset of fast\u2011acting, high\u2011severity incidents that constitute the majority of actionable alerts in the SOC. The study\u2019s conclusions are scoped to detectable incidents within the maturation window, and the bias does not invalidate the claim for that scope.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "We conceded F1 due to a fatal lack of design control isolating the ranking objective from model architecture and feature set; although we deferred F2 and F3 for empirical resolution and treated F4 as immaterial, the conceded fatal flaw drives the overall outcome."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=8 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 7,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

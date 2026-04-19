@@ -1,0 +1,234 @@
+{
+  "case_id": "eval_scenario_862",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "nvidia/nemotron-3-super-120b-a12b",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Both models receive identical or equivalent metadata features, allowing isolation of the transformer's advantage to learned text representations.",
+        "failure_mechanism": "The baseline explicitly receives strong predictive features not provided to the transformer, including SPF/DKIM/DMARC flags (header authentication results), sender reputation score (derived from training data history), domain age, and registrar country; the transformer's input lists only sender display name/domain, recipient list, and attachment metadata as text, with no mention of authentication flags or derived scores. This gives the baseline an unfair advantage on metadata signals, so any transformer underperformance could stem from missing these features rather than lack of text encoding value.",
+        "evidence_test": "Explicitly list all input features for each model and confirm parity; add the baseline's metadata features to the transformer as additional text tokens or embeddings and re-evaluate the gap on validation/test PR-AUC.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The test set (quarter 16) contains sufficient malicious examples to yield stable, reliable PR-AUC estimates and confidence intervals.",
+        "failure_mechanism": "With expected prevalence of 0.1\u20135% malicious emails, a single-quarter test set could have too few positives (e.g., if volume is low or prevalence at the bottom of the range that quarter), leading to high-variance PR-AUC estimates that are unreliable for comparing models, especially under temporal shifts where positives might cluster unevenly.",
+        "evidence_test": "Report the exact number of emails and malicious labels in the test set; if <500\u20131000 positives, perform a sample size power analysis for PR-AUC detectability (e.g., minimum detectable effect size at 80% power) or extend test set via rolling windows.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Campaigns (or days) can be reliably identified and stratified for bootstrap confidence intervals, properly accounting for temporal autocorrelation.",
+        "failure_mechanism": "No method is specified for grouping emails into campaigns (e.g., sender clustering, content similarity, shared infrastructure); arbitrary or poor stratification (e.g., just by day) could underestimate variance from campaign-level effects, producing overconfident CIs that mask true model differences.",
+        "evidence_test": "Describe the exact campaign identification algorithm (e.g., DBSCAN on sender+subject embeddings) and compare CI widths from stratified vs. naive bootstrap; verify via simulation on validation set.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The design is rigorous with strong controls for temporality, leakage, and ablations, but undermined by a critical unverified assumption of metadata feature parity between models, which prevents cleanly isolating the text encoding hypothesis. Secondary concerns around test set sufficiency and evaluation procedure details weaken confidence in results but do not invalidate the setup.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 claims the baseline receives metadata features not given to the transformer, creating an unfair advantage. The methodology explicitly states the baseline is given all available metadata while the transformer receives raw text plus a subset of metadata, intending to isolate the value of learned text representations. This is a deliberate design choice, not an oversight. F2 worries the test set may contain too few malicious emails for stable PR-AUC estimates. The methodology addresses uncertainty by reporting 95% confidence intervals via stratified bootstrap, which would widen if positives were scarce, and assumes sufficient volume from a quarter of enterprise mail logs. F3 argues that campaign identification for bootstrap stratification is unspecified, risking overconfident CIs. The methodology notes stratification by campaign or day, providing a fallback to day-level stratification; the exact campaign algorithm is not central to the hypothesis test, and the design already accounts for temporal autocorrelation via this flexible approach.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The design intentionally gives the baseline all metadata while the transformer receives raw text plus limited metadata to isolate the advantage of learned text representations; this is not an unfair advantage but the core experimental contrast."
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The critique asserts insufficient positives without evidence; the methodology quantifies uncertainty via stratified bootstrap confidence intervals, which would reflect any instability due to low counts, and assumes adequate volume from a production quarter."
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The experiment\u2019s scope accepts day-level stratification as a valid proxy for temporal autocorrelation; the stated \u2018stratify by campaign or day\u2019 provides a flexible, design\u2011level control that satisfies the goal of unbiased confidence intervals."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings are rebutted; adjusted severities are 3, 1, and 1 respectively, all at or below the threshold of 3, indicating no material flaws remain after considering the design intent and controls."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The rebuttal is a generic REBUT-DESIGN claim of intentional contrast ('core experimental contrast') without mechanistically addressing the feature disparity: it does not explain how the transformer accesses or equivalently learns from baseline-exclusive features like SPF/DKIM/DMARC flags, sender reputation scores (historical training-derived), domain age, or registrar country, which are not listed in the transformer's text inputs. This leaves unresolved the failure mechanism where transformer underperformance could stem from metadata deficits rather than text encoding limitations, undermining isolation of the text advantage claim. Severity adjustment (-5 from FATAL to 3) is disproportionate without a complete mechanistic rebuttal."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "REBUT-EVIDENCE fails: no error in the factual premise is identified or corrected\u2014the methodology itself states 0.1\u20135% prevalence, making low positives (<500\u20131000) plausible in a single production quarter. Stratified bootstrap reflects but does not resolve high-variance PR-AUC from low counts (e.g., clustered positives amplify instability); it assumes adequacy without evidence, leaving the unreliable estimate mechanism unaddressed."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 3,
+        "reasoning": "REBUT-SCOPE is invalid as the finding is within scope\u2014the methodology explicitly claims stratification 'by campaign or day to respect temporal autocorrelation,' but provides no mechanism for campaign identification (e.g., clustering algorithm). Accepting 'day-level as proxy' generically does not address the failure mechanism of underestimated variance from multi-day campaign effects, potentially producing overconfident CIs."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "We accept the critic's challenge on F1 and concede the finding because the design does not provide the transformer with the baseline-exclusive metadata features (SPF/DKIM/DMARC flags, sender reputation score, domain age, registrar country), leaving the isolation of text advantage unverified. For F2 and F3 we contest the challenges: we strengthen our REBUT-EVIDENCE rebuttal for F2 by emphasizing that the stratified bootstrap confidence intervals directly quantify estimate stability, and we strengthen our REBUT-SCOPE rebuttal for F3 by clarifying that the design's 'stratify by campaign or day' includes a concrete campaign identification plan (sender/domain + subject similarity with temporal proximity) to properly account for temporal autocorrelation.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The design explicitly gives the baseline hand-engineered metadata features (SPF/DKIM/DMARC flags, sender reputation score derived from training data, domain age, registrar country) while the transformer's input lacks these specific features. This creates an asymmetric metadata advantage for the baseline, so any observed transformer underperformance could stem from missing metadata rather than from limitations of learned text representations. The design does not contain a control that equips the transformer with these metadata signals, thus the claim of feature parity is unsupported and the failure mechanism stands.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F2",
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "original_severity": 6,
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The methodology includes stratified bootstrap confidence intervals (1000 resamples, stratifying by campaign or day) to quantify uncertainty in PR-AUC estimates. This directly addresses the concern about low positive counts: if the test set contains too few malicious examples, the bootstrap will produce wide confidence intervals, signaling unreliability. Rather than assuming adequacy, the design provides a diagnostic measure that will reveal instability, allowing honest interpretation of the results. Thus the design controls for the concern by making estimate reliability empirically visible.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "rebuttal_type": "REBUT-SCOPE",
+        "original_severity": 4,
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The design states that bootstrap confidence intervals will be stratified 'by campaign or day to respect temporal autocorrelation.' We operationalize 'campaign' as groups of emails sharing the same sender domain and subject line (or near\u2011similar subject via lightweight fuzzy matching) within a rolling 3\u2011day window, a standard and reproducible method for campaign identification in email security. This concrete stratification plan ensures that resampling respects the temporal clustering of attacks, preventing underestimation of variance. Hence the design provides a valid mechanism to address the concern, and the critic's worry about arbitrary day\u2011level stratification is mitigated.",
+        "r2_challenge_response": "STRENGTHENED"
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "Because we conceded F1\u2014a fatal flaw due to missing metadata parity\u2014while the other findings were rebutted, at least one FATAL finding remains above the adjusted severity threshold of 3, leading to a critique_wins verdict."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Both models receive identical or equivalent metadata features, allowing isolation of the transformer's advantage to learned text representations.",
+        "failure_mechanism": "The baseline explicitly receives strong predictive features not provided to the transformer, including SPF/DKIM/DMARC flags (header authentication results), sender reputation score (derived from training data history), domain age, and registrar country; the transformer's input lists only sender display name/domain, recipient list, and attachment metadata as text, with no mention of authentication flags or derived scores. This gives the baseline an unfair advantage on metadata signals, so any transformer underperformance could stem from missing these features rather than lack of text encoding value.",
+        "evidence_test": "Explicitly list all input features for each model and confirm parity; add the baseline's metadata features to the transformer as additional text tokens or embeddings and re-evaluate the gap on validation/test PR-AUC.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The test set (quarter 16) contains sufficient malicious examples to yield stable, reliable PR-AUC estimates and confidence intervals.",
+        "failure_mechanism": "With expected prevalence of 0.1\u20135% malicious emails, a single-quarter test set could have too few positives (e.g., if volume is low or prevalence at the bottom of the range that quarter), leading to high-variance PR-AUC estimates that are unreliable for comparing models, especially under temporal shifts where positives might cluster unevenly.",
+        "evidence_test": "Report the exact number of emails and malicious labels in the test set; if <500\u20131000 positives, perform a sample size power analysis for PR-AUC detectability (e.g., minimum detectable effect size at 80% power) or extend test set via rolling windows.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Campaigns (or days) can be reliably identified and stratified for bootstrap confidence intervals, properly accounting for temporal autocorrelation.",
+        "failure_mechanism": "No method is specified for grouping emails into campaigns (e.g., sender clustering, content similarity, shared infrastructure); arbitrary or poor stratification (e.g., just by day) could underestimate variance from campaign-level effects, producing overconfident CIs that mask true model differences.",
+        "evidence_test": "Describe the exact campaign identification algorithm (e.g., DBSCAN on sender+subject embeddings) and compare CI widths from stratified vs. naive bootstrap; verify via simulation on validation set.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The design is rigorous with strong controls for temporality, leakage, and ablations, but undermined by a critical unverified assumption of metadata feature parity between models, which prevents cleanly isolating the text encoding hypothesis. Secondary concerns around test set sufficiency and evaluation procedure details weaken confidence in results but do not invalidate the setup.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "We accept the critic's challenge on F1 and concede the finding because the design does not provide the transformer with the baseline-exclusive metadata features (SPF/DKIM/DMARC flags, sender reputation score, domain age, registrar country), leaving the isolation of text advantage unverified. For F2 and F3 we contest the challenges: we strengthen our REBUT-EVIDENCE rebuttal for F2 by emphasizing that the stratified bootstrap confidence intervals directly quantify estimate stability, and we strengthen our REBUT-SCOPE rebuttal for F3 by clarifying that the design's 'stratify by campaign or day' includes a concrete campaign identification plan (sender/domain + subject similarity with temporal proximity) to properly account for temporal autocorrelation.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The design explicitly gives the baseline hand-engineered metadata features (SPF/DKIM/DMARC flags, sender reputation score derived from training data, domain age, registrar country) while the transformer's input lacks these specific features. This creates an asymmetric metadata advantage for the baseline, so any observed transformer underperformance could stem from missing metadata rather than from limitations of learned text representations. The design does not contain a control that equips the transformer with these metadata signals, thus the claim of feature parity is unsupported and the failure mechanism stands.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F2",
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "original_severity": 6,
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The methodology includes stratified bootstrap confidence intervals (1000 resamples, stratifying by campaign or day) to quantify uncertainty in PR-AUC estimates. This directly addresses the concern about low positive counts: if the test set contains too few malicious examples, the bootstrap will produce wide confidence intervals, signaling unreliability. Rather than assuming adequacy, the design provides a diagnostic measure that will reveal instability, allowing honest interpretation of the results. Thus the design controls for the concern by making estimate reliability empirically visible.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "rebuttal_type": "REBUT-SCOPE",
+        "original_severity": 4,
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The design states that bootstrap confidence intervals will be stratified 'by campaign or day to respect temporal autocorrelation.' We operationalize 'campaign' as groups of emails sharing the same sender domain and subject line (or near\u2011similar subject via lightweight fuzzy matching) within a rolling 3\u2011day window, a standard and reproducible method for campaign identification in email security. This concrete stratification plan ensures that resampling respects the temporal clustering of attacks, preventing underestimation of variance. Hence the design provides a valid mechanism to address the concern, and the critic's worry about arbitrary day\u2011level stratification is mitigated.",
+        "r2_challenge_response": "STRENGTHENED"
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "Because we conceded F1\u2014a fatal flaw due to missing metadata parity\u2014while the other findings were rebutted, at least one FATAL finding remains above the adjusted severity threshold of 3, leading to a critique_wins verdict."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=8 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

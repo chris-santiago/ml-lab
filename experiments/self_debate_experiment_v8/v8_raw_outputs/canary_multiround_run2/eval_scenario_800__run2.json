@@ -1,0 +1,293 @@
+{
+  "case_id": "eval_scenario_800",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Treating competing events (death, hospice, LTC placement) as censoring (label = 0) is a valid way to reflect the clinical use case of predicting acute care readmission.",
+        "failure_mechanism": "In survival analysis, censoring assumes the event of interest (readmission) could still happen in the future, but we just stopped observing the patient. However, death is a 'competing risk'\u2014it makes the event of readmission impossible. By labeling deaths as 0 (non-readmitted) or treating them as right-censored, the model is forced to learn a hazard function for a population that includes people who *cannot* be readmitted. This biases the risk estimates downward and violates the fundamental assumption of independent censoring in Cox models, leading to an overestimation of the 'survival' probability (non-readmission) and potentially invalidating the ROC-AUC ranking.",
+        "evidence_test": "Compare the model's performance and calibration using a Fine-Gray sub-distribution hazard model (designed for competing risks) versus the proposed Cox/Censoring approach. If the predicted probabilities shift significantly or the C-index changes, the censoring assumption is flawed.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (Logistic Regression on static features) is a sufficient comparison to isolate the effect of longitudinal information.",
+        "failure_mechanism": "The PoC compares a potentially non-linear, high-capacity model (Random Survival Forests/GBDTs) against a linear model (Logistic Regression). If the survival model outperforms the baseline, it is impossible to determine if the gain comes from the *longitudinal features* or simply from the *model's ability to capture non-linear interactions* among the static features. The 'ablation study' mentioned in Section 6 helps, but if the ablation uses a survival forest on static features, it only proves that survival forests > logistic regression, not that longitudinal data > static data.",
+        "evidence_test": "Implement a non-linear baseline (e.g., XGBoost or Random Forest) using only static features. If the longitudinal survival model does not significantly outperform this non-linear static baseline, the claim that longitudinal data is the driver is unsupported.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (months 1-30 train, 31-36 val, 37-42 test) ensures the model is robust to real-world deployment.",
+        "failure_mechanism": "Clinical practice patterns (coding standards, discharge protocols, and heart failure guidelines) often shift abruptly due to policy changes or new drug approvals (e.g., the introduction of SGLT2 inhibitors). A 42-month window may contain a 'regime shift' that the model doesn't account for. Because the test set is only the final 6 months, the results may be overly optimistic if the test period was stable, or overly pessimistic if a specific policy change occurred in month 37, without the researcher knowing why.",
+        "evidence_test": "Perform a 'sliding window' cross-validation (walk-forward validation) across the 42 months. If performance varies significantly across different 6-month test windows, the model is sensitive to temporal instability rather than generalizable.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Imputation fit on training data and applied to test data handles missingness in labs (5-15%).",
+        "failure_mechanism": "In EHR data, missingness is rarely Missing At Random (MAR). The *absence* of a lab test is often a clinical signal (e.g., the doctor believed the patient was stable enough not to need a BNP test). While the PoC adds missingness indicators, simple imputation (like mean/median) can wash out the signal of the 'last known value' in a longitudinal context, especially if the time since the last measurement is the actual predictor of risk.",
+        "evidence_test": "Compare a model using simple imputation vs. a model using 'Last Observation Carried Forward' (LOCF) combined with 'time-since-last-measurement' features. If LOCF performs better, the imputation strategy is suppressing clinical signal.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC has a critical flaw in its handling of competing risks (death/hospice), which invalidates the survival analysis assumptions. Additionally, the baseline comparison is insufficient to isolate the value of longitudinal data from the value of model complexity.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "The critique raises valid concerns regarding the handling of competing risks, the baseline comparison, temporal robustness, and imputation strategy. The design has some controls in place but requires further empirical testing to fully address these concerns.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The concern about competing risks is valid, and comparing with a Fine-Gray model is a suitable empirical test."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "Implementing a non-linear baseline is necessary to isolate the effect of longitudinal features conclusively."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "Sliding window cross-validation is needed to assess robustness to temporal shifts."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The imputation strategy's impact is likely immaterial to the primary ROC-AUC metric, and missingness indicators are used."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Multiple findings require empirical testing to resolve concerns about competing risks, baseline comparison, and temporal robustness."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 8,
+        "reasoning": "The defender deferred the finding, acknowledging the validity of the competing risks concern and the proposed test."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 6,
+        "reasoning": "The defender deferred the finding, acknowledging the need for a non-linear baseline to isolate the feature effect."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 4,
+        "reasoning": "The defender deferred the finding, acknowledging the need for sliding window validation."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 2,
+        "reasoning": "The rebuttal is generic and dismissive. Stating that the impact is 'likely immaterial' does not address the specific failure mechanism: that simple imputation can wash out the clinical signal inherent in the timing and absence of tests. The use of missingness indicators is a partial mitigation, but it does not resolve the issue of how longitudinal values are imputed between measurements. The severity adjustment to 0 is disproportionate as no mechanistic evidence was provided to prove the imputation strategy is optimal."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic accepted our deferrals on F1, F2, and F3, but challenged our rebuttal on F4, arguing it was too generic and didn't address the imputation strategy's impact on longitudinal data.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The concern about competing risks is valid, and comparing with a Fine-Gray model is a suitable empirical test to assess the impact of treating death and other competing events as censoring.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "Implementing a non-linear baseline is necessary to isolate the effect of longitudinal features conclusively. The current baseline (Logistic Regression) may not be sufficient to compare against the potentially non-linear survival models.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "Sliding window cross-validation is needed to assess the model's robustness to temporal shifts and changes in clinical practice patterns over the 42-month period.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "While simple imputation might wash out some clinical signal, our design includes missingness indicators as features, which helps to preserve the information about the absence or timing of measurements. Furthermore, the primary metric (ROC-AUC) is less sensitive to minor imputation artifacts as it focuses on ranking rather than calibration. The longitudinal features are summarized as sequences, recent values, trends, and measurement frequency, which inherently capture some aspects of the timing and absence of tests.",
+        "r2_challenge_response": "STRENGTHENED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Multiple key findings were deferred, indicating the need for empirical tests to resolve valid concerns about the methodology."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Treating competing events (death, hospice, LTC placement) as censoring (label = 0) is a valid way to reflect the clinical use case of predicting acute care readmission.",
+        "failure_mechanism": "In survival analysis, censoring assumes the event of interest (readmission) could still happen in the future, but we just stopped observing the patient. However, death is a 'competing risk'\u2014it makes the event of readmission impossible. By labeling deaths as 0 (non-readmitted) or treating them as right-censored, the model is forced to learn a hazard function for a population that includes people who *cannot* be readmitted. This biases the risk estimates downward and violates the fundamental assumption of independent censoring in Cox models, leading to an overestimation of the 'survival' probability (non-readmission) and potentially invalidating the ROC-AUC ranking.",
+        "evidence_test": "Compare the model's performance and calibration using a Fine-Gray sub-distribution hazard model (designed for competing risks) versus the proposed Cox/Censoring approach. If the predicted probabilities shift significantly or the C-index changes, the censoring assumption is flawed.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (Logistic Regression on static features) is a sufficient comparison to isolate the effect of longitudinal information.",
+        "failure_mechanism": "The PoC compares a potentially non-linear, high-capacity model (Random Survival Forests/GBDTs) against a linear model (Logistic Regression). If the survival model outperforms the baseline, it is impossible to determine if the gain comes from the *longitudinal features* or simply from the *model's ability to capture non-linear interactions* among the static features. The 'ablation study' mentioned in Section 6 helps, but if the ablation uses a survival forest on static features, it only proves that survival forests > logistic regression, not that longitudinal data > static data.",
+        "evidence_test": "Implement a non-linear baseline (e.g., XGBoost or Random Forest) using only static features. If the longitudinal survival model does not significantly outperform this non-linear static baseline, the claim that longitudinal data is the driver is unsupported.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (months 1-30 train, 31-36 val, 37-42 test) ensures the model is robust to real-world deployment.",
+        "failure_mechanism": "Clinical practice patterns (coding standards, discharge protocols, and heart failure guidelines) often shift abruptly due to policy changes or new drug approvals (e.g., the introduction of SGLT2 inhibitors). A 42-month window may contain a 'regime shift' that the model doesn't account for. Because the test set is only the final 6 months, the results may be overly optimistic if the test period was stable, or overly pessimistic if a specific policy change occurred in month 37, without the researcher knowing why.",
+        "evidence_test": "Perform a 'sliding window' cross-validation (walk-forward validation) across the 42 months. If performance varies significantly across different 6-month test windows, the model is sensitive to temporal instability rather than generalizable.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Imputation fit on training data and applied to test data handles missingness in labs (5-15%).",
+        "failure_mechanism": "In EHR data, missingness is rarely Missing At Random (MAR). The *absence* of a lab test is often a clinical signal (e.g., the doctor believed the patient was stable enough not to need a BNP test). While the PoC adds missingness indicators, simple imputation (like mean/median) can wash out the signal of the 'last known value' in a longitudinal context, especially if the time since the last measurement is the actual predictor of risk.",
+        "evidence_test": "Compare a model using simple imputation vs. a model using 'Last Observation Carried Forward' (LOCF) combined with 'time-since-last-measurement' features. If LOCF performs better, the imputation strategy is suppressing clinical signal.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC has a critical flaw in its handling of competing risks (death/hospice), which invalidates the survival analysis assumptions. Additionally, the baseline comparison is insufficient to isolate the value of longitudinal data from the value of model complexity.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic accepted our deferrals on F1, F2, and F3, but challenged our rebuttal on F4, arguing it was too generic and didn't address the imputation strategy's impact on longitudinal data.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The concern about competing risks is valid, and comparing with a Fine-Gray model is a suitable empirical test to assess the impact of treating death and other competing events as censoring.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "Implementing a non-linear baseline is necessary to isolate the effect of longitudinal features conclusively. The current baseline (Logistic Regression) may not be sufficient to compare against the potentially non-linear survival models.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "Sliding window cross-validation is needed to assess the model's robustness to temporal shifts and changes in clinical practice patterns over the 42-month period.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "While simple imputation might wash out some clinical signal, our design includes missingness indicators as features, which helps to preserve the information about the absence or timing of measurements. Furthermore, the primary metric (ROC-AUC) is less sensitive to minor imputation artifacts as it focuses on ranking rather than calibration. The longitudinal features are summarized as sequences, recent values, trends, and measurement frequency, which inherently capture some aspects of the timing and absence of tests.",
+        "r2_challenge_response": "STRENGTHENED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Multiple key findings were deferred, indicating the need for empirical tests to resolve valid concerns about the methodology."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=8, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 4,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "3 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

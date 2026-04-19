@@ -1,0 +1,647 @@
+{
+  "case_id": "eval_scenario_068",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The sepsis onset label represents true physiological sepsis that can be predicted before clinical intervention",
+        "failure_mechanism": "The sepsis definition includes 'presumed infection with empiric antibiotics' and 'vasopressor need' as diagnostic criteria. These are treatment decisions that clinicians make based on clinical suspicion, often before formal sepsis diagnosis. The model could learn to predict when doctors start antibiotics/vasopressors rather than true physiological sepsis onset. This creates treatment-based label leakage where features (antibiotics, vasopressors) are both predictors and part of the target definition.",
+        "evidence_test": "Analyze the temporal distribution of antibiotic/vasopressor administration relative to sepsis onset timestamps. If treatment frequently precedes the official sepsis label by >2 hours in the training data, the model is learning treatment patterns rather than true prediction. Additionally, train a model excluding antibiotic/vasopressor features and compare performance.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The sequence model properly handles irregularly sampled time series with timestamps",
+        "failure_mechanism": "Many off-the-shelf Transformer and TCN implementations assume regular time intervals. Without explicit handling of irregular sampling (e.g., time-aware embeddings, gap encoding, continuous-time RNNs), the model may learn artifacts from the sampling pattern rather than true temporal dependencies. The PoC states the model 'ingests irregularly sampled time series' but provides no architectural details to verify this capability.",
+        "evidence_test": "Examine the model architecture code to verify time-aware mechanisms exist. Run an ablation where time gaps are randomized while preserving event order\u2014if performance drops significantly, the model was learning sampling artifacts. Compare against a model with explicit gap encoding.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The sequence model outperforms the baseline in exploiting temporal structure",
+        "failure_mechanism": "The baseline uses only the first 12 hours while the sequence model predicts from hour 6 through hour 60. This confounds temporal advantage with feature window advantage. The sequence model has access to 5x more temporal data than the baseline, so any performance gain could be due to more information rather than better temporal modeling.",
+        "evidence_test": "Retrain the baseline using summary features from hour 6-60 (matching the sequence model's temporal window). If the performance gap narrows significantly, the original advantage was due to feature window, not temporal modeling capability.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The comparison establishes clinical utility of sequence models for sepsis prediction",
+        "failure_mechanism": "No comparison to established clinical scoring systems (SOFA, qSOFA, MEWS, NEWS) is included. In clinical practice, these scoring systems are the actual baseline that would be used. A custom logistic regression baseline doesn't establish whether the sequence model improves on existing clinical workflows.",
+        "evidence_test": "Add baseline comparisons using SOFA/qSOFA scores calculated from the same data. Report whether the sequence model outperforms these established clinical tools at the same operating point.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal train/val/test split ensures robust generalization",
+        "failure_mechanism": "The split has significant seasonality issues: training (21 months) spans multiple years while validation is only 5 months. ICU sepsis rates vary by season (flu season, summer infections). If the test period (Mar-Dec 2023) has different seasonal patterns than training, performance may not generalize. The short validation period also risks overfitting to validation-specific patterns.",
+        "evidence_test": "Analyze sepsis incidence rates by month across all three periods. If there are >20% differences in seasonal patterns between training and test, run cross-season validation (train on summer, test on winter) to quantify the shift.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Preprocessing imputation strategies do not introduce bias",
+        "failure_mechanism": "ICU data has informative missingness\u2014labs not ordered often indicate clinical stability. Simple imputation (mean/median) treats missing as random, potentially introducing bias. The PoC states imputation is fit on training only but doesn't specify the strategy. Without handling missingness as a feature, the model may learn artifacts of documentation patterns rather than true physiology.",
+        "evidence_test": "Compare models with different imputation strategies (mean, median, missing-indicator, MICE). If performance varies significantly, the imputation strategy matters. Additionally, train a model where missingness indicators are explicitly included as features.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The prediction window captures clinically relevant sepsis onset",
+        "failure_mechanism": "Predictions are made hourly from hour 6 through hour 60, meaning the model only evaluates patients who survive at least 6 hours without sepsis. This creates selection bias\u2014early sepsis deaths are excluded from evaluation. The model may perform well on this subset but fail on the clinically critical early-onset cases.",
+        "evidence_test": "Analyze the distribution of sepsis onset times in the training data. If >15% of sepsis events occur before hour 6, the evaluation excludes a clinically important subset. Compare performance on patients with onset <6 hours vs. \u22656 hours.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Manual review of 100 test predictions confirms no temporal leakage",
+        "failure_mechanism": "100 samples is statistically insufficient for a 3-year dataset to verify leakage absence. A small sample could miss systematic leakage patterns. Programmatic verification of temporal ordering for all test samples would provide stronger evidence.",
+        "evidence_test": "Programmatically verify temporal ordering for 100% of test samples. If any violations are found, investigate the source. A 100-sample audit has ~95% confidence of detecting leakage only if leakage rate >3%.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Hospital stratification ensures robustness across sites",
+        "failure_mechanism": "Stratification ensures all sites appear in each split, but doesn't verify patient-level data isn't leaked across hospitals. If the same patient has multiple admissions across different hospitals, there could be patient-level leakage. However, this is less likely in ICU settings where patients typically stay at one facility.",
+        "evidence_test": "Check for duplicate patient IDs across hospitals in the dataset. If duplicates exist, verify they're not split across train/val/test. If no duplicates exist, this concern is mitigated.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Recency ablation validates temporal pattern exploitation",
+        "failure_mechanism": "The recency ablation is described as a 'secondary model' without clarity on whether it's part of the main evaluation or exploratory. If exploratory, it doesn't validate the main claim. The ablation design also doesn't isolate whether gains come from long-range patterns vs. timing artifacts.",
+        "evidence_test": "Clarify whether the recency ablation is a primary or secondary analysis. If primary, report it alongside main results. If secondary, acknowledge it as exploratory and not part of the main hypothesis test.",
+        "flaw_category": "ambiguous_evidence"
+      }
+    ],
+    "summary": "The PoC contains two FATAL flaws that fundamentally invalidate the hypothesis: treatment-based label leakage (antibiotics/vasopressors in sepsis definition create circular prediction) and unverified irregular time series handling (model may not actually process irregular data correctly). Five MATERIAL flaws weaken the clinical utility claims, including unfair baseline comparison, missing clinical scoring baselines, seasonality in temporal split, unspecified imputation strategy, and selection bias from the prediction window. Four MINOR findings relate to verification rigor and supplementary analyses.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "Detailed analysis of each finding considering the experiment design and controls.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The experiment includes controls like feature availability audit and event timing spot-check to mitigate label leakage."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "An empirical test is needed to verify if the model handles irregular sampling properly."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The comparison is confounded by different feature windows used for the sequence model and baseline."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The experiment's scope is to compare sequence models with traditional feature engineering approaches."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "Analyzing seasonality differences between training and test periods is necessary."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "Comparing different imputation strategies is needed to verify the impact on model performance."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The experiment is designed to evaluate patients surviving at least 6 hours without sepsis."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "While statistically limited, the manual review serves as a basic sanity check."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Patient-level leakage is unlikely in ICU settings and can be further checked."
+      },
+      {
+        "finding_id": "F10",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Clarifying the recency ablation's role would improve transparency but is not critical."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Multiple findings require empirical verification or further analysis to resolve concerns about model handling of irregular sampling, seasonality, and imputation strategies."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 9,
+        "reasoning": "The rebuttal cites 'feature availability audit' which prevents temporal leakage (features after t), but the finding concerns *label* leakage where features (antibiotics/vasopressors) are part of the target definition. The audit does not decouple the features from the label definition. The severity reduction from 9 to 5 is disproportionate as the core mechanism (treatment-based label) remains unresolved."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 8,
+        "reasoning": "The defender acknowledges the need for empirical verification. The finding stands as an open question for the next round."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 6,
+        "reasoning": "The defender concedes the comparison is confounded by different feature windows. The finding is valid."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The scope statement admits the comparison is limited to feature engineering. This does not validate the claim of 'clinical utility' which requires comparison to clinical standards (SOFA). The finding remains valid."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 5,
+        "reasoning": "The defender acknowledges the need for seasonality analysis. The finding stands as an open question."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 5,
+        "reasoning": "The defender acknowledges the need for imputation comparison. The finding stands as an open question."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The scope admission confirms the design excludes early sepsis deaths. This validates the selection bias finding. The claim that the window captures 'clinically relevant sepsis onset' is overstated for the excluded subset."
+      },
+      {
+        "finding_id": "F8",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 2,
+        "reasoning": "Statistical insufficiency of 100 samples remains. A 'sanity check' does not provide the evidence required to 'confirm no temporal leakage' for a 3-year dataset."
+      },
+      {
+        "finding_id": "F9",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 2,
+        "reasoning": "Verification of patient-level leakage is not performed. 'Can be further checked' is a deferral, not a resolution. The finding stands."
+      },
+      {
+        "finding_id": "F10",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 2,
+        "reasoning": "Ambiguity regarding the recency ablation's role remains. Calling it 'not critical' does not resolve the evidence quality issue."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic's challenges have been addressed with either strengthened rebuttals or concessions where the design was found to be flawed or ambiguous.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic's challenge highlights that the feature availability audit does not address label leakage caused by treatment decisions being part of the sepsis definition. An empirical test, such as training a model excluding antibiotic/vasopressor features and comparing performance, is needed to settle this question.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic accepted our deferral, acknowledging the need for empirical verification of the model's handling of irregular sampling.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic accepted our concession that the comparison between the sequence model and baseline is confounded by different feature windows.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The experiment's scope is limited to comparing sequence models with traditional feature engineering approaches, not establishing clinical utility directly against established scoring systems like SOFA. The claim of clinical utility is out of scope.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic accepted our deferral, acknowledging the need to analyze seasonality differences between training and test periods.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic accepted our deferral, recognizing the need to compare different imputation strategies to verify their impact on model performance.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The experiment is designed to evaluate patients who survive at least 6 hours without sepsis. The claim is scoped to this population, and the selection bias is acknowledged but is within the experiment's defined scope.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "While the manual review of 100 samples is statistically limited, programmatically verifying temporal ordering for all test samples would provide stronger evidence. This is an empirical question that can be settled by implementing a more comprehensive check.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 2,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "Checking for duplicate patient IDs across hospitals in the dataset can verify if patient-level leakage is a concern. This is a feasible empirical check.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F10",
+        "original_severity": 2,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "Clarifying the role of the recency ablation (whether primary or secondary analysis) is necessary to understand its impact on the main claim. This ambiguity can be resolved by providing more details on its inclusion in the evaluation.",
+        "r2_challenge_response": "DEFERRED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Multiple findings were deferred to empirical testing, indicating that while there are valid concerns, they can be resolved through further analysis or experimentation."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The sepsis onset label represents true physiological sepsis that can be predicted before clinical intervention",
+        "failure_mechanism": "The sepsis definition includes 'presumed infection with empiric antibiotics' and 'vasopressor need' as diagnostic criteria. These are treatment decisions that clinicians make based on clinical suspicion, often before formal sepsis diagnosis. The model could learn to predict when doctors start antibiotics/vasopressors rather than true physiological sepsis onset. This creates treatment-based label leakage where features (antibiotics, vasopressors) are both predictors and part of the target definition.",
+        "evidence_test": "Analyze the temporal distribution of antibiotic/vasopressor administration relative to sepsis onset timestamps. If treatment frequently precedes the official sepsis label by >2 hours in the training data, the model is learning treatment patterns rather than true prediction. Additionally, train a model excluding antibiotic/vasopressor features and compare performance.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The sequence model properly handles irregularly sampled time series with timestamps",
+        "failure_mechanism": "Many off-the-shelf Transformer and TCN implementations assume regular time intervals. Without explicit handling of irregular sampling (e.g., time-aware embeddings, gap encoding, continuous-time RNNs), the model may learn artifacts from the sampling pattern rather than true temporal dependencies. The PoC states the model 'ingests irregularly sampled time series' but provides no architectural details to verify this capability.",
+        "evidence_test": "Examine the model architecture code to verify time-aware mechanisms exist. Run an ablation where time gaps are randomized while preserving event order\u2014if performance drops significantly, the model was learning sampling artifacts. Compare against a model with explicit gap encoding.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The sequence model outperforms the baseline in exploiting temporal structure",
+        "failure_mechanism": "The baseline uses only the first 12 hours while the sequence model predicts from hour 6 through hour 60. This confounds temporal advantage with feature window advantage. The sequence model has access to 5x more temporal data than the baseline, so any performance gain could be due to more information rather than better temporal modeling.",
+        "evidence_test": "Retrain the baseline using summary features from hour 6-60 (matching the sequence model's temporal window). If the performance gap narrows significantly, the original advantage was due to feature window, not temporal modeling capability.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The comparison establishes clinical utility of sequence models for sepsis prediction",
+        "failure_mechanism": "No comparison to established clinical scoring systems (SOFA, qSOFA, MEWS, NEWS) is included. In clinical practice, these scoring systems are the actual baseline that would be used. A custom logistic regression baseline doesn't establish whether the sequence model improves on existing clinical workflows.",
+        "evidence_test": "Add baseline comparisons using SOFA/qSOFA scores calculated from the same data. Report whether the sequence model outperforms these established clinical tools at the same operating point.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal train/val/test split ensures robust generalization",
+        "failure_mechanism": "The split has significant seasonality issues: training (21 months) spans multiple years while validation is only 5 months. ICU sepsis rates vary by season (flu season, summer infections). If the test period (Mar-Dec 2023) has different seasonal patterns than training, performance may not generalize. The short validation period also risks overfitting to validation-specific patterns.",
+        "evidence_test": "Analyze sepsis incidence rates by month across all three periods. If there are >20% differences in seasonal patterns between training and test, run cross-season validation (train on summer, test on winter) to quantify the shift.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Preprocessing imputation strategies do not introduce bias",
+        "failure_mechanism": "ICU data has informative missingness\u2014labs not ordered often indicate clinical stability. Simple imputation (mean/median) treats missing as random, potentially introducing bias. The PoC states imputation is fit on training only but doesn't specify the strategy. Without handling missingness as a feature, the model may learn artifacts of documentation patterns rather than true physiology.",
+        "evidence_test": "Compare models with different imputation strategies (mean, median, missing-indicator, MICE). If performance varies significantly, the imputation strategy matters. Additionally, train a model where missingness indicators are explicitly included as features.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The prediction window captures clinically relevant sepsis onset",
+        "failure_mechanism": "Predictions are made hourly from hour 6 through hour 60, meaning the model only evaluates patients who survive at least 6 hours without sepsis. This creates selection bias\u2014early sepsis deaths are excluded from evaluation. The model may perform well on this subset but fail on the clinically critical early-onset cases.",
+        "evidence_test": "Analyze the distribution of sepsis onset times in the training data. If >15% of sepsis events occur before hour 6, the evaluation excludes a clinically important subset. Compare performance on patients with onset <6 hours vs. \u22656 hours.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Manual review of 100 test predictions confirms no temporal leakage",
+        "failure_mechanism": "100 samples is statistically insufficient for a 3-year dataset to verify leakage absence. A small sample could miss systematic leakage patterns. Programmatic verification of temporal ordering for all test samples would provide stronger evidence.",
+        "evidence_test": "Programmatically verify temporal ordering for 100% of test samples. If any violations are found, investigate the source. A 100-sample audit has ~95% confidence of detecting leakage only if leakage rate >3%.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Hospital stratification ensures robustness across sites",
+        "failure_mechanism": "Stratification ensures all sites appear in each split, but doesn't verify patient-level data isn't leaked across hospitals. If the same patient has multiple admissions across different hospitals, there could be patient-level leakage. However, this is less likely in ICU settings where patients typically stay at one facility.",
+        "evidence_test": "Check for duplicate patient IDs across hospitals in the dataset. If duplicates exist, verify they're not split across train/val/test. If no duplicates exist, this concern is mitigated.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Recency ablation validates temporal pattern exploitation",
+        "failure_mechanism": "The recency ablation is described as a 'secondary model' without clarity on whether it's part of the main evaluation or exploratory. If exploratory, it doesn't validate the main claim. The ablation design also doesn't isolate whether gains come from long-range patterns vs. timing artifacts.",
+        "evidence_test": "Clarify whether the recency ablation is a primary or secondary analysis. If primary, report it alongside main results. If secondary, acknowledge it as exploratory and not part of the main hypothesis test.",
+        "flaw_category": "ambiguous_evidence"
+      }
+    ],
+    "summary": "The PoC contains two FATAL flaws that fundamentally invalidate the hypothesis: treatment-based label leakage (antibiotics/vasopressors in sepsis definition create circular prediction) and unverified irregular time series handling (model may not actually process irregular data correctly). Five MATERIAL flaws weaken the clinical utility claims, including unfair baseline comparison, missing clinical scoring baselines, seasonality in temporal split, unspecified imputation strategy, and selection bias from the prediction window. Four MINOR findings relate to verification rigor and supplementary analyses.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic's challenges have been addressed with either strengthened rebuttals or concessions where the design was found to be flawed or ambiguous.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic's challenge highlights that the feature availability audit does not address label leakage caused by treatment decisions being part of the sepsis definition. An empirical test, such as training a model excluding antibiotic/vasopressor features and comparing performance, is needed to settle this question.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic accepted our deferral, acknowledging the need for empirical verification of the model's handling of irregular sampling.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic accepted our concession that the comparison between the sequence model and baseline is confounded by different feature windows.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The experiment's scope is limited to comparing sequence models with traditional feature engineering approaches, not establishing clinical utility directly against established scoring systems like SOFA. The claim of clinical utility is out of scope.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic accepted our deferral, acknowledging the need to analyze seasonality differences between training and test periods.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic accepted our deferral, recognizing the need to compare different imputation strategies to verify their impact on model performance.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The experiment is designed to evaluate patients who survive at least 6 hours without sepsis. The claim is scoped to this population, and the selection bias is acknowledged but is within the experiment's defined scope.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "While the manual review of 100 samples is statistically limited, programmatically verifying temporal ordering for all test samples would provide stronger evidence. This is an empirical question that can be settled by implementing a more comprehensive check.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 2,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "Checking for duplicate patient IDs across hospitals in the dataset can verify if patient-level leakage is a concern. This is a feasible empirical check.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F10",
+        "original_severity": 2,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "Clarifying the role of the recency ablation (whether primary or secondary analysis) is necessary to understand its impact on the main claim. This ambiguity can be resolved by providing more details on its inclusion in the evaluation.",
+        "r2_challenge_response": "DEFERRED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Multiple findings were deferred to empirical testing, indicating that while there are valid concerns, they can be resolved through further analysis or experimentation."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=9, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 8,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=8, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=6, CONCEDE \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 2,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "defense_wins",
+        "rule_applied": "constitutional: DEFER + adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 2,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "defense_wins",
+        "rule_applied": "constitutional: DEFER + adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F10",
+        "adjusted_severity": 2,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "defense_wins",
+        "rule_applied": "constitutional: DEFER + adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

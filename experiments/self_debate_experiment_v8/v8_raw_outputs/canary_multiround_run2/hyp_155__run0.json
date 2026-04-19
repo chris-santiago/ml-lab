@@ -1,0 +1,411 @@
+{
+  "case_id": "hyp_155",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The performance gap between the hypothesis model and the baseline can be attributed specifically to the contribution of graph and historical context signals.",
+        "failure_mechanism": "The baseline model is denied *all* non-text features (attachments, URLs, sender reputation), while the hypothesis model receives *all* of them (graph + attachments + URLs + reputation). The experiment tests 'Text vs. Text+Graph+Other', not 'Text vs. Text+Graph'. Any observed gain could be entirely driven by the URL blocklist or attachment features, invalidating the specific claim about graph augmentation.",
+        "evidence_test": "Run a second baseline that includes attachment types, URL blocklist matches, and sender reputation scores but excludes graph features. If this baseline matches the hypothesis model's performance, the graph contribution is negligible.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 'Benign' label definition (no report after 30 days) accurately reflects non-malicious email status for training purposes.",
+        "failure_mechanism": "In spear-phishing and BEC scenarios, successful attacks often go unreported for long periods (e.g., credential harvesting where the user changes passwords later, or financial fraud where the victim is unaware). Classifying these as 'Benign' introduces false negatives into the training set, causing the model to learn that successful attacks are safe.",
+        "evidence_test": "Manually audit a random sample of emails labeled 'Benign' (no report > 30 days) to determine the true malicious rate. If the rate is significantly > 0, the label noise is confirmed.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The primary metric (Precision at 80% Recall) is sufficient to evaluate the model's operational performance.",
+        "failure_mechanism": "The protocol allows pivoting to a secondary metric (Recall at 2% FPR) if the primary metric is 'unattainable'. This creates a data-dependent metric selection process where the team can choose the metric that yields the most favorable result, inflating the apparent success of the model.",
+        "evidence_test": "Check if the pivot condition was triggered during validation. If the model failed the primary metric but passed the secondary, the primary claim is unsupported.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The frozen graph and blocklist features accurately simulate the deployment environment.",
+        "failure_mechanism": "In production, the communication graph and blocklists are updated incrementally. By freezing them at the training boundary, the test set features are systematically stale compared to production. This creates a distribution shift where the test set is harder than production (less signal), potentially underestimating performance, but more critically, it misaligns the feature distribution used for evaluation with the actual deployment environment.",
+        "evidence_test": "Compare the distribution of graph features (e.g., sender degree, reciprocity) in the test set against a simulated production environment where the graph is updated up to the prediction time.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The hypothesis model and baseline have equivalent model capacity.",
+        "failure_mechanism": "The hypothesis model concatenates graph features to text embeddings before the MLP head, increasing input dimensionality. The baseline receives only text. Unless the baseline MLP input is padded to match dimensions, the hypothesis model has higher capacity (more parameters or larger effective input space), allowing it to win due to capacity rather than signal.",
+        "evidence_test": "Inspect the MLP input layer dimensions for both models. If the hypothesis model has a larger input dimension without corresponding baseline padding, capacity is unbalanced.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Stratifying by sender domain in a temporal split ensures realistic operational distributions without distorting temporal dynamics.",
+        "failure_mechanism": "Forcing a specific sender domain distribution across temporal windows may mask or distort the natural drift in sender behavior (e.g., increased external traffic during holidays). If the stratification forces the test set to match the training distribution rather than the test period's natural distribution, it reduces the realism of the temporal drift evaluation.",
+        "evidence_test": "Compare the sender domain distribution in the test set against the natural distribution of emails received in that 3-month window. If they differ significantly, the stratification distorted the temporal reality.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC contains a FATAL flaw in the baseline design that invalidates the specific claim about graph augmentation, as the hypothesis model receives multiple non-text signals not present in the baseline. Additionally, there are MATERIAL concerns regarding label noise, metric pivot flexibility, and distribution shifts between the frozen test features and production reality.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "## Pass 1 Analysis\n\n### F1 (FATAL, sev 9): Missing baselines - graph vs. other signals\n**Critic's claim:** The experiment compares text-only vs. text+graph+attachments+URLs+reputation, not text vs. text+graph. The specific graph contribution is not isolated.\n\n**Analysis:** The methodology in Section 4 states: \"This design isolates the contribution of graph and historical context signals.\" However, the hypothesis model receives graph features + historical sender signals + non-text signals (attachments, URLs, reputation), while the baseline receives only text. The critic is correct that this comparison does NOT isolate the graph contribution specifically \u2014 any gain could come from the non-graph signals (attachments, URL blocklist, sender reputation). The suggested evidence test (add a baseline with non-graph signals but no graph) would indeed isolate the graph contribution. This is a valid FATAL flaw \u2014 the claim specifically attributes the gap to \"graph and historical context signals\" but the design includes additional signals that could drive the entire effect.\n\n### F2 (MATERIAL, sev 6): Benign label definition\n**Critic's claim:** The 30-day no-report rule for benign labels may include unreported successful attacks (false negatives in training).\n\n**Analysis:** This is a legitimate concern in security datasets. However, the methodology explicitly defines benign as \"confirmed non-malicious OR older than 30 days without subsequent report\" \u2014 the first category requires confirmation. The 30-day rule is a deliberate design choice stated in Section 1: \"exclude any message whose label arrives more than 30 days after the message date, to avoid training on highly delayed or uncertain labels that would not have informed a real-time detector.\" This is a principled (though imperfect) approach to label quality. The critic's suggested audit would require ground truth the experiment is trying to discover. This is a known limitation, not an unaddressed flaw.\n\n### F3 (MATERIAL, sev 6): Metric selection\n**Critic's claim:** The protocol allows pivoting to a secondary metric if primary is \"unattainable,\" creating data-dependent selection that could inflate results.\n\n**Analysis:** The methodology states: \"If 80% recall is unattainable by either model, we pivot to Recall at a fixed false-positive rate of 2%.\" The pivot condition applies to BOTH models failing the primary metric \u2014 it's not cherry-picking. This is a reasonable fallback protocol for an unachievable primary metric, not a way to select favorable results. The evidence test asks whether the pivot was triggered \u2014 if not, the concern is moot. This is a deliberate design choice with reasonable justification.\n\n### F4 (MATERIAL, sev 5): Frozen graph features\n**Critic's claim:** Freezing graph and blocklists at training creates distribution shift where test features are stale compared to production.\n\n**Analysis:** The methodology explicitly addresses this in Section 3: \"This simulates realistic deployment where the model observes only past communication context.\" Section 7 lists this under \"Graph leakage\" controls. The design intentionally simulates a deployment scenario \u2014 it's not trying to maximize performance, it's testing realistic operational performance. The critic's concern about underestimating production performance is valid, but the design choice is deliberate and matches the stated operational simulation goal.\n\n### F5 (MATERIAL, sev 5): Model capacity imbalance\n**Critic's claim:** Hypothesis model concatenates graph features, increasing input dimensionality. Without baseline padding, capacity is unbalanced.\n\n**Analysis:** This is a technical concern about fair comparison. The methodology does not explicitly address whether MLP input dimensions are matched. The critic's evidence test (inspect layer dimensions) is straightforward and would resolve this. This is a verifiable configuration detail that could bias results if not addressed.\n\n### F6 (MINOR, sev 2): Stratification distorting temporal dynamics\n**Critic's claim:** Stratifying by sender domain may mask natural drift in sender behavior across time.\n\n**Analysis:** The methodology stratifies to ensure \"realistic operational sender distribution.\" The critic's concern is that this could reduce temporal drift realism. This is a minor methodological consideration \u2014 the stratification has a clear intent (maintaining realistic distribution) and the critic's evidence test would require comparing against a counterfactual natural distribution. The impact on conclusions is minimal.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic correctly identifies that the hypothesis model receives graph + historical + non-text signals (attachments, URLs, reputation) while baseline receives only text. The methodology claims to 'isolate the contribution of graph and historical context signals' but the design does not actually do this \u2014 a baseline with non-graph signals but no graph would be needed to isolate the specific graph contribution. The performance gap could be entirely driven by attachment types, URL blocklist matches, or sender reputation. This is a valid FATAL flaw."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The 30-day benign label rule is a deliberate design choice explicitly stated in Section 1: 'exclude any message whose label arrives more than 30 days after the message date, to avoid training on highly delayed or uncertain labels that would not have informed a real-time detector.' This ensures temporal consistency between label availability and model deployment context. While unreported attacks are a known limitation of security datasets, the methodology acknowledges this is a simplification. The design choice is justified for the experiment's operational simulation goal."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The metric pivot applies when 80% recall is 'unattainable by either model' \u2014 the condition triggers symmetrically for both models, not as cherry-picking. This is a fallback protocol for an unachievable primary metric, ensuring both models can be compared fairly on a meaningful operational metric. The design choice is deliberate and justified."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The frozen graph is explicitly designed to 'simulate realistic deployment where the model observes only past communication context' (Section 3). This is listed under 'Graph leakage' controls in Section 7. The design intentionally creates a conservative evaluation that matches operational deployment constraints \u2014 it's not an oversight but a deliberate choice to test realistic performance."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "This concern requires inspecting the actual MLP input layer dimensions to verify whether the baseline is padded to match the hypothesis model's input size. The evidence test is straightforward: compare layer dimensions. If dimensions differ, this is a valid capacity confound. If matched, the concern is resolved. The question cannot be resolved by argument alone \u2014 it requires examining the model configuration."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The stratification has a clear intent: ensuring each temporal window reflects the 'realistic operational sender distribution.' While the critic raises a valid point about potential distortion of natural temporal drift, this is a second-order effect. The primary evaluation (precision at 80% recall) is driven by classification performance on the email population, not by subtle sender distribution shifts. The finding is real but below significance for the experiment's primary conclusions."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "F1 (FATAL, severity 9) was CONCEDed \u2014 the experiment does not isolate the specific contribution of graph and historical context signals as claimed, because the hypothesis model includes non-graph signals (attachments, URLs, reputation) that the baseline lacks. This is a genuine flaw that invalidates the specific attribution claim. Since a FATAL finding with adjusted severity \u2265 7 was CONCEDed, the verdict is critique_wins."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 9,
+        "reasoning": "The defender explicitly concedes the flaw: the hypothesis model receives non-text features (URLs, attachments, reputation) that the baseline lacks, meaning the performance gap cannot be attributed solely to graph augmentation. This is a valid FATAL flaw as the core claim is invalidated."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The defender clarifies that the 30-day label rule is a deliberate design choice to ensure temporal consistency with real-time deployment constraints, acknowledging it as a simplification. This justifies the methodology for the experiment's specific operational simulation goal, mitigating the concern that the labels are unintentionally noisy."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The defender correctly explains that the metric pivot is a symmetric fallback protocol triggered by unattainability, not cherry-picking. This addresses the failure mechanism of data-dependent metric selection, ensuring both models are evaluated on the same operational metric."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 2,
+        "reasoning": "The methodology explicitly defines the deployment environment as one where the graph is frozen to simulate realistic constraints (Section 3). The finding's assumption that production updates incrementally contradicts the experiment's defined scope. The rebuttal justifies the design as a conservative evaluation matching the intended deployment context."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The defender defers the decision pending code inspection. The concern regarding model capacity imbalance (input dimensionality) remains unresolved without empirical verification of the MLP layer configurations. The finding stands until the evidence is provided."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The defender argues that sender domain stratification is a second-order effect that does not significantly impact the primary classification metric. Given the minor severity (2) and the justification that the primary evaluation is driven by performance rather than distribution shifts, the reduction to 1 is proportionate."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic ACCEPTed my rebuttals for F1 (conceded), F2, F3, F4, and F6. For F5, the critic CHALLENGED my DEFER, arguing that the capacity concern remains unresolved without empirical verification. I will maintain DEFER for F5 but clarify that the design specifies 'identical transformer architecture' for both models, which implies equivalent MLP capacity \u2014 the question is whether this is sufficient, which requires examining the actual implementation. Since the design document doesn't explicitly specify MLP dimension matching, this remains a genuine ambiguity requiring implementation inspection.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic correctly ACCEPTed my concession. The hypothesis model receives graph + historical + non-text signals (attachments, URLs, reputation) while baseline receives only text. The methodology cannot attribute any performance gap specifically to graph augmentation.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The 30-day benign label rule is a deliberate design choice to ensure temporal consistency with real-time deployment constraints. The design explicitly states: 'exclude any message whose label arrives more than 30 days after the message date, to avoid training on highly delayed or uncertain labels that would not have informed a real-time detector.' This is a justified simplification for the experiment's operational simulation goal.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The metric pivot applies when 80% recall is 'unattainable by either model' \u2014 the condition triggers symmetrically for both hypothesis and baseline models, not as cherry-picking. This is a fallback protocol for an unachievable primary metric, ensuring fair comparison on a meaningful operational metric.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The frozen graph is explicitly designed to 'simulate realistic deployment where the model observes only past communication context' (Section 3). Listed under 'Graph leakage' controls in Section 7, this is a deliberate conservative choice matching operational deployment constraints \u2014 not an oversight. The finding assumes production updates incrementally, which contradicts the experiment's defined scope.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The design specifies 'identical transformer architecture' for both models, which implies equivalent MLP capacity. However, the design document does not explicitly specify whether MLP input dimensions are matched through padding. The evidence test requires inspecting actual MLP input layer dimensions in the implementation. If dimensions differ without padding, this is a valid capacity confound. If matched or if capacity is otherwise equalized, the concern is resolved. This is a genuine implementation detail that cannot be resolved by argument alone \u2014 it requires examining the model configuration.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The stratification ensures each temporal window reflects the 'realistic operational sender distribution.' While the critic raises a valid point about potential distortion of natural temporal drift, this is a second-order effect. The primary evaluation (precision at 80% recall) is driven by classification performance on the email population, not by subtle sender distribution shifts.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 remains FATAL (conceded, severity 9). F5 is DEFERred \u2014 the capacity concern requires implementation inspection to verify MLP dimension matching, which cannot be resolved by argument alone. This is a genuine ambiguity where empirical evidence is needed. All other findings (F2, F3, F4, F6) were successfully rebutted to adjusted severity \u2264 3. The verdict is 'empirical_test_agreed' because F5 requires empirical verification of model architecture details."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The performance gap between the hypothesis model and the baseline can be attributed specifically to the contribution of graph and historical context signals.",
+        "failure_mechanism": "The baseline model is denied *all* non-text features (attachments, URLs, sender reputation), while the hypothesis model receives *all* of them (graph + attachments + URLs + reputation). The experiment tests 'Text vs. Text+Graph+Other', not 'Text vs. Text+Graph'. Any observed gain could be entirely driven by the URL blocklist or attachment features, invalidating the specific claim about graph augmentation.",
+        "evidence_test": "Run a second baseline that includes attachment types, URL blocklist matches, and sender reputation scores but excludes graph features. If this baseline matches the hypothesis model's performance, the graph contribution is negligible.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 'Benign' label definition (no report after 30 days) accurately reflects non-malicious email status for training purposes.",
+        "failure_mechanism": "In spear-phishing and BEC scenarios, successful attacks often go unreported for long periods (e.g., credential harvesting where the user changes passwords later, or financial fraud where the victim is unaware). Classifying these as 'Benign' introduces false negatives into the training set, causing the model to learn that successful attacks are safe.",
+        "evidence_test": "Manually audit a random sample of emails labeled 'Benign' (no report > 30 days) to determine the true malicious rate. If the rate is significantly > 0, the label noise is confirmed.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The primary metric (Precision at 80% Recall) is sufficient to evaluate the model's operational performance.",
+        "failure_mechanism": "The protocol allows pivoting to a secondary metric (Recall at 2% FPR) if the primary metric is 'unattainable'. This creates a data-dependent metric selection process where the team can choose the metric that yields the most favorable result, inflating the apparent success of the model.",
+        "evidence_test": "Check if the pivot condition was triggered during validation. If the model failed the primary metric but passed the secondary, the primary claim is unsupported.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The frozen graph and blocklist features accurately simulate the deployment environment.",
+        "failure_mechanism": "In production, the communication graph and blocklists are updated incrementally. By freezing them at the training boundary, the test set features are systematically stale compared to production. This creates a distribution shift where the test set is harder than production (less signal), potentially underestimating performance, but more critically, it misaligns the feature distribution used for evaluation with the actual deployment environment.",
+        "evidence_test": "Compare the distribution of graph features (e.g., sender degree, reciprocity) in the test set against a simulated production environment where the graph is updated up to the prediction time.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The hypothesis model and baseline have equivalent model capacity.",
+        "failure_mechanism": "The hypothesis model concatenates graph features to text embeddings before the MLP head, increasing input dimensionality. The baseline receives only text. Unless the baseline MLP input is padded to match dimensions, the hypothesis model has higher capacity (more parameters or larger effective input space), allowing it to win due to capacity rather than signal.",
+        "evidence_test": "Inspect the MLP input layer dimensions for both models. If the hypothesis model has a larger input dimension without corresponding baseline padding, capacity is unbalanced.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Stratifying by sender domain in a temporal split ensures realistic operational distributions without distorting temporal dynamics.",
+        "failure_mechanism": "Forcing a specific sender domain distribution across temporal windows may mask or distort the natural drift in sender behavior (e.g., increased external traffic during holidays). If the stratification forces the test set to match the training distribution rather than the test period's natural distribution, it reduces the realism of the temporal drift evaluation.",
+        "evidence_test": "Compare the sender domain distribution in the test set against the natural distribution of emails received in that 3-month window. If they differ significantly, the stratification distorted the temporal reality.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC contains a FATAL flaw in the baseline design that invalidates the specific claim about graph augmentation, as the hypothesis model receives multiple non-text signals not present in the baseline. Additionally, there are MATERIAL concerns regarding label noise, metric pivot flexibility, and distribution shifts between the frozen test features and production reality.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic ACCEPTed my rebuttals for F1 (conceded), F2, F3, F4, and F6. For F5, the critic CHALLENGED my DEFER, arguing that the capacity concern remains unresolved without empirical verification. I will maintain DEFER for F5 but clarify that the design specifies 'identical transformer architecture' for both models, which implies equivalent MLP capacity \u2014 the question is whether this is sufficient, which requires examining the actual implementation. Since the design document doesn't explicitly specify MLP dimension matching, this remains a genuine ambiguity requiring implementation inspection.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic correctly ACCEPTed my concession. The hypothesis model receives graph + historical + non-text signals (attachments, URLs, reputation) while baseline receives only text. The methodology cannot attribute any performance gap specifically to graph augmentation.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The 30-day benign label rule is a deliberate design choice to ensure temporal consistency with real-time deployment constraints. The design explicitly states: 'exclude any message whose label arrives more than 30 days after the message date, to avoid training on highly delayed or uncertain labels that would not have informed a real-time detector.' This is a justified simplification for the experiment's operational simulation goal.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The metric pivot applies when 80% recall is 'unattainable by either model' \u2014 the condition triggers symmetrically for both hypothesis and baseline models, not as cherry-picking. This is a fallback protocol for an unachievable primary metric, ensuring fair comparison on a meaningful operational metric.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The frozen graph is explicitly designed to 'simulate realistic deployment where the model observes only past communication context' (Section 3). Listed under 'Graph leakage' controls in Section 7, this is a deliberate conservative choice matching operational deployment constraints \u2014 not an oversight. The finding assumes production updates incrementally, which contradicts the experiment's defined scope.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The design specifies 'identical transformer architecture' for both models, which implies equivalent MLP capacity. However, the design document does not explicitly specify whether MLP input dimensions are matched through padding. The evidence test requires inspecting actual MLP input layer dimensions in the implementation. If dimensions differ without padding, this is a valid capacity confound. If matched or if capacity is otherwise equalized, the concern is resolved. This is a genuine implementation detail that cannot be resolved by argument alone \u2014 it requires examining the model configuration.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The stratification ensures each temporal window reflects the 'realistic operational sender distribution.' While the critic raises a valid point about potential distortion of natural temporal drift, this is a second-order effect. The primary evaluation (precision at 80% recall) is driven by classification performance on the email population, not by subtle sender distribution shifts.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 remains FATAL (conceded, severity 9). F5 is DEFERred \u2014 the capacity concern requires implementation inspection to verify MLP dimension matching, which cannot be resolved by argument alone. This is a genuine ambiguity where empirical evidence is needed. All other findings (F2, F3, F4, F6) were successfully rebutted to adjusted severity \u2264 3. The verdict is 'empirical_test_agreed' because F5 requires empirical verification of model architecture details."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=9 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

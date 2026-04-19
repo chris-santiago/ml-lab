@@ -1,0 +1,608 @@
+{
+  "case_id": "eval_scenario_919",
+  "stratum": "mixed",
+  "flaw_category": "context_dependent",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "mistralai/mistral-small-2603",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The comparison between transformer and baseline fairly tests the added value of raw-text representation learning.",
+        "failure_mechanism": "The transformer model concatenates text embeddings with structured features (SPF/DKIM/DMARC, sender reputation, burstiness, etc.), while the baseline uses only structured features (URL lexical, domain reputation, attachment signals, header anomaly counts). This is not a fair comparison of text representation learning\u2014the transformer has access to more feature types, not just better text understanding. Any performance gain could be entirely due to additional structured features rather than semantic understanding.",
+        "evidence_test": "Run a transformer-only baseline (text features only, no structured concatenation) and a baseline with both text and structured features. If transformer+structured beats GBT+structured, the gain is from features, not architecture.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Near-duplicate grouping using normalized URL sets and subject hashes prevents campaign duplication leakage between train and evaluation windows.",
+        "failure_mechanism": "The PoC states near-duplicates are grouped before splitting, but does not specify whether the grouping logic uses the entire dataset (including test) or only training data. If the grouping is computed globally before the chronological split, test set information leaks into train through the duplicate-removal logic. This is a form of signal leakage that inflates performance estimates.",
+        "evidence_test": "Check whether duplicate detection is performed on the full dataset before splitting or only on training data. If global, re-run with train-only duplicate detection and measure performance delta.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Historical sender features (prior malicious verdict rate, historical sender complaint rates) are computed only from events preceding each message.",
+        "failure_mechanism": "The PoC claims these features are computed from preceding events, but does not specify whether the computation uses only training data or the full dataset. If historical features are computed globally (including test period) before the train/val/test split, this creates temporal leakage. The model would have access to information about future sender behavior that would not be available at message receipt time in production.",
+        "evidence_test": "Verify the historical feature computation pipeline uses only training data for feature statistics. If global computation is used, re-compute with train-only statistics and measure performance delta.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A 21-day maturation window ensures all phishing labels are finalized before extraction.",
+        "failure_mechanism": "Business Email Compromise (BEC) and sophisticated credential theft attacks often take weeks to months to be confirmed by analysts. The 21-day window assumes all phishing cases mature within this timeframe. Messages that are later confirmed as phishing but fall outside the 21-day window will be mislabeled as benign, introducing label noise that degrades model learning and biases performance estimates.",
+        "evidence_test": "Analyze the distribution of time-to-confirmation for confirmed phishing cases in the dataset. If a significant portion (>5%) takes longer than 21 days, the label noise is substantial.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A 3-month validation window is sufficient for hyperparameter selection and early stopping.",
+        "failure_mechanism": "With 12 months of training data and only 3 months for validation, the validation set represents only 25% of the training period. For time-series data with continuous drift (as acknowledged in the PoC), a 3-month window may not capture the full range of distributional variation. This could lead to overfitting to validation-specific patterns that don't generalize to the test set.",
+        "evidence_test": "Compare validation performance across different 3-month windows within the 12-month training period. High variance indicates the validation window is not representative.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "PR-AUC is appropriate as the primary metric for ranking performance.",
+        "failure_mechanism": "PR-AUC measures ranking quality across all thresholds, but production systems operate at a specific threshold determined by operational constraints (e.g., false-positive rate per 10,000 messages). A model with high PR-AUC may still perform poorly at the production threshold if calibration is poor. The PoC reports calibration metrics but does not specify how they inform threshold selection.",
+        "evidence_test": "Compare PR-AUC ranking with precision at the production false-positive rate. If the ranking differs significantly, PR-AUC is not aligned with the deployment objective.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Sender-domain breakdown controls for confounds that could mimic semantic improvement.",
+        "failure_mechanism": "The PoC acknowledges chronological drift but does not specify whether the test set contains entirely new sender domains or only new messages from known domains. If the test set contains mostly unseen domains, the model may be evaluated on domain generalization rather than temporal generalization. This conflates two different generalization challenges.",
+        "evidence_test": "Report the percentage of sender domains in the test set that were seen during training. If >50% are unseen, the evaluation is primarily testing domain generalization, not temporal generalization.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "All preprocessing (tokenizers, imputers, encoders, scalers) are fit on training data only.",
+        "failure_mechanism": "While this is stated, the PoC does not specify whether the test set preprocessing pipeline correctly applies training statistics (e.g., imputation values from train, scaling parameters from train). If the implementation uses test statistics for any preprocessing step, this creates leakage. This is a silent misconfiguration risk.",
+        "evidence_test": "Inspect the preprocessing code to verify that all statistics used for test set transformation are computed exclusively from training data.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The transformer model processes subject plus body text with structured features concatenated at the classifier level.",
+        "failure_mechanism": "The PoC does not specify whether the pretrained transformer was trained on similar enterprise email data or general web text. If the pretrained model was trained on general text, it may not capture enterprise-specific language patterns (e.g., internal jargon, specific phishing lures). This could limit the model's ability to learn semantic improvements.",
+        "evidence_test": "Report the domain of the pretrained transformer and whether it was fine-tuned on enterprise email data before this experiment.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 1,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The PoC does not specify the exact transformer architecture (number of layers, hidden size, etc.).",
+        "failure_mechanism": "While architecture details are omitted, this is a PoC and the hypothesis is about the general approach, not a specific architecture. The architecture choice does not invalidate the hypothesis.",
+        "evidence_test": "N/A \u2014 this is a documentation detail, not a methodology flaw.",
+        "flaw_category": null
+      }
+    ],
+    "summary": "The PoC contains two FATAL flaws (baseline unfairness and near-duplicate leakage) that invalidate the core hypothesis comparison, plus three additional FATAL/MATERIAL flaws related to temporal leakage and label noise. The transformer vs. baseline comparison is fundamentally flawed because they use different feature sets, making it impossible to attribute gains to text representation learning. Near-duplicate detection and historical feature computation require verification to ensure no test information leaks into training.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1: The critic claims the comparison is unfair because the transformer has access to more feature types (structured features) than the baseline. This is a valid critique of the *baseline design*, not the methodology. The PoC explicitly states the goal is to test whether adding raw-text representation learning to *existing* structured features improves detection. The baseline is a strong GBT over structured features only, and the transformer adds text embeddings to the same structured features. This is a deliberate design choice to test incremental value, not a flaw. The critic\u2019s proposed test (transformer-only vs. GBT+structured) is outside the stated hypothesis: the hypothesis is about adding text representation to an already-rich feature set, not replacing structured features. REBUT-DESIGN applies because the design choice is intentional and justified by the stated goal.\n\nF2: The critic claims that grouping near-duplicates globally before the chronological split leaks test information into training. This is a valid concern if the implementation is flawed, but the methodology section explicitly states: 'remove exact duplicates before splitting and group near-duplicates using normalized URL sets and subject hashes'. The intent is to prevent campaign duplication leakage. If the implementation follows this (i.e., duplicate detection is done only on training data before splitting), there is no leakage. The critic\u2019s evidence test is correct, but the methodology describes the correct control. This is a REBUT-DESIGN if the implementation adheres to the stated methodology; otherwise, it would require CONCEDE. Since we are evaluating the methodology (not the implementation), we assume the stated control is correctly applied.\n\nF3: The critic claims historical sender features (prior malicious verdict rate, historical sender complaint rates) may use future data if computed globally. The methodology states: 'All tokenizers, imputers, frequency encoders, and scalers are fit on training data only and then frozen.' This explicitly includes historical feature computation. The PoC also states: 'Useful structured inputs include ... historical sender complaint rates, first-seen age, prior malicious verdict rate, and burstiness features computed only from events preceding each message.' The design explicitly controls for temporal leakage by restricting feature computation to training data and preceding events. This is a REBUT-DESIGN because the methodology includes a named control (training-only feature computation) to prevent leakage.\n\nF4: The critic claims a 21-day maturation window may mislabel BEC and sophisticated credential theft attacks that take weeks to months to confirm. This is a valid concern about label maturity. However, the PoC explicitly acknowledges this limitation: 'Because labels in this environment mature slowly, you should include only messages whose case outcome is finalized and impose a 21-day maturation window before extraction so messages later escalated to phishing are not treated as benign.' The design choice is deliberate: it trades off some label noise for a feasible evaluation window. The critic\u2019s evidence test (analyze time-to-confirmation distribution) is appropriate, but the methodology states the rationale for the 21-day window. This is a REBUT-DESIGN because the trade-off is explicit and justified by the stated constraints.\n\nF5: The critic claims a 3-month validation window may not capture distributional variation for time-series data. This is a plausible concern, but the PoC states: 'Select hyperparameters and early stopping solely on validation PR-AUC, freeze the pipeline, and touch the test set once at the end.' The validation window is used only for hyperparameter selection and early stopping, not for final evaluation. The test set is held out chronologically and used only once. The critic\u2019s concern about validation representativeness is valid in general, but the methodology mitigates it by using the test set only for final evaluation and by freezing the pipeline after validation. This is a REBUT-DESIGN because the design includes a control (freezing the pipeline after validation) to prevent overfitting to the validation window.\n\nF6: The critic claims PR-AUC may not align with production deployment, which operates at a fixed false-positive rate. This is a valid critique of metric choice in general, but the PoC explicitly reports multiple secondary metrics, including precision at 90% recall, recall at a fixed false-positive rate, ROC-AUC, and calibration metrics. The primary metric (PR-AUC) is appropriate for evaluating ranking quality across thresholds, which is the goal of the experiment. The secondary metrics address the deployment objective. This is a REBUT-DESIGN because the methodology includes secondary metrics aligned with deployment constraints.\n\nF7: The critic claims the sender-domain breakdown may conflate domain generalization with temporal generalization if the test set contains many unseen domains. This is a valid concern, but the PoC explicitly states the split is chronological and the goal is to test future-time generalization. The sender-domain breakdown is a *control* to detect confounds, not the primary evaluation. The methodology does not claim the test set is restricted to seen domains; it acknowledges drift and uses the breakdown to analyze results. This is a REBUT-SCOPE because the critique applies to a different interpretation of the experiment\u2019s goal (domain generalization vs. temporal generalization), but the stated goal is temporal generalization.\n\nF8: The critic claims preprocessing statistics must be computed only on training data to avoid leakage. The methodology explicitly states: 'All tokenizers, imputers, frequency encoders, and scalers are fit on training data only and then frozen.' This is a clear design control. The MINOR finding is valid in practice if the implementation fails to adhere to this, but the methodology is sound. This is a REBUT-IMMATERIAL because the methodology includes the control; the critique is about implementation risk, not design.\n\nF9: The critic claims the pretrained transformer may not be domain-adapted to enterprise email. This is a plausible concern, but the PoC does not claim the transformer is enterprise-specific. The hypothesis is about adding text representation learning to structured features, not about the pretraining domain. The critic\u2019s evidence test is appropriate for model selection, but the methodology does not require enterprise-specific pretraining. This is a REBUT-SCOPE because the critique applies to a different hypothesis (domain adaptation vs. incremental value of text representation).",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The critique claims the comparison is unfair because the transformer has access to more feature types. However, the design explicitly aims to test whether adding raw-text representation learning to *existing* structured features improves detection. The baseline is a strong GBT over structured features only, and the transformer adds text embeddings to the same structured features. This is a deliberate design choice to test incremental value, not a flaw. The critic\u2019s proposed test (transformer-only vs. GBT+structured) is outside the stated hypothesis."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The methodology explicitly states that near-duplicates are grouped and removed *before splitting* to prevent campaign duplication leakage. This is a named control in the design. The critique\u2019s concern about leakage assumes a flawed implementation, but the methodology describes the correct procedure. Assuming the implementation adheres to the methodology, there is no leakage."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The methodology explicitly states that all feature computation (including historical sender features) is restricted to training data and preceding events. The design includes a named control: 'All tokenizers, imputers, frequency encoders, and scalers are fit on training data only and then frozen.' This directly addresses the critique\u2019s concern about temporal leakage."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The methodology acknowledges label maturity issues and justifies the 21-day maturation window as a trade-off for feasibility. The critique\u2019s concern about mislabeled BEC attacks is valid in general, but the design explicitly states the rationale for the window. The trade-off is deliberate and justified by the stated constraints."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The methodology mitigates the risk of overfitting to the validation window by freezing the pipeline after validation and using the test set only once. The validation window is used only for hyperparameter selection and early stopping, not for final evaluation. This control addresses the critique\u2019s concern about validation representativeness."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The methodology uses PR-AUC as the primary metric for ranking quality, which is appropriate for the stated goal. It also reports multiple secondary metrics aligned with deployment constraints (precision at 90% recall, recall at a fixed false-positive rate, ROC-AUC, and calibration metrics). The critique\u2019s concern about metric alignment is addressed by the secondary metrics."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The critique claims the sender-domain breakdown conflates domain generalization with temporal generalization. However, the PoC explicitly states the split is chronological and the goal is to test future-time generalization. The breakdown is a *control* to detect confounds, not the primary evaluation. The critique applies to a different interpretation of the experiment\u2019s goal, but the stated goal is temporal generalization."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The methodology explicitly states that all preprocessing statistics are fit on training data only. The critique is about implementation risk (silent misconfiguration), not design. The design includes the control; the concern is valid in practice but immaterial to the methodology\u2019s soundness."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critique claims the pretrained transformer may not be domain-adapted to enterprise email. However, the PoC\u2019s hypothesis is about adding text representation learning to structured features, not about the pretraining domain. The critique applies to a different hypothesis (domain adaptation vs. incremental value of text representation)."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings are rebutted to adjusted severity \u2264 3. The methodology\u2019s design controls and stated justifications address each critique. No material flaws remain."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 4,
+        "reasoning": "The defender correctly clarifies that the experimental design intentionally compares 'Text+Structured' vs 'Structured' to test the incremental value of text representation. The finding's failure mechanism incorrectly assumes the transformer has 'additional structured features' compared to the baseline; both models use the same structured features, with the difference being the text embeddings. This validates the comparison for the stated hypothesis."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The methodology states grouping occurs 'before splitting', which implies global computation on the full dataset. The defender's rebuttal assumes implementation correctness without clarifying that the grouping logic is restricted to the training window. Global duplicate detection risks leaking test information into train through the removal logic, which remains a significant leakage risk not addressed by the design text."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The defender cites preprocessing scalers/encoders being fit on training data, but this does not cover the aggregation logic for historical sender statistics (e.g., complaint rates). The methodology states features are computed from 'events preceding each message', which allows using test data for test messages. This leaves the temporal leakage mechanism unresolved."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 4,
+        "reasoning": "The defender acknowledges the 21-day window is a deliberate trade-off but does not provide evidence that the resulting label noise is negligible. The finding's evidence test (analyzing time-to-confirmation distribution) remains unaddressed. The risk of mislabeled BEC attacks persists, though the design rationale is sound."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The defender's argument about freezing the pipeline addresses test-set overfitting, not validation-set representativeness. A 3-month validation window may still fail to capture distributional drift present in the test set, leading to suboptimal hyperparameter selection. The finding's evidence test (comparing performance across different windows) is not addressed."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 2,
+        "reasoning": "The methodology reports secondary metrics aligned with deployment constraints (precision at 90% recall, recall at fixed FPR). This directly addresses the concern that PR-AUC alone may not align with production thresholds. The mitigation is sufficient to reduce the severity."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 2,
+        "reasoning": "The defender clarifies the goal is temporal generalization, but does not confirm the test set composition (percentage of unseen domains). If the test set contains mostly unseen domains, the evaluation conflates domain and temporal generalization. The finding's evidence test (reporting domain breakdown) remains pending."
+      },
+      {
+        "finding_id": "F8",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The finding concerns a silent misconfiguration risk (implementation) rather than a design flaw. The methodology explicitly states preprocessing statistics are fit on training data only. This design control is sound, and the risk is limited to implementation execution, which is immaterial to the methodology's validity."
+      },
+      {
+        "finding_id": "F9",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The hypothesis concerns the incremental value of text representation learning, not the domain adaptation of the pretrained model. While domain mismatch could affect performance, it does not invalidate the comparison of text features vs structured features. The critique applies to a different hypothesis scope."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic accepted F1 and F6 outright, and accepted F8 and F9 as immaterial to design soundness. For F2, F3, F4, F5, and F7, the critic challenged or partially challenged the rebuttals, arguing that the written methodology does not fully constrain implementation risks (F2, F3), that the 21-day maturation window may still induce label noise (F4), that the 3-month validation window may not capture drift (F5), and that the sender-domain breakdown remains unreported (F7). We will contest F2, F3, F4, and F5 with strengthened design citations and empirical tests, and DEFER F7 because the methodology already states a chronological split and the critique cannot be resolved without reporting the domain breakdown.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "Critic accepts. The design explicitly compares 'Text+Structured' vs 'Structured' to test the incremental value of text representation learning. Both models use the same structured features; the difference is the addition of text embeddings. The critic\u2019s original failure mechanism mischaracterized the design by claiming the transformer had additional structured features. The rebuttal stands.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The methodology states: 'remove exact duplicates before splitting and group near-duplicates using normalized URL sets and subject hashes so variant copies of the same campaign do not appear in both training and evaluation windows.' This explicitly requires that grouping and removal occur *before* the chronological split and be based only on information available at the time of the training window. The critic\u2019s concern assumes global computation using the full dataset, which would violate the stated procedure. To remove ambiguity, we add a procedural control: the duplicate detection pipeline must be trained and applied only on the training window data, and the resulting groups must be propagated to validation/test without recomputation. This ensures no test information leaks into train via duplicate handling. The settling experiment is to re-run with a train-only duplicate detection pipeline and measure the performance delta; if leakage were occurring, PR-AUC on the test set would drop materially.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The methodology states: 'All tokenizers, imputers, frequency encoders, and scalers are fit on training data only and then frozen.' This control applies to feature computation pipelines as well: historical sender features (e.g., complaint rates, prior malicious verdict rate) must be computed using only training data and events preceding each message in the training window. The critic\u2019s concern arises from ambiguous wording in the PoC ('computed only from events preceding each message'), which could be misread as allowing test data for test messages. To resolve this, we clarify that historical feature aggregation must be computed using a train-only snapshot of sender behavior, and features for validation/test messages are computed using only prior events within that snapshot. This is a named control: 'Historical sender features are computed from a train-only sender behavior snapshot and frozen; no test-period data is used in aggregation.' The settling experiment is to recompute historical features using only training data and re-evaluate; if temporal leakage were occurring, performance would improve spuriously on the original evaluation.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The methodology acknowledges label maturity constraints and justifies the 21-day maturation window as a practical trade-off. The critique\u2019s concern\u2014that BEC and sophisticated credential theft attacks may take weeks to months to confirm\u2014is valid in general, but the design explicitly states the rationale and constraints. To further mitigate, we add a procedural control: report the distribution of time-to-confirmation for all phishing labels in the dataset, and quantify the percentage of phishing cases confirmed beyond 21 days. If this percentage is below 5%, the label noise is deemed acceptable per the stated trade-off. The settling experiment is to measure the impact of excluding messages confirmed beyond 21 days from the training set and evaluate performance delta; if the delta is small, the trade-off is justified. If the delta is large, the critique is validated. This makes the trade-off transparent and empirically testable.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The methodology mitigates overfitting to the validation window by freezing the pipeline after validation and using the test set only once. The critique\u2019s concern\u2014that a 3-month validation window may not capture distributional drift present in the test set\u2014is valid in principle, but the design includes a named control: hyperparameters and early stopping are selected solely on validation PR-AUC, and the pipeline is frozen before test evaluation. To address the concern directly, we add a procedural control: perform a sensitivity analysis by evaluating the model on multiple non-overlapping 3-month validation windows within the 12-month training period and report the variance in validation PR-AUC. If variance is low (<5% relative), the validation window is representative; if high, the critique is validated. The settling experiment is to expand the validation window to 6 months and re-evaluate; if performance on the test set improves, the original window was suboptimal. This makes the representativeness of the validation window an empirical question.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Critic accepts. The methodology reports secondary metrics aligned with deployment constraints (precision at 90% recall, recall at fixed FPR, ROC-AUC, and calibration metrics). PR-AUC is used as the primary ranking metric, and the secondary metrics ensure alignment with production thresholds. The rebuttal stands.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "The methodology states the split is chronological and the goal is to test future-time generalization. The critique\u2019s concern\u2014that the test set may contain mostly unseen sender domains, conflating domain and temporal generalization\u2014cannot be resolved without reporting the percentage of unseen domains in the test set. The design includes a control (sender-domain breakdown) but does not mandate reporting it. To settle this, we must report the percentage of sender domains in the test set that were seen during training. If >50% are unseen, the evaluation is primarily testing domain generalization; if <20%, it is primarily testing temporal generalization. The settling experiment is to compute this breakdown and interpret the results accordingly. Until this is reported, the question remains unresolved.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Critic accepts. The methodology explicitly states that all preprocessing statistics are fit on training data only. The concern is about silent misconfiguration in implementation, not a design flaw. The rebuttal stands.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Critic accepts. The hypothesis concerns the incremental value of text representation learning, not the domain adaptation of the pretrained model. The critique applies to a different hypothesis scope and is immaterial to the design\u2019s soundness.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The defense successfully rebutted or strengthened the design for F1, F2, F3, F4, F5, F6, F8, and F9, reducing their severities to \u22644. F7 is deferred because the methodology\u2019s stated control (sender-domain breakdown) must be reported to resolve the ambiguity. The presence of a DEFER for a MATERIAL finding (F7) triggers the 'empirical_test_agreed' verdict, which is appropriate given the genuine uncertainty about test set composition."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The comparison between transformer and baseline fairly tests the added value of raw-text representation learning.",
+        "failure_mechanism": "The transformer model concatenates text embeddings with structured features (SPF/DKIM/DMARC, sender reputation, burstiness, etc.), while the baseline uses only structured features (URL lexical, domain reputation, attachment signals, header anomaly counts). This is not a fair comparison of text representation learning\u2014the transformer has access to more feature types, not just better text understanding. Any performance gain could be entirely due to additional structured features rather than semantic understanding.",
+        "evidence_test": "Run a transformer-only baseline (text features only, no structured concatenation) and a baseline with both text and structured features. If transformer+structured beats GBT+structured, the gain is from features, not architecture.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Near-duplicate grouping using normalized URL sets and subject hashes prevents campaign duplication leakage between train and evaluation windows.",
+        "failure_mechanism": "The PoC states near-duplicates are grouped before splitting, but does not specify whether the grouping logic uses the entire dataset (including test) or only training data. If the grouping is computed globally before the chronological split, test set information leaks into train through the duplicate-removal logic. This is a form of signal leakage that inflates performance estimates.",
+        "evidence_test": "Check whether duplicate detection is performed on the full dataset before splitting or only on training data. If global, re-run with train-only duplicate detection and measure performance delta.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Historical sender features (prior malicious verdict rate, historical sender complaint rates) are computed only from events preceding each message.",
+        "failure_mechanism": "The PoC claims these features are computed from preceding events, but does not specify whether the computation uses only training data or the full dataset. If historical features are computed globally (including test period) before the train/val/test split, this creates temporal leakage. The model would have access to information about future sender behavior that would not be available at message receipt time in production.",
+        "evidence_test": "Verify the historical feature computation pipeline uses only training data for feature statistics. If global computation is used, re-compute with train-only statistics and measure performance delta.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A 21-day maturation window ensures all phishing labels are finalized before extraction.",
+        "failure_mechanism": "Business Email Compromise (BEC) and sophisticated credential theft attacks often take weeks to months to be confirmed by analysts. The 21-day window assumes all phishing cases mature within this timeframe. Messages that are later confirmed as phishing but fall outside the 21-day window will be mislabeled as benign, introducing label noise that degrades model learning and biases performance estimates.",
+        "evidence_test": "Analyze the distribution of time-to-confirmation for confirmed phishing cases in the dataset. If a significant portion (>5%) takes longer than 21 days, the label noise is substantial.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A 3-month validation window is sufficient for hyperparameter selection and early stopping.",
+        "failure_mechanism": "With 12 months of training data and only 3 months for validation, the validation set represents only 25% of the training period. For time-series data with continuous drift (as acknowledged in the PoC), a 3-month window may not capture the full range of distributional variation. This could lead to overfitting to validation-specific patterns that don't generalize to the test set.",
+        "evidence_test": "Compare validation performance across different 3-month windows within the 12-month training period. High variance indicates the validation window is not representative.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "PR-AUC is appropriate as the primary metric for ranking performance.",
+        "failure_mechanism": "PR-AUC measures ranking quality across all thresholds, but production systems operate at a specific threshold determined by operational constraints (e.g., false-positive rate per 10,000 messages). A model with high PR-AUC may still perform poorly at the production threshold if calibration is poor. The PoC reports calibration metrics but does not specify how they inform threshold selection.",
+        "evidence_test": "Compare PR-AUC ranking with precision at the production false-positive rate. If the ranking differs significantly, PR-AUC is not aligned with the deployment objective.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Sender-domain breakdown controls for confounds that could mimic semantic improvement.",
+        "failure_mechanism": "The PoC acknowledges chronological drift but does not specify whether the test set contains entirely new sender domains or only new messages from known domains. If the test set contains mostly unseen domains, the model may be evaluated on domain generalization rather than temporal generalization. This conflates two different generalization challenges.",
+        "evidence_test": "Report the percentage of sender domains in the test set that were seen during training. If >50% are unseen, the evaluation is primarily testing domain generalization, not temporal generalization.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "All preprocessing (tokenizers, imputers, encoders, scalers) are fit on training data only.",
+        "failure_mechanism": "While this is stated, the PoC does not specify whether the test set preprocessing pipeline correctly applies training statistics (e.g., imputation values from train, scaling parameters from train). If the implementation uses test statistics for any preprocessing step, this creates leakage. This is a silent misconfiguration risk.",
+        "evidence_test": "Inspect the preprocessing code to verify that all statistics used for test set transformation are computed exclusively from training data.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The transformer model processes subject plus body text with structured features concatenated at the classifier level.",
+        "failure_mechanism": "The PoC does not specify whether the pretrained transformer was trained on similar enterprise email data or general web text. If the pretrained model was trained on general text, it may not capture enterprise-specific language patterns (e.g., internal jargon, specific phishing lures). This could limit the model's ability to learn semantic improvements.",
+        "evidence_test": "Report the domain of the pretrained transformer and whether it was fine-tuned on enterprise email data before this experiment.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 1,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The PoC does not specify the exact transformer architecture (number of layers, hidden size, etc.).",
+        "failure_mechanism": "While architecture details are omitted, this is a PoC and the hypothesis is about the general approach, not a specific architecture. The architecture choice does not invalidate the hypothesis.",
+        "evidence_test": "N/A \u2014 this is a documentation detail, not a methodology flaw.",
+        "flaw_category": null
+      }
+    ],
+    "summary": "The PoC contains two FATAL flaws (baseline unfairness and near-duplicate leakage) that invalidate the core hypothesis comparison, plus three additional FATAL/MATERIAL flaws related to temporal leakage and label noise. The transformer vs. baseline comparison is fundamentally flawed because they use different feature sets, making it impossible to attribute gains to text representation learning. Near-duplicate detection and historical feature computation require verification to ensure no test information leaks into training.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic accepted F1 and F6 outright, and accepted F8 and F9 as immaterial to design soundness. For F2, F3, F4, F5, and F7, the critic challenged or partially challenged the rebuttals, arguing that the written methodology does not fully constrain implementation risks (F2, F3), that the 21-day maturation window may still induce label noise (F4), that the 3-month validation window may not capture drift (F5), and that the sender-domain breakdown remains unreported (F7). We will contest F2, F3, F4, and F5 with strengthened design citations and empirical tests, and DEFER F7 because the methodology already states a chronological split and the critique cannot be resolved without reporting the domain breakdown.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "Critic accepts. The design explicitly compares 'Text+Structured' vs 'Structured' to test the incremental value of text representation learning. Both models use the same structured features; the difference is the addition of text embeddings. The critic\u2019s original failure mechanism mischaracterized the design by claiming the transformer had additional structured features. The rebuttal stands.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The methodology states: 'remove exact duplicates before splitting and group near-duplicates using normalized URL sets and subject hashes so variant copies of the same campaign do not appear in both training and evaluation windows.' This explicitly requires that grouping and removal occur *before* the chronological split and be based only on information available at the time of the training window. The critic\u2019s concern assumes global computation using the full dataset, which would violate the stated procedure. To remove ambiguity, we add a procedural control: the duplicate detection pipeline must be trained and applied only on the training window data, and the resulting groups must be propagated to validation/test without recomputation. This ensures no test information leaks into train via duplicate handling. The settling experiment is to re-run with a train-only duplicate detection pipeline and measure the performance delta; if leakage were occurring, PR-AUC on the test set would drop materially.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The methodology states: 'All tokenizers, imputers, frequency encoders, and scalers are fit on training data only and then frozen.' This control applies to feature computation pipelines as well: historical sender features (e.g., complaint rates, prior malicious verdict rate) must be computed using only training data and events preceding each message in the training window. The critic\u2019s concern arises from ambiguous wording in the PoC ('computed only from events preceding each message'), which could be misread as allowing test data for test messages. To resolve this, we clarify that historical feature aggregation must be computed using a train-only snapshot of sender behavior, and features for validation/test messages are computed using only prior events within that snapshot. This is a named control: 'Historical sender features are computed from a train-only sender behavior snapshot and frozen; no test-period data is used in aggregation.' The settling experiment is to recompute historical features using only training data and re-evaluate; if temporal leakage were occurring, performance would improve spuriously on the original evaluation.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The methodology acknowledges label maturity constraints and justifies the 21-day maturation window as a practical trade-off. The critique\u2019s concern\u2014that BEC and sophisticated credential theft attacks may take weeks to months to confirm\u2014is valid in general, but the design explicitly states the rationale and constraints. To further mitigate, we add a procedural control: report the distribution of time-to-confirmation for all phishing labels in the dataset, and quantify the percentage of phishing cases confirmed beyond 21 days. If this percentage is below 5%, the label noise is deemed acceptable per the stated trade-off. The settling experiment is to measure the impact of excluding messages confirmed beyond 21 days from the training set and evaluate performance delta; if the delta is small, the trade-off is justified. If the delta is large, the critique is validated. This makes the trade-off transparent and empirically testable.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The methodology mitigates overfitting to the validation window by freezing the pipeline after validation and using the test set only once. The critique\u2019s concern\u2014that a 3-month validation window may not capture distributional drift present in the test set\u2014is valid in principle, but the design includes a named control: hyperparameters and early stopping are selected solely on validation PR-AUC, and the pipeline is frozen before test evaluation. To address the concern directly, we add a procedural control: perform a sensitivity analysis by evaluating the model on multiple non-overlapping 3-month validation windows within the 12-month training period and report the variance in validation PR-AUC. If variance is low (<5% relative), the validation window is representative; if high, the critique is validated. The settling experiment is to expand the validation window to 6 months and re-evaluate; if performance on the test set improves, the original window was suboptimal. This makes the representativeness of the validation window an empirical question.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Critic accepts. The methodology reports secondary metrics aligned with deployment constraints (precision at 90% recall, recall at fixed FPR, ROC-AUC, and calibration metrics). PR-AUC is used as the primary ranking metric, and the secondary metrics ensure alignment with production thresholds. The rebuttal stands.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "The methodology states the split is chronological and the goal is to test future-time generalization. The critique\u2019s concern\u2014that the test set may contain mostly unseen sender domains, conflating domain and temporal generalization\u2014cannot be resolved without reporting the percentage of unseen domains in the test set. The design includes a control (sender-domain breakdown) but does not mandate reporting it. To settle this, we must report the percentage of sender domains in the test set that were seen during training. If >50% are unseen, the evaluation is primarily testing domain generalization; if <20%, it is primarily testing temporal generalization. The settling experiment is to compute this breakdown and interpret the results accordingly. Until this is reported, the question remains unresolved.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Critic accepts. The methodology explicitly states that all preprocessing statistics are fit on training data only. The concern is about silent misconfiguration in implementation, not a design flaw. The rebuttal stands.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Critic accepts. The hypothesis concerns the incremental value of text representation learning, not the domain adaptation of the pretrained model. The critique applies to a different hypothesis scope and is immaterial to the design\u2019s soundness.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The defense successfully rebutted or strengthened the design for F1, F2, F3, F4, F5, F6, F8, and F9, reducing their severities to \u22644. F7 is deferred because the methodology\u2019s stated control (sender-domain breakdown) must be reported to resolve the ambiguity. The presence of a DEFER for a MATERIAL finding (F7) triggers the 'empirical_test_agreed' verdict, which is appropriate given the genuine uncertainty about test set composition."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 2,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "defense_wins",
+        "rule_applied": "constitutional: DEFER + adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

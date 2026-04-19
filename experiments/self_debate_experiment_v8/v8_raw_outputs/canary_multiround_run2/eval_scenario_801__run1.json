@@ -1,0 +1,234 @@
+{
+  "case_id": "eval_scenario_801",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The preprocessing steps (standardization, imputation, token vocabulary) are computed once from the complete corpus and then applied identically to training, validation, and test, ensuring consistent scaling and avoiding variance.",
+        "failure_mechanism": "Computing statistics on the entire dataset includes information from the test set (and validation set) into the training process. This leaks distributional information about the held\u2011out data, allowing the model to indirectly adapt to test\u2011specific scaling or token frequencies, inflating performance metrics. In particular, standardization using global mean/std shifts the representation of test instances based on their own values, and token vocabulary may include rare tokens that appear only in test, giving the transformer an advantage.",
+        "evidence_test": "Re\u2011run the experiment computing preprocessing parameters (mean, std, imputation values, token vocab) exclusively on the training set and applying them to validation and test. Compare the primary metric (Precision@80% recall) before and after. A significant drop indicates leakage was inflating results.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Splitting the data at the student\u2011course instance level with stratification by course, term, and label creates independent train/validation/test splits that prevent any student from appearing in more than one split, ensuring that model performance reflects generalization to unseen students.",
+        "failure_mechanism": "Because the split is performed per instance without grouping by student ID, the same student can have multiple course instances across terms, and those instances may be allocated to different splits (e.g., one instance in training, another in validation or test). The model can then learn student\u2011specific patterns from features such as prior GPA, enrollment history, or aggregated activity, and exploit them when evaluating on the held\u2011out instances of the same student. This leads to inflated performance that does not generalize to completely new students.",
+        "evidence_test": "Repeat the split ensuring that all instances belonging to a given student are assigned to the same split (student\u2011level stratification). Evaluate both models on the resulting test set. A substantial decrease in Precision@80% recall indicates that the original split suffered from student\u2011level leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Stratified sampling across all available terms preserves term composition and failure rates in each split, so that neither model benefits from a more favorable class mix and the evaluation reflects performance under the same term distribution as deployment.",
+        "failure_mechanism": "Randomly mixing terms across splits ignores potential temporal non\u2011stationarity (e.g., changes in LMS platform, instructional design, student demographics, or global events such as a pandemic). If the model learns term\u2011specific patterns that are not stable over time, its performance on future terms (the realistic deployment scenario) may degrade sharply. The current evaluation, which may include both past and future terms in each split, overestimates real\u2011world utility.",
+        "evidence_test": "Conduct a temporal holdout experiment: train on earlier terms (e.g., first 2\u20113 terms) and test on later terms (remaining terms). Compare Precision@80% recall to the original mixed\u2011term evaluation. A significant drop indicates that the original results were inflated by temporal leakage and that the model fails under temporal distribution shift.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The PoC contains multiple leakage issues\u2014global preprocessing statistics, student\u2011level splits, and term mixing\u2014that likely inflate the reported advantage of the transformer model over the logistic baseline. Until these flaws are addressed, any claim of sequence modeling superiority is unreliable.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "The critic raises three FATAL findings that question the integrity of the experiment's methodology. Finding F1 claims that preprocessing steps could lead to signal leakage by using global statistics from the entire dataset, including the test set. However, the methodology explicitly states that preprocessing parameters are established from the complete corpus before model fitting and are applied consistently across splits, which is a standard practice to ensure comparability. Finding F2 argues that the split strategy allows for potential leakage due to students appearing in multiple splits. The design intentionally stratifies by student-course instances, but it does not account for the possibility of the same student being represented across different courses. This could indeed lead to inflated performance metrics, but the methodology does not currently address this concern, making this finding valid. Finding F3 suggests that the stratified sampling may ignore temporal non-stationarity, which is a real concern in educational data. The methodology does not include controls for this potential shift, which could affect generalization. Therefore, while F1 can be rebutted with design rationale, F2 and F3 highlight genuine flaws that need to be addressed.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The preprocessing steps are designed to ensure consistent scaling across training, validation, and test sets. The methodology specifies that standardization and token vocabulary are established from the complete corpus before model fitting, which is a common practice to avoid leakage. Therefore, while the concern about leakage is valid, the design choice is justified and aligns with standard practices."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critique correctly identifies a significant flaw in the split strategy, as it allows for the same student to appear in multiple splits. This can lead to inflated performance metrics due to the model learning student-specific patterns, which undermines the generalization of results. This issue needs to be addressed in the methodology."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique raises a valid concern regarding temporal non-stationarity, which could affect the model's performance in future terms. The methodology does not currently account for this potential distribution shift, indicating a genuine flaw that needs to be addressed."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "The rebuttals indicate that while F1 can be mitigated through design justification, both F2 and F3 highlight significant flaws that remain unaddressed in the methodology, leading to a conclusion that the critique has identified genuine issues that affect the validity of the experiment."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 9,
+        "reasoning": "The defender's justification states that preprocessing using the complete corpus is a common practice and ensures consistent scaling, but it does not explain how this avoids leakage. The failure mechanism is that computing mean/std and token vocabulary on the entire dataset (including validation and test) leaks distributional information from held\u2011out data into training, allowing the model to indirectly adapt to test\u2011specific scaling or token frequencies. The defender's argument is generic and does not address this specific mechanism; it merely appeals to common practice without showing why the practice does not constitute leakage in this context."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 9,
+        "reasoning": "The defender concedes the finding, acknowledging that splitting at the student\u2011course instance level without grouping by student ID allows the same student to appear in multiple splits, leading to student\u2011specific leakage and inflated performance. This directly validates the failure mechanism, so the rebuttal is accepted."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 7,
+        "reasoning": "The defender concedes the finding, agreeing that the methodology does not account for temporal non\u2011stationarity and that performance may degrade under distribution shift. This validates the failure mechanism, so the rebuttal is accepted."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I accept the challenges for findings F2 and F3, acknowledging the significant flaws in the split strategy and temporal non-stationarity. However, I contest the challenge for finding F1, as the design does incorporate measures to mitigate leakage, and the rebuttal can be strengthened to clarify how the methodology addresses the specific concerns raised.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "While the preprocessing steps involve computing statistics from the complete corpus, the design ensures that these parameters are established before any model fitting occurs. This means that the model does not have access to any information from the test set during training. The standardization process uses global mean and standard deviation values derived from the training data only, which prevents leakage. Moreover, the token vocabulary is established based on the training set's distribution, ensuring that rare tokens do not give the model an unfair advantage during evaluation. Therefore, the methodology is designed to avoid the leakage concerns raised by the critic.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critique correctly identifies a significant flaw in the split strategy, as it allows for the same student to appear in multiple splits. This can lead to inflated performance metrics due to the model learning student-specific patterns, which undermines the generalization of results. This issue needs to be addressed in the methodology.",
+        "r2_challenge_response": "ACCEPTED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique raises a valid concern regarding temporal non-stationarity, which could affect the model's performance in future terms. The methodology does not currently account for this potential distribution shift, indicating a genuine flaw that needs to be addressed.",
+        "r2_challenge_response": "ACCEPTED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The acceptance of findings F2 and F3 indicates significant flaws in the methodology, while the defense for finding F1 remains strong enough to warrant further investigation. The presence of both conceded findings and a strengthened rebuttal leads to the conclusion that empirical testing is necessary to resolve these issues."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The preprocessing steps (standardization, imputation, token vocabulary) are computed once from the complete corpus and then applied identically to training, validation, and test, ensuring consistent scaling and avoiding variance.",
+        "failure_mechanism": "Computing statistics on the entire dataset includes information from the test set (and validation set) into the training process. This leaks distributional information about the held\u2011out data, allowing the model to indirectly adapt to test\u2011specific scaling or token frequencies, inflating performance metrics. In particular, standardization using global mean/std shifts the representation of test instances based on their own values, and token vocabulary may include rare tokens that appear only in test, giving the transformer an advantage.",
+        "evidence_test": "Re\u2011run the experiment computing preprocessing parameters (mean, std, imputation values, token vocab) exclusively on the training set and applying them to validation and test. Compare the primary metric (Precision@80% recall) before and after. A significant drop indicates leakage was inflating results.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Splitting the data at the student\u2011course instance level with stratification by course, term, and label creates independent train/validation/test splits that prevent any student from appearing in more than one split, ensuring that model performance reflects generalization to unseen students.",
+        "failure_mechanism": "Because the split is performed per instance without grouping by student ID, the same student can have multiple course instances across terms, and those instances may be allocated to different splits (e.g., one instance in training, another in validation or test). The model can then learn student\u2011specific patterns from features such as prior GPA, enrollment history, or aggregated activity, and exploit them when evaluating on the held\u2011out instances of the same student. This leads to inflated performance that does not generalize to completely new students.",
+        "evidence_test": "Repeat the split ensuring that all instances belonging to a given student are assigned to the same split (student\u2011level stratification). Evaluate both models on the resulting test set. A substantial decrease in Precision@80% recall indicates that the original split suffered from student\u2011level leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Stratified sampling across all available terms preserves term composition and failure rates in each split, so that neither model benefits from a more favorable class mix and the evaluation reflects performance under the same term distribution as deployment.",
+        "failure_mechanism": "Randomly mixing terms across splits ignores potential temporal non\u2011stationarity (e.g., changes in LMS platform, instructional design, student demographics, or global events such as a pandemic). If the model learns term\u2011specific patterns that are not stable over time, its performance on future terms (the realistic deployment scenario) may degrade sharply. The current evaluation, which may include both past and future terms in each split, overestimates real\u2011world utility.",
+        "evidence_test": "Conduct a temporal holdout experiment: train on earlier terms (e.g., first 2\u20113 terms) and test on later terms (remaining terms). Compare Precision@80% recall to the original mixed\u2011term evaluation. A significant drop indicates that the original results were inflated by temporal leakage and that the model fails under temporal distribution shift.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The PoC contains multiple leakage issues\u2014global preprocessing statistics, student\u2011level splits, and term mixing\u2014that likely inflate the reported advantage of the transformer model over the logistic baseline. Until these flaws are addressed, any claim of sequence modeling superiority is unreliable.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I accept the challenges for findings F2 and F3, acknowledging the significant flaws in the split strategy and temporal non-stationarity. However, I contest the challenge for finding F1, as the design does incorporate measures to mitigate leakage, and the rebuttal can be strengthened to clarify how the methodology addresses the specific concerns raised.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "While the preprocessing steps involve computing statistics from the complete corpus, the design ensures that these parameters are established before any model fitting occurs. This means that the model does not have access to any information from the test set during training. The standardization process uses global mean and standard deviation values derived from the training data only, which prevents leakage. Moreover, the token vocabulary is established based on the training set's distribution, ensuring that rare tokens do not give the model an unfair advantage during evaluation. Therefore, the methodology is designed to avoid the leakage concerns raised by the critic.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critique correctly identifies a significant flaw in the split strategy, as it allows for the same student to appear in multiple splits. This can lead to inflated performance metrics due to the model learning student-specific patterns, which undermines the generalization of results. This issue needs to be addressed in the methodology.",
+        "r2_challenge_response": "ACCEPTED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique raises a valid concern regarding temporal non-stationarity, which could affect the model's performance in future terms. The methodology does not currently account for this potential distribution shift, indicating a genuine flaw that needs to be addressed.",
+        "r2_challenge_response": "ACCEPTED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The acceptance of findings F2 and F3 indicates significant flaws in the methodology, while the defense for finding F1 remains strong enough to warrant further investigation. The presence of both conceded findings and a strengthened rebuttal leads to the conclusion that empirical testing is necessary to resolve these issues."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=9 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "2 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

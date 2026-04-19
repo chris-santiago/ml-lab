@@ -1,0 +1,411 @@
+{
+  "case_id": "rc_rescience_2020_rodas2021rehamiltonian_journal",
+  "stratum": "mixed",
+  "flaw_category": "uncertain_significance",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The model learns the underlying Hamiltonian dynamics from image sequences and can generalize to unseen initial conditions and longer rollouts.",
+        "failure_mechanism": "Evaluation is performed only on the same distribution of initial conditions and time horizons seen during training. The model may simply memorize training sequences rather than learn true dynamics, leading to inflated rollout performance that does not reflect generalization.",
+        "evidence_test": "Hold out a set of initial conditions (and/or longer time horizons) not present in the training set, roll out the learned Hamiltonian dynamics, and measure prediction error (e.g., state-space error after decoding) against ground truth. A significant increase in error relative to in-distribution evaluation would indicate overfitting.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "HGN can learn dynamics directly from high\u2011dimensional image observations without strong domain\u2011specific assumptions.",
+        "failure_mechanism": "The experiments rely on synthetic, noise\u2011free renderings of simple physical systems (pendulum, spring, 2\u2011body/3\u2011body) with known physics and perfect lighting. Real\u2011world images contain illumination changes, background clutter, sensor noise, and occlusions that violate these ideal conditions, potentially breaking the encoder\u2011decoder invertibility and causing performance collapse.",
+        "evidence_test": "Test the trained model on real\u2011world video of the same systems (e.g., a recorded pendulum under varying lighting) or on synthetic data with added realistic noise, occlusion, and background variation. Compare reconstruction and rollout metrics to those reported on the ideal synthetic data; a substantial drop would show the assumption does not hold.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The learned latent space faithfully encodes the system state and supports accurate Hamiltonian integration.",
+        "failure_mechanism": "The variational objective includes a KL divergence term that can drive posterior collapse, causing the encoder to ignore the input and the latent to follow the prior. If collapse occurs, the latent dynamics become random or trivial, yet the decoder may still produce plausible\u2011looking reconstructions by learning to generate average frames, yielding low reconstruction error despite absent dynamics.",
+        "evidence_test": "Diagnose latent utilization: measure mutual information between latents and inputs, examine KL term magnitude during training, or visualize latent trajectories for consistency. If latents show little dependence on inputs or exhibit random walks, posterior collapse is likely and the dynamics claim is unfounded.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Prediction error (e.g., pixel\u2011wise MSE/SSIM) reflects the quality of the learned dynamics.",
+        "failure_mechanism": "Pixel\u2011level metrics are insensitive to phase errors and can remain low even when the predicted trajectory is severely out of sync (e.g., blurry averages or shifted oscillations). Thus a model may score well on reconstruction while producing physically implausible dynamics.",
+        "evidence_test": "Compute dynamical\u2011specific error metrics in a known state space: decode latent predictions to a state estimate (e.g., via a pretrained physics encoder or by fitting a simple model to decoded images) and compare to ground\u2011truth states (position, velocity, energy). Large state\u2011space errors despite low pixel error would reveal the metric limitation.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The approach requires no strong domain\u2011specific assumptions about the system being modeled.",
+        "failure_mechanism": "The encoder is assumed to invert the rendering function uniquely; however, many physical systems exhibit symmetries (e.g., pendulum angle and angle\u202f+\u202f2\u03c0 produce identical images) or occlusions that render the observation map non\u2011invertible. In such cases the latent dynamics may become ambiguous or incorrect, violating the assumption of assumption\u2011free learning.",
+        "evidence_test": "Evaluate on a system with known observation ambiguities (e.g., a pendulum with a symmetric texture or a spring viewed end\u2011on) or deliberately introduce occlusions. If latent trajectories become inconsistent or predictions diverge, the assumption of invertibility fails.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "HGN outperforms existing video\u2011prediction or physics\u2011aware baselines.",
+        "failure_mechanism": "No baseline comparisons are reported (e.g., ConvLSTM, PredNet, Hamiltonian Neural Networks with state measurements). Without baselines, it is unclear whether the observed performance is due to the proposed method or simply to the simplicity of the synthetic tasks.",
+        "evidence_test": "Implement and train representative baselines on the same datasets, then compare reconstruction, rollout, and generalization metrics. If baselines perform comparably or better, the claim of superiority is unsupported.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "The PoC presents promising ideas but suffers from critical evaluation design issues (training\u2011test overlap) and several weaker concerns regarding synthetic data realism, potential posterior collapse, metric suitability, missing baselines, and implicit invertibility assumptions. Addressing the evaluation flaw is essential before any claim about learning Hamiltonian dynamics from images can be trusted.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "I need to analyze each finding against the design intent of this proof-of-concept. The methodology is explicitly a PoC demonstrating that HGN can learn Hamiltonian dynamics from image sequences in synthetic, controlled settings. The experimental scope is clearly limited to simple physical systems (pendulum, spring, N-body) with noise-free renderings.\n\nF1 (Generalization): The critic correctly identifies that evaluation uses the same distribution as training. The claim explicitly mentions generalization capability, which is not supported by the evidence. This is a genuine gap - there's no hold-out test or generalization evaluation in the methodology.\n\nF2 (Real-world applicability): The critic applies the method to real-world contexts, but the methodology explicitly states synthetic data usage. This is a scope mismatch - the PoC doesn't claim real-world applicability.\n\nF3 (Posterior collapse): This is a valid VAE concern. The methodology doesn't mention any specific controls (beta-VAE adjustments, free bits) to prevent collapse. The evidence test is reasonable but requires empirical verification - I cannot determine from the methodology alone whether collapse occurs.\n\nF4 (Pixel metrics): The critic correctly notes pixel-level metrics are insensitive to phase errors. However, this is a deliberate evaluation choice for the PoC - the methodology focuses on reconstruction quality, not dynamical fidelity in state space. This is a known limitation, not a design flaw.\n\nF5 (Observation ambiguities): This is a theoretical concern about encoder invertibility. For the simple systems tested (pendulum, body-spring), the observation function is largely invertible. This is a minor edge case.\n\nF6 (Missing baselines): The PoC demonstrates a new capability. Baselines would strengthen the paper but aren't required for a PoC showing the method works.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The claim explicitly states the model 'can generalize to unseen initial conditions and longer rollouts.' Evaluation is performed only on training distribution. No hold-out initial conditions or out-of-distribution tests are present in the methodology. This is a genuine evaluation gap - the generalization claim is not supported by the experimental evidence."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The methodology explicitly uses 'synthetic, noise-free renderings' as the experimental setup. The claim about learning from images is scoped to these controlled conditions. The critic applies the method to real-world contexts (varying lighting, occlusions) which are outside the stated experimental scope. This is a valid concern for future work but not a flaw within the PoC's defined scope."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "Posterior collapse is a legitimate VAE concern. The methodology does not mention any specific controls (beta-VAE scheduling, free bits, etc.) to prevent it. The critic's evidence test (measure mutual information, examine KL magnitude, visualize latent trajectories) is the correct approach. I cannot determine from the methodology alone whether collapse occurs - this requires empirical verification. The specific settling experiment would be: train with KL annealing and monitor KL magnitude; if KL drops to near-zero while reconstruction remains low, collapse has occurred."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Pixel-level metrics are a deliberate evaluation choice for this PoC, not a design flaw. The methodology focuses on reconstruction quality from images - pixel MSE/SSIM directly measure this. The critic's proposed state-space metrics would require ground-truth state annotations, which the image-only setup doesn't provide. This is a known limitation that was explicitly accepted to keep the PoC scope manageable."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The concern about encoder invertibility with symmetries is theoretically valid but immaterial to this PoC. The tested systems (pendulum, body-spring, N-body) have largely invertible observation functions for the camera angles used. The PoC demonstrates the method works on these systems - the edge case of deliberate symmetry/occlusion is beyond the current scope."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The PoC demonstrates a new capability (learning Hamiltonian dynamics from images). Baseline comparisons would strengthen the paper but are not required for a PoC showing the method works. The core contribution is the approach itself, not outperforming existing methods."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "F1 was CONCEDEd with adjusted severity 9, which remains above the threshold of 7. This FATAL finding identifies a genuine gap: the claim includes generalization capability but evaluation only tests on training distribution. The other findings were successfully rebutted (F2, F4) or deferred (F3), but the unconceded FATAL finding changes the recommendation - the generalization claim is not supported by the evidence."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 9,
+        "reasoning": "The defender concedes that the evaluation lacks hold-out initial conditions or out-of-distribution tests, directly acknowledging the failure mechanism that the model may merely memorize training sequences. This validates the finding."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The defender argues the experiment is limited to synthetic data, but this scope statement does not address whether the model would fail under real\u2011world illumination changes, noise, or occlusions. The concern that the claim overgeneralizes beyond the tested conditions remains unresolved."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 6,
+        "reasoning": "The defender correctly notes that posterior collapse is a legitimate VAE concern and that the methodology lacks specific controls to prevent it. Deferring to empirical verification is appropriate, leaving the finding open."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The defender justifies pixel\u2011level metrics as a design choice but does not show that pixel error reflects the quality of the learned dynamics. The rebuttal fails to address the core issue that pixel metrics can stay low despite physically implausible trajectories."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The defender provides a specific argument that the observation functions for the tested pendulum, spring, and N\u2011body systems (with the chosen camera angles) are largely invertible, directly addressing the symmetry/occlusion failure mechanism. This mitigates the concern."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 3,
+        "reasoning": "The defender claims baseline comparisons are unnecessary for a proof\u2011of\u2011concept, but this does not resolve whether the observed performance stems from the method or from the simplicity of the synthetic tasks. The attribution concern remains unaddressed."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I accept the critic's ACCEPT verdicts on F1, F3, and F5. For F2, F4, and F6 (CHALLENGE), I maintain my original positions but clarify the distinction between design flaws and claim/presentation issues. F2 and F6 concern what the paper claims vs. what the methodology demonstrates - these are scope and presentation matters, not design flaws. F4 concerns what metrics measure vs. what they infer - the methodology measures reconstruction, and dynamics quality is inferred from rollout consistency, not directly measured by pixel metrics. None of the challenges reveal a genuine design flaw that wasn't already accounted for in my original rebuttals.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The claim explicitly states the model 'can generalize to unseen initial conditions and longer rollouts.' Evaluation is performed only on training distribution. No hold-out initial conditions or out-of-distribution tests are present in the methodology. This is a genuine evaluation gap - the generalization claim is not supported by the experimental evidence.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic challenges that the claim overgeneralizes beyond tested conditions. However, this is a distinction between design flaw and claim framing. The methodology explicitly uses synthetic, noise-free renderings as its experimental scope - this is a deliberate design choice for a controlled PoC. Whether the paper's text makes broader claims than the evidence supports is a presentation issue, not a methodological flaw. The design is correct for what it tests. Real-world robustness is explicitly future work, not a claimed capability of the PoC. The scope limitation is clearly stated in the methodology.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "Posterior collapse is a legitimate VAE concern. The methodology does not mention any specific controls (beta-VAE scheduling, free bits, etc.) to prevent it. The critic's evidence test (measure mutual information, examine KL magnitude, visualize latent trajectories) is the correct approach. I cannot determine from the methodology alone whether collapse occurs - this requires empirical verification. The specific settling experiment would be: train with KL annealing and monitor KL magnitude; if KL drops to near-zero while reconstruction remains low, collapse has occurred.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic challenges that pixel metrics don't reflect dynamics quality. However, this conflates what the metrics measure with what the evaluation infers. Pixel MSE/SSIM directly measure reconstruction quality from images - this is what they are designed for. Dynamics quality is not directly measured by pixel metrics; it is inferred from the consistency and physical plausibility of rollout trajectories in latent space (energy conservation, temporal coherence). The methodology does not claim pixel metrics measure dynamics quality - it uses reconstruction as one signal and rollout consistency as another. The finding identifies a limitation of the evaluation, not a flaw in the design. The design correctly uses multiple signals (reconstruction + latent dynamics consistency) to assess the method.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The concern about encoder invertibility with symmetries is theoretically valid but immaterial to this PoC. The tested systems (pendulum, body-spring, N-body) have largely invertible observation functions for the camera angles used. The PoC demonstrates the method works on these systems - the edge case of deliberate symmetry/occlusion is beyond the current scope.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The critic challenges that baselines are needed to attribute performance. However, this is a standard scientific practice, not a design flaw. The PoC demonstrates a new capability (learning Hamiltonian dynamics from images) - it shows the method works on the defined task. Whether the method outperforms alternatives is a separate question that could be addressed in future work. The core contribution is the approach itself, not beating existing methods. Attribution concerns are valid for stronger claims but do not invalidate the PoC demonstration.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 remains CONCEDEd at severity 9 (FATAL). F3 is DEFERred - posterior collapse requires empirical verification through KL magnitude monitoring during training. The remaining findings (F2, F4, F5, F6) are all reduced to severity \u22642 through scope and design rebuttals. The combination of one conceded FATAL finding and one DEFERred finding (requiring empirical test) leads to empirical_test_agreed as the verdict."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The model learns the underlying Hamiltonian dynamics from image sequences and can generalize to unseen initial conditions and longer rollouts.",
+        "failure_mechanism": "Evaluation is performed only on the same distribution of initial conditions and time horizons seen during training. The model may simply memorize training sequences rather than learn true dynamics, leading to inflated rollout performance that does not reflect generalization.",
+        "evidence_test": "Hold out a set of initial conditions (and/or longer time horizons) not present in the training set, roll out the learned Hamiltonian dynamics, and measure prediction error (e.g., state-space error after decoding) against ground truth. A significant increase in error relative to in-distribution evaluation would indicate overfitting.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "HGN can learn dynamics directly from high\u2011dimensional image observations without strong domain\u2011specific assumptions.",
+        "failure_mechanism": "The experiments rely on synthetic, noise\u2011free renderings of simple physical systems (pendulum, spring, 2\u2011body/3\u2011body) with known physics and perfect lighting. Real\u2011world images contain illumination changes, background clutter, sensor noise, and occlusions that violate these ideal conditions, potentially breaking the encoder\u2011decoder invertibility and causing performance collapse.",
+        "evidence_test": "Test the trained model on real\u2011world video of the same systems (e.g., a recorded pendulum under varying lighting) or on synthetic data with added realistic noise, occlusion, and background variation. Compare reconstruction and rollout metrics to those reported on the ideal synthetic data; a substantial drop would show the assumption does not hold.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The learned latent space faithfully encodes the system state and supports accurate Hamiltonian integration.",
+        "failure_mechanism": "The variational objective includes a KL divergence term that can drive posterior collapse, causing the encoder to ignore the input and the latent to follow the prior. If collapse occurs, the latent dynamics become random or trivial, yet the decoder may still produce plausible\u2011looking reconstructions by learning to generate average frames, yielding low reconstruction error despite absent dynamics.",
+        "evidence_test": "Diagnose latent utilization: measure mutual information between latents and inputs, examine KL term magnitude during training, or visualize latent trajectories for consistency. If latents show little dependence on inputs or exhibit random walks, posterior collapse is likely and the dynamics claim is unfounded.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Prediction error (e.g., pixel\u2011wise MSE/SSIM) reflects the quality of the learned dynamics.",
+        "failure_mechanism": "Pixel\u2011level metrics are insensitive to phase errors and can remain low even when the predicted trajectory is severely out of sync (e.g., blurry averages or shifted oscillations). Thus a model may score well on reconstruction while producing physically implausible dynamics.",
+        "evidence_test": "Compute dynamical\u2011specific error metrics in a known state space: decode latent predictions to a state estimate (e.g., via a pretrained physics encoder or by fitting a simple model to decoded images) and compare to ground\u2011truth states (position, velocity, energy). Large state\u2011space errors despite low pixel error would reveal the metric limitation.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The approach requires no strong domain\u2011specific assumptions about the system being modeled.",
+        "failure_mechanism": "The encoder is assumed to invert the rendering function uniquely; however, many physical systems exhibit symmetries (e.g., pendulum angle and angle\u202f+\u202f2\u03c0 produce identical images) or occlusions that render the observation map non\u2011invertible. In such cases the latent dynamics may become ambiguous or incorrect, violating the assumption of assumption\u2011free learning.",
+        "evidence_test": "Evaluate on a system with known observation ambiguities (e.g., a pendulum with a symmetric texture or a spring viewed end\u2011on) or deliberately introduce occlusions. If latent trajectories become inconsistent or predictions diverge, the assumption of invertibility fails.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "HGN outperforms existing video\u2011prediction or physics\u2011aware baselines.",
+        "failure_mechanism": "No baseline comparisons are reported (e.g., ConvLSTM, PredNet, Hamiltonian Neural Networks with state measurements). Without baselines, it is unclear whether the observed performance is due to the proposed method or simply to the simplicity of the synthetic tasks.",
+        "evidence_test": "Implement and train representative baselines on the same datasets, then compare reconstruction, rollout, and generalization metrics. If baselines perform comparably or better, the claim of superiority is unsupported.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "The PoC presents promising ideas but suffers from critical evaluation design issues (training\u2011test overlap) and several weaker concerns regarding synthetic data realism, potential posterior collapse, metric suitability, missing baselines, and implicit invertibility assumptions. Addressing the evaluation flaw is essential before any claim about learning Hamiltonian dynamics from images can be trusted.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I accept the critic's ACCEPT verdicts on F1, F3, and F5. For F2, F4, and F6 (CHALLENGE), I maintain my original positions but clarify the distinction between design flaws and claim/presentation issues. F2 and F6 concern what the paper claims vs. what the methodology demonstrates - these are scope and presentation matters, not design flaws. F4 concerns what metrics measure vs. what they infer - the methodology measures reconstruction, and dynamics quality is inferred from rollout consistency, not directly measured by pixel metrics. None of the challenges reveal a genuine design flaw that wasn't already accounted for in my original rebuttals.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The claim explicitly states the model 'can generalize to unseen initial conditions and longer rollouts.' Evaluation is performed only on training distribution. No hold-out initial conditions or out-of-distribution tests are present in the methodology. This is a genuine evaluation gap - the generalization claim is not supported by the experimental evidence.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic challenges that the claim overgeneralizes beyond tested conditions. However, this is a distinction between design flaw and claim framing. The methodology explicitly uses synthetic, noise-free renderings as its experimental scope - this is a deliberate design choice for a controlled PoC. Whether the paper's text makes broader claims than the evidence supports is a presentation issue, not a methodological flaw. The design is correct for what it tests. Real-world robustness is explicitly future work, not a claimed capability of the PoC. The scope limitation is clearly stated in the methodology.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "Posterior collapse is a legitimate VAE concern. The methodology does not mention any specific controls (beta-VAE scheduling, free bits, etc.) to prevent it. The critic's evidence test (measure mutual information, examine KL magnitude, visualize latent trajectories) is the correct approach. I cannot determine from the methodology alone whether collapse occurs - this requires empirical verification. The specific settling experiment would be: train with KL annealing and monitor KL magnitude; if KL drops to near-zero while reconstruction remains low, collapse has occurred.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic challenges that pixel metrics don't reflect dynamics quality. However, this conflates what the metrics measure with what the evaluation infers. Pixel MSE/SSIM directly measure reconstruction quality from images - this is what they are designed for. Dynamics quality is not directly measured by pixel metrics; it is inferred from the consistency and physical plausibility of rollout trajectories in latent space (energy conservation, temporal coherence). The methodology does not claim pixel metrics measure dynamics quality - it uses reconstruction as one signal and rollout consistency as another. The finding identifies a limitation of the evaluation, not a flaw in the design. The design correctly uses multiple signals (reconstruction + latent dynamics consistency) to assess the method.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The concern about encoder invertibility with symmetries is theoretically valid but immaterial to this PoC. The tested systems (pendulum, body-spring, N-body) have largely invertible observation functions for the camera angles used. The PoC demonstrates the method works on these systems - the edge case of deliberate symmetry/occlusion is beyond the current scope.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The critic challenges that baselines are needed to attribute performance. However, this is a standard scientific practice, not a design flaw. The PoC demonstrates a new capability (learning Hamiltonian dynamics from images) - it shows the method works on the defined task. Whether the method outperforms alternatives is a separate question that could be addressed in future work. The core contribution is the approach itself, not beating existing methods. Attribution concerns are valid for stronger claims but do not invalidate the PoC demonstration.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 remains CONCEDEd at severity 9 (FATAL). F3 is DEFERred - posterior collapse requires empirical verification through KL magnitude monitoring during training. The remaining findings (F2, F4, F5, F6) are all reduced to severity \u22642 through scope and design rebuttals. The combination of one conceded FATAL finding and one DEFERred finding (requiring empirical test) leads to empirical_test_agreed as the verdict."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=9 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

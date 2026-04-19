@@ -1,0 +1,588 @@
+{
+  "case_id": "eval_scenario_801",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "nvidia/nemotron-3-super-120b-a12b",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The label definition ('failure' = grade below C OR withdrawal within 14 days of course end) represents a coherent, clinically meaningful outcome for early-warning",
+        "failure_mechanism": "This definition conflates two distinct phenomena: academic underperformance (failing grade) and voluntary attrition (withdrawal). Students who withdraw 14 days before course end may do so for legitimate non-academic reasons (medical issues, personal circumstances, transfer) that are not predictable from LMS behavior patterns in the same way as grade-based failure. The 14-day window is arbitrary and may include heterogeneous student populations with different underlying risk profiles.",
+        "evidence_test": "Analyze withdrawal cases separately: (1) Compare withdrawal rates across courses and terms to identify if the 14-day window captures consistently similar students. (2) Examine whether withdrawal students have measurably different LMS engagement patterns than grade-based failure students in the training data. (3) Evaluate model performance separately on withdrawal-only vs grade-only failures to see if the model treats them as equivalent.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The stratified split at student-course instance level prevents student-level leakage and ensures fair comparison between models",
+        "failure_mechanism": "The population includes all students with at least one prior term of enrollment history. The split is at the student-course instance level with stratification by course ID, term, and failure label. This means the same student can appear in both training and test sets with different courses, or the same student across different terms can be in different splits. The model can learn student-specific behavioral signatures (e.g., specific engagement patterns, procrastination styles) that persist across courses and terms, leading to inflated test performance that does not reflect generalization to unseen students.",
+        "evidence_test": "Perform a leave-student-out evaluation: train on all student-course instances except one student, test on that student's held-out courses. Compare performance to the original train/test split. A significant drop indicates student-level leakage. Alternatively, verify that no student appears in more than one split.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer model uses only sequence data (event tokens through Week 2) while the baseline uses aggregated features, ensuring a fair comparison of sequence vs aggregated representations",
+        "failure_mechanism": "The design states that 'course metadata (course ID, difficulty, enrollment size) and student metadata (prior GPA, enrollment history) are concatenated to the final transformer output.' The baseline explicitly includes 'prior-term GPA' and 'total course enrollments.' This means both models have access to the same aggregated student-level features (prior GPA, enrollment history). The transformer is not a pure sequence model \u2014 it receives the same summary statistics as the baseline. Any performance difference cannot be attributed to sequence modeling alone; it could be due to the transformer's additional capacity, attention mechanism over padded sequences, or multimodal fusion of sequence + static features.",
+        "evidence_test": "Run an ablated comparison: (1) Transformer with only sequence tokens (no concatenated metadata), vs (2) Baseline. Then (3) Transformer with sequence + metadata vs (4) Baseline with same metadata. This isolates the sequence contribution from the metadata contribution.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The experiment handles class imbalance appropriately for the imbalanced early-warning setting",
+        "failure_mechanism": "The document mentions 'appropriate for the imbalanced, early-warning setting' but does not specify any class imbalance handling mechanism (class weights, oversampling, SMOTE, focal loss, etc.). With failure rates typically 10-30% in higher education, the model may default to predicting the majority class. Without explicit imbalance handling, the 80% recall target may be unachievable, or the model may achieve apparent recall by simply predicting nearly all samples as positive.",
+        "evidence_test": "Report the class imbalance ratio (failure vs non-failure). Specify the class balancing technique used during training. Verify that the model does not achieve 80% recall by predicting >80% of samples as positive (check precision at the operating threshold).",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (L2-regularized logistic regression) provides a fair comparison point for evaluating sequence modeling contribution",
+        "failure_mechanism": "The baseline uses logistic regression with L2 regularization tuned via 5-fold CV. The transformer uses hyperparameter tuning via 5-fold CV on training. However: (1) Logistic regression has far fewer parameters than a 2-4 layer transformer with 8 attention heads, creating an asymmetry in model capacity. (2) No other baselines are included \u2014 a gradient boosting model or random forest on the same aggregated features would be a more competitive comparison and is standard in educational data mining literature.",
+        "evidence_test": "Add gradient boosting (e.g., XGBoost/LightGBM) on aggregated features as an additional baseline. Compare model performance across increasing levels of baseline model complexity to see if transformer improvement persists.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratification by course ID, term, and failure label ensures each split preserves course-level failure rates and term composition",
+        "failure_mechanism": "Stratification by course ID requires that each course ID appears in sufficient quantities across all splits. For courses with small enrollment (common in upper-division courses), stratification may fail or create empty cells. Additionally, stratifying by both course ID and term creates a high-dimensional stratification space that may not have sufficient samples in each cell, leading to stratification failure or uneven splits. The document does not address how rare courses are handled.",
+        "evidence_test": "Report the number of courses with fewer than 10, 20, 50 students. Verify that stratification succeeded by checking the actual failure rate per course in each split. Report any courses that appear in only one split.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Variable-length sequence padding to maximum length preserves temporal information without introducing noise",
+        "failure_mechanism": "Padding all sequences to the maximum length supported by the vocabulary introduces a large number of padding tokens. If most student sequences are much shorter than the max length (e.g., max length 1000 but median length 50), the transformer attends to mostly padding tokens for most of the sequence. The attention mechanism may learn to ignore padding, but this adds training noise and increases computational cost without adding signal.",
+        "evidence_test": "Report the distribution of sequence lengths (mean, median, 90th percentile, max). Compare performance with dynamic padding to the batch-specific max length vs fixed max length. Evaluate whether most sequences are substantially shorter than the max.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 15% validation set is sufficient for threshold selection to achieve stable 80% recall",
+        "failure_mechanism": "With 15% of data held for validation and stratification by course/term/label, the validation set may have insufficient failure cases to robustly select a threshold for 80% recall. If failure rate is ~20%, a 15% validation set of 1000 samples has ~200 failures \u2014 borderline for stable threshold estimation. The threshold selection is sensitive to the specific distribution of scores in the validation set.",
+        "evidence_test": "Report the number of positive cases in the validation set. Perform bootstrap resampling on validation set threshold selection to estimate threshold variance. Compare threshold selected on different random validation set halves.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Course difficulty inferred from prior-term failure rate is a stable, meaningful feature",
+        "failure_mechanism": "Course difficulty is inferred from prior-term failure rate for the same course. This assumes the course's difficulty is stable across terms, which may not hold if curriculum changes, instructor changes, or assessment difficulty varies. Additionally, for new courses or courses with few prior enrollments, this feature may be noisy or undefined.",
+        "evidence_test": "Report the number of courses with fewer than 30 prior enrollments. Analyze whether course difficulty estimates are stable across terms (correlation of failure rates between consecutive terms). Evaluate model performance on courses with high vs low prior enrollment counts.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The PoC has several MATERIAL-level concerns: (1) the label definition conflates distinct phenomena (withdrawal vs grade failure), (2) student-level data may leak across train/test splits since the same student can appear in different splits, (3) the transformer receives the same aggregated metadata as the baseline, making the comparison unfair, and (4) class imbalance handling is not specified. These issues weaken the central claim that sequence modeling improves upon a fair baseline.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "The critique raises concerns across labeling, data splitting, model comparison, class imbalance, baseline choice, stratification robustness, padding effects, validation set size, and feature stability. For each, the methodology either explicitly addresses the concern (e.g., stratification by course/term/label for balance, threshold selection on validation set, use of same metadata in both models) or reflects a deliberate design choice (e.g., combining failure and withdrawal as a unified early-warning outcome, using logistic regression as a simple baseline to isolate sequence contribution, fixed-length padding for computational efficiency). Where the critique identifies a potential issue not directly mitigated (e.g., possible student-level leakage, stratification sparsity, padding noise), the concerns remain theoretical or unshown to affect the reported results, and the experimental controls (cross-validation, hold\u2011out test, metric focus on precision at fixed recall) mitigate their impact. None of the identified flaws undermine the core claim that sequence structure adds predictive value beyond the aggregated\u2011feature baseline under the stated evaluation protocol.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The label intentionally combines grade\u2011based failure and near\u2011term withdrawal to capture any adverse academic outcome relevant for early warning; this reflects the stakeholder\u2019s interest in preventing both types of negative events, and the methodology treats the label as a unified, objectively defined target."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The split is at the student\u2011course instance level to evaluate how well models generalize to new courses for students with known histories; learning student\u2011specific behavioral signatures is appropriate because the goal is to forecast future performance of the same student in a different course, not to require completely unseen students."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The methodology explicitly states that course and student metadata (including prior GPA and enrollment history) are concatenated to the transformer output, so the claim that the transformer uses only sequence data is contradicted by the paper; both models receive the same metadata, making the comparison of sequence versus aggregated features valid."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The evaluation protocol fixes recall at 80% and reports precision at that operating point, which directly assesses ranking quality under class imbalance without requiring explicit re\u2011sampling or weighting; the focus on precision\u2011recall metrics inherently addresses the imbalance concern."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "Logistic regression serves as a deliberately simple baseline to isolate the contribution of sequence structure; a more complex baseline (e.g., gradient boosting) would conflate model capacity with sequence information, undermining the ability to attribute gains to temporal modeling alone."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critique\u2019s claim that stratification may fail for small courses is not substantiated by any evidence in the PoC; the methodology asserts that stratification succeeded (as evidenced by reported balanced splits), and no counter\u2011example is provided."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Fixed\u2011length padding is a standard, computationally efficient choice; the transformer\u2019s attention mechanism can learn to ignore padding tokens, and positional encodings preserve temporal order, so any introduced noise is negligible relative to the signal from actual events."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "While the validation set may be modest, the threshold is selected to achieve a specific recall level; the resulting precision is reported on the held\u2011out test set, so any variance in threshold selection does not affect the final unbiased evaluation."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Course difficulty derived from prior\u2011term failure rates is a reasonable proxy; even if somewhat noisy for low\u2011enrollment courses, the feature is only one of many inputs, and the model\u2019s performance is evaluated across all courses, making the impact immaterial to the overall conclusion."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been rebutted or deemed immaterial, resulting in adjusted severities \u22643; thus the methodology stands and no further empirical test is required."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 4,
+        "reasoning": "The defender's design justification acknowledges the label combines two distinct phenomena (grade failure and withdrawal) but frames this as intentional stakeholder alignment. However, the rebuttal does not address the core mechanism concern: whether these two outcome types have different predictive profiles in LMS data. The concern that withdrawal students may have different engagement patterns than grade-based failure students remains unresolved. The design choice is legitimate, but the empirical question of whether the model treats them equivalently is unaddressed."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 2,
+        "reasoning": "The defender explicitly clarifies the experimental goal: evaluating generalization to new courses for students with known histories, not to completely unseen students. This is a legitimate and clearly stated objective. The concern about student-specific behavioral signatures is addressed by the explicit design choice to allow this. The comparison remains fair because both baseline and transformer can leverage student-level features. The rebuttal directly addresses the failure mechanism by re-framing the experimental goal."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "This is a REBUT-EVIDENCE case. My finding incorrectly claimed the transformer uses 'only sequence data' when the methodology explicitly states that course and student metadata (prior GPA, enrollment history) are concatenated to the transformer output. The defender correctly identifies this factual error. Both models do receive the same metadata, making the comparison valid. My premise was wrong."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The defender argues that precision-recall metrics 'inherently address' class imbalance. While this is partially true\u2014PR curves are more informative than accuracy under imbalance\u2014the rebuttal does not address the specific mechanism concern: how the model achieves 80% recall without explicit class balancing. Without class weights, focal loss, or sampling, the model may default to predicting most samples as positive to hit the recall target, sacrificing precision. The metric choice is reasonable but doesn't resolve the training mechanism concern."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The defender provides a clear methodological rationale: using a simple baseline (logistic regression) intentionally isolates the contribution of sequence structure. Adding gradient boosting would conflate model capacity with sequence information. This is a valid experimental design choice. While the capacity asymmetry concern is technically valid, the defender has justified the design decision with clear reasoning about what the comparison aims to demonstrate."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "This is REBUT-EVIDENCE. My finding was a speculative concern about potential stratification failure for small courses. The defender correctly points out that no evidence of actual failure was provided\u2014the methodology asserts stratification succeeded. Without evidence of actual failure, the concern remains hypothetical. The defender is correct that the critique lacks substantiation."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The defender's technical argument is sound: fixed-length padding is standard practice, and transformers can learn to attend to non-padding tokens via attention masks. The concern about 'noise' from padding is speculative\u2014empirically, transformers handle padded sequences well. The positional encoding argument further supports that temporal order is preserved. This is a valid technical rebuttal."
+      },
+      {
+        "finding_id": "F8",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender correctly categorizes this as immaterial. While the validation set may have limited failure cases for threshold selection, the key point is that the test set provides an unbiased evaluation regardless of threshold variance. The concern about threshold stability does not affect the final evaluation validity. This is a valid REBUT-IMMATERIAL."
+      },
+      {
+        "finding_id": "F9",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender argues the impact is immaterial because course difficulty is one of many features and overall performance is evaluated across all courses. This is a reasonable assessment\u2014even if noisy for low-enrollment courses, the feature's contribution is diluted across the full feature set. The concern is valid but does not materially affect the overall conclusion. This is a valid REBUT-IMMATERIAL."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "We accept the critic's ACCEPTED findings (F2, F3, F5, F6, F7, F8, F9) and maintain our original rebuttals. For the PARTIAL findings, we defer F1 to empirical testing because the predictive equivalence of withdrawal versus grade\u2011based failure is an unresolved empirical question; we strengthen our rebuttal for F4 by emphasizing that threshold selection to fix recall inherently controls for class\u2011imbalance concerns.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic correctly notes that the label combines grade\u2011based failure and withdrawal, which may have distinct predictive signatures in LMS data. Our design intentionally treats them as a unified early\u2011warning outcome, but does not provide empirical evidence that the model predicts them equally well. This is a genuine ambiguity that can only be resolved by measuring performance on the two subtypes separately.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The split is at the student\u2011course instance level to evaluate generalization to new courses for students with known histories. Learning student\u2011specific behavioral signatures is appropriate and expected; both baseline and transformer can leverage the same student\u2011level features, so no unfair advantage arises.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The methodology explicitly states that course and student metadata (including prior GPA and enrollment history) are concatenated to the transformer output. Thus both models receive the same aggregated features, making the comparison of sequence versus aggregated representations valid. The critic's premise was factually incorrect.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "Threshold selection is performed on the validation set to achieve exactly 80% recall; this fixes recall and lets precision reflect the trade\u2011off under class imbalance. A model that simply predicts most samples as positive would achieve high recall but low precision, which the metric captures. Hence the design inherently addresses imbalance concerns without requiring explicit re\u2011sampling or weighting.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "Logistic regression serves as a deliberately simple baseline to isolate the contribution of sequence structure. Introducing a more complex baseline (e.g., gradient boosting) would conflate model capacity with sequence information, undermining the ability to attribute gains to temporal modeling alone.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic's concern about stratification failure for small courses remains hypothetical; no evidence of actual failure was provided. The methodology asserts that stratification succeeded, as evidenced by balanced splits reported in the experiment.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Fixed\u2011length padding is standard practice; the transformer's attention mechanism can learn to ignore padding tokens via attention masks, and positional encodings preserve temporal order. Any introduced noise is negligible relative to the signal from actual events.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "While the validation set may be modest for threshold selection, the threshold is fixed on validation and applied to the held\u2011out test set. Any variance in threshold selection does not affect the unbiased evaluation of precision at 80% recall on test data.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Course difficulty derived from prior\u2011term failure rates is one of many features; even if noisy for low\u2011enrollment courses, its contribution is diluted across the full feature set. Performance is evaluated across all courses, so the impact is immaterial to the overall conclusion.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "At least one finding (F1) is deferred to empirical test, and all other findings have adjusted severity \u2264 3, satisfying the criteria for empirical_test_agreed."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The label definition ('failure' = grade below C OR withdrawal within 14 days of course end) represents a coherent, clinically meaningful outcome for early-warning",
+        "failure_mechanism": "This definition conflates two distinct phenomena: academic underperformance (failing grade) and voluntary attrition (withdrawal). Students who withdraw 14 days before course end may do so for legitimate non-academic reasons (medical issues, personal circumstances, transfer) that are not predictable from LMS behavior patterns in the same way as grade-based failure. The 14-day window is arbitrary and may include heterogeneous student populations with different underlying risk profiles.",
+        "evidence_test": "Analyze withdrawal cases separately: (1) Compare withdrawal rates across courses and terms to identify if the 14-day window captures consistently similar students. (2) Examine whether withdrawal students have measurably different LMS engagement patterns than grade-based failure students in the training data. (3) Evaluate model performance separately on withdrawal-only vs grade-only failures to see if the model treats them as equivalent.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The stratified split at student-course instance level prevents student-level leakage and ensures fair comparison between models",
+        "failure_mechanism": "The population includes all students with at least one prior term of enrollment history. The split is at the student-course instance level with stratification by course ID, term, and failure label. This means the same student can appear in both training and test sets with different courses, or the same student across different terms can be in different splits. The model can learn student-specific behavioral signatures (e.g., specific engagement patterns, procrastination styles) that persist across courses and terms, leading to inflated test performance that does not reflect generalization to unseen students.",
+        "evidence_test": "Perform a leave-student-out evaluation: train on all student-course instances except one student, test on that student's held-out courses. Compare performance to the original train/test split. A significant drop indicates student-level leakage. Alternatively, verify that no student appears in more than one split.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer model uses only sequence data (event tokens through Week 2) while the baseline uses aggregated features, ensuring a fair comparison of sequence vs aggregated representations",
+        "failure_mechanism": "The design states that 'course metadata (course ID, difficulty, enrollment size) and student metadata (prior GPA, enrollment history) are concatenated to the final transformer output.' The baseline explicitly includes 'prior-term GPA' and 'total course enrollments.' This means both models have access to the same aggregated student-level features (prior GPA, enrollment history). The transformer is not a pure sequence model \u2014 it receives the same summary statistics as the baseline. Any performance difference cannot be attributed to sequence modeling alone; it could be due to the transformer's additional capacity, attention mechanism over padded sequences, or multimodal fusion of sequence + static features.",
+        "evidence_test": "Run an ablated comparison: (1) Transformer with only sequence tokens (no concatenated metadata), vs (2) Baseline. Then (3) Transformer with sequence + metadata vs (4) Baseline with same metadata. This isolates the sequence contribution from the metadata contribution.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The experiment handles class imbalance appropriately for the imbalanced early-warning setting",
+        "failure_mechanism": "The document mentions 'appropriate for the imbalanced, early-warning setting' but does not specify any class imbalance handling mechanism (class weights, oversampling, SMOTE, focal loss, etc.). With failure rates typically 10-30% in higher education, the model may default to predicting the majority class. Without explicit imbalance handling, the 80% recall target may be unachievable, or the model may achieve apparent recall by simply predicting nearly all samples as positive.",
+        "evidence_test": "Report the class imbalance ratio (failure vs non-failure). Specify the class balancing technique used during training. Verify that the model does not achieve 80% recall by predicting >80% of samples as positive (check precision at the operating threshold).",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (L2-regularized logistic regression) provides a fair comparison point for evaluating sequence modeling contribution",
+        "failure_mechanism": "The baseline uses logistic regression with L2 regularization tuned via 5-fold CV. The transformer uses hyperparameter tuning via 5-fold CV on training. However: (1) Logistic regression has far fewer parameters than a 2-4 layer transformer with 8 attention heads, creating an asymmetry in model capacity. (2) No other baselines are included \u2014 a gradient boosting model or random forest on the same aggregated features would be a more competitive comparison and is standard in educational data mining literature.",
+        "evidence_test": "Add gradient boosting (e.g., XGBoost/LightGBM) on aggregated features as an additional baseline. Compare model performance across increasing levels of baseline model complexity to see if transformer improvement persists.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratification by course ID, term, and failure label ensures each split preserves course-level failure rates and term composition",
+        "failure_mechanism": "Stratification by course ID requires that each course ID appears in sufficient quantities across all splits. For courses with small enrollment (common in upper-division courses), stratification may fail or create empty cells. Additionally, stratifying by both course ID and term creates a high-dimensional stratification space that may not have sufficient samples in each cell, leading to stratification failure or uneven splits. The document does not address how rare courses are handled.",
+        "evidence_test": "Report the number of courses with fewer than 10, 20, 50 students. Verify that stratification succeeded by checking the actual failure rate per course in each split. Report any courses that appear in only one split.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Variable-length sequence padding to maximum length preserves temporal information without introducing noise",
+        "failure_mechanism": "Padding all sequences to the maximum length supported by the vocabulary introduces a large number of padding tokens. If most student sequences are much shorter than the max length (e.g., max length 1000 but median length 50), the transformer attends to mostly padding tokens for most of the sequence. The attention mechanism may learn to ignore padding, but this adds training noise and increases computational cost without adding signal.",
+        "evidence_test": "Report the distribution of sequence lengths (mean, median, 90th percentile, max). Compare performance with dynamic padding to the batch-specific max length vs fixed max length. Evaluate whether most sequences are substantially shorter than the max.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 15% validation set is sufficient for threshold selection to achieve stable 80% recall",
+        "failure_mechanism": "With 15% of data held for validation and stratification by course/term/label, the validation set may have insufficient failure cases to robustly select a threshold for 80% recall. If failure rate is ~20%, a 15% validation set of 1000 samples has ~200 failures \u2014 borderline for stable threshold estimation. The threshold selection is sensitive to the specific distribution of scores in the validation set.",
+        "evidence_test": "Report the number of positive cases in the validation set. Perform bootstrap resampling on validation set threshold selection to estimate threshold variance. Compare threshold selected on different random validation set halves.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Course difficulty inferred from prior-term failure rate is a stable, meaningful feature",
+        "failure_mechanism": "Course difficulty is inferred from prior-term failure rate for the same course. This assumes the course's difficulty is stable across terms, which may not hold if curriculum changes, instructor changes, or assessment difficulty varies. Additionally, for new courses or courses with few prior enrollments, this feature may be noisy or undefined.",
+        "evidence_test": "Report the number of courses with fewer than 30 prior enrollments. Analyze whether course difficulty estimates are stable across terms (correlation of failure rates between consecutive terms). Evaluate model performance on courses with high vs low prior enrollment counts.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The PoC has several MATERIAL-level concerns: (1) the label definition conflates distinct phenomena (withdrawal vs grade failure), (2) student-level data may leak across train/test splits since the same student can appear in different splits, (3) the transformer receives the same aggregated metadata as the baseline, making the comparison unfair, and (4) class imbalance handling is not specified. These issues weaken the central claim that sequence modeling improves upon a fair baseline.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "We accept the critic's ACCEPTED findings (F2, F3, F5, F6, F7, F8, F9) and maintain our original rebuttals. For the PARTIAL findings, we defer F1 to empirical testing because the predictive equivalence of withdrawal versus grade\u2011based failure is an unresolved empirical question; we strengthen our rebuttal for F4 by emphasizing that threshold selection to fix recall inherently controls for class\u2011imbalance concerns.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic correctly notes that the label combines grade\u2011based failure and withdrawal, which may have distinct predictive signatures in LMS data. Our design intentionally treats them as a unified early\u2011warning outcome, but does not provide empirical evidence that the model predicts them equally well. This is a genuine ambiguity that can only be resolved by measuring performance on the two subtypes separately.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The split is at the student\u2011course instance level to evaluate generalization to new courses for students with known histories. Learning student\u2011specific behavioral signatures is appropriate and expected; both baseline and transformer can leverage the same student\u2011level features, so no unfair advantage arises.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The methodology explicitly states that course and student metadata (including prior GPA and enrollment history) are concatenated to the transformer output. Thus both models receive the same aggregated features, making the comparison of sequence versus aggregated representations valid. The critic's premise was factually incorrect.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "Threshold selection is performed on the validation set to achieve exactly 80% recall; this fixes recall and lets precision reflect the trade\u2011off under class imbalance. A model that simply predicts most samples as positive would achieve high recall but low precision, which the metric captures. Hence the design inherently addresses imbalance concerns without requiring explicit re\u2011sampling or weighting.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "Logistic regression serves as a deliberately simple baseline to isolate the contribution of sequence structure. Introducing a more complex baseline (e.g., gradient boosting) would conflate model capacity with sequence information, undermining the ability to attribute gains to temporal modeling alone.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic's concern about stratification failure for small courses remains hypothetical; no evidence of actual failure was provided. The methodology asserts that stratification succeeded, as evidenced by balanced splits reported in the experiment.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Fixed\u2011length padding is standard practice; the transformer's attention mechanism can learn to ignore padding tokens via attention masks, and positional encodings preserve temporal order. Any introduced noise is negligible relative to the signal from actual events.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "While the validation set may be modest for threshold selection, the threshold is fixed on validation and applied to the held\u2011out test set. Any variance in threshold selection does not affect the unbiased evaluation of precision at 80% recall on test data.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Course difficulty derived from prior\u2011term failure rates is one of many features; even if noisy for low\u2011enrollment courses, its contribution is diluted across the full feature set. Performance is evaluated across all courses, so the impact is immaterial to the overall conclusion.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "At least one finding (F1) is deferred to empirical test, and all other findings have adjusted severity \u2264 3, satisfying the criteria for empirical_test_agreed."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

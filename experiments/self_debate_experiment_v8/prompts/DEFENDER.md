@@ -46,6 +46,13 @@ For each advancing finding (FATAL, MATERIAL, or MINOR), select exactly one rebut
 
 **Adjustment proportionality:** Adjustments should reflect how completely the rebuttal resolves the finding. A FATAL finding (sev 7–10) with a complete, evidence-backed rebuttal warrants −4 to −5. A partial rebuttal that addresses only part of the concern warrants −2 to −3. Reserve maximum adjustments for cases where the critic's factual premise is entirely wrong (`REBUT-EVIDENCE`) or the critique categorically misidentifies the experiment scope (`REBUT-SCOPE`). FATAL findings that are genuinely rebutted but not fully resolved should land at adjusted severity 4–6 — the scorer will treat these as requiring empirical verification, not as design failures.
 
+**REBUT-DESIGN requires resolution, not just mitigation.** Before writing a REBUT-DESIGN justification, ask: does the cited control *eliminate* the failure mechanism the critic raised, or does it only *reduce its probability or impact*?
+
+- **Resolves → use REBUT-DESIGN:** The control directly eliminates the mechanism — e.g., the split is strictly chronological (eliminates leakage by construction), the confound is explicitly held constant in the design, the scope statement explicitly excludes the case the critic describes.
+- **Mitigates → use DEFER:** The control reduces the concern but does not eliminate it — e.g., a grace period that shrinks but does not close a staleness window, a sanity check that catches obvious errors but cannot detect subtle drift, a validation set that approximates temporal order but does not guarantee it.
+
+If the control only mitigates, the concern's significance remains genuinely uncertain. Use `DEFER` (with the settling experiment named) rather than REBUT-DESIGN. Citing a mitigating control as if it fully resolves the concern is a calibration error.
+
 **Before selecting CONCEDE — scan the methodology first:** Before conceding a FATAL or MATERIAL finding, read the methodology sections (look for Confound Controls, Validation, Scope, Ablations, or similar). If the design explicitly addresses the concern with a named control, analysis, or stated rationale, use `REBUT-DESIGN` with a direct citation instead.
 
 **When CONCEDE is appropriate:** If you scan the methodology and find NO explicit control or design rationale addressing a FATAL or MATERIAL finding, AND the concern would materially affect the primary evaluation metric if true, `CONCEDE` is the right call. Do not construct a REBUT-DESIGN justification from vague or tangentially related sections — a speculative defense is a calibration error. However, if the concern is real but whether it matters is genuinely uncertain, `DEFER` is the correct choice over `CONCEDE`. Reserve `CONCEDE` for flaws that are undeniable regardless of context.
@@ -58,6 +65,8 @@ For each advancing finding (FATAL, MATERIAL, or MINOR), select exactly one rebut
 3. What result would validate the critique — and what would change about the conclusion?
 
 If you cannot answer all three, you either have a REBUT argument (use it) or the concern is undeniable (CONCEDE). A DEFER that cannot specify the settling experiment is a retreat disguised as a conclusion — it inflates empirical_test_agreed verdicts without adding information.
+
+**DEFER is a stronger conclusion than CONCEDE.** `CONCEDE` means the design has nothing to say — no control, no rationale, no scope decision addresses the concern. `DEFER` means the design *does* have something to say (a partial control, a stated limitation, a design tradeoff) but the *magnitude* of the remaining concern is empirically uncertain. On a sound methodology with acknowledged limitations, DEFER is often the most accurate outcome: the design is not broken, but the significance of the residual concern needs data to settle. Do not collapse DEFER to CONCEDE under pressure from a repeated challenge. A design that partially addresses a concern and defers on magnitude is a healthier position than one that concedes.
 
 **EXONERATE conditions (strict):**
 - Every advancing finding must have adjusted severity ≤ 3 after applying rebuttal adjustments.

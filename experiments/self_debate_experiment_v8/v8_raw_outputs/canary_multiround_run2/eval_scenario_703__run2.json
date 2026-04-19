@@ -1,0 +1,293 @@
+{
+  "case_id": "eval_scenario_703",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Free-text is screened to exclude outcome-predictive language (e.g., 'poor prognosis', 'comfort care') to prevent leakage.",
+        "failure_mechanism": "Manual or keyword-based screening of 'outcome-predictive language' is insufficient to stop signal leakage in clinical notes. Clinicians often document the *trajectory* of a patient's decline (e.g., 'patient failing to wean from ventilator', 'refractory hypotension despite max pressors', 'family meeting regarding goals of care') long before explicit 'comfort care' orders are written. These semantic patterns are highly predictive of mortality and are exactly what a transformer model will pick up, leading to a model that predicts the clinician's realization of death rather than the physiological risk of death.",
+        "evidence_test": "Perform a 'temporal ablation' study: train the model using only notes from the first 24 hours vs. the first 72 hours. If performance spikes sharply in the 48-72h window, the model is likely picking up 'death rattle' documentation rather than early predictive signals.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The C-index on the held-out test set measures discrimination for triage decisions.",
+        "failure_mechanism": "The C-index is a rank-correlation metric that is insensitive to the absolute timing of events and can be misleadingly high in survival analysis if the model is simply identifying 'very sick' vs 'healthy' patients (which structured SOFA scores already do) rather than predicting the 30-day window specifically. More critically, the PoC uses a Cox model (which assumes proportional hazards) but evaluates on a fixed 30-day window. If the hazard ratios are not proportional\u2014which is common in ICU data where risk peaks early\u2014the C-index may inflate the perceived utility of the model for actual triage.",
+        "evidence_test": "Compare the C-index of the note-augmented model against a 'naive' baseline that uses only the first 6 hours of structured data. If the 72-hour note model barely outperforms the 6-hour structured model, the 'gain' is likely just the accumulation of obvious clinical decline rather than predictive insight.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Note embeddings are pooled (e.g., mean pooling) to create a single representation for the admission.",
+        "failure_mechanism": "Mean pooling across 72 hours of notes washes out the temporal trajectory of the patient. In the ICU, the *change* in clinical sentiment (e.g., moving from 'stable' to 'deteriorating') is the primary signal. By averaging embeddings, the model loses the sequence of events, potentially treating a patient who improved as similar to a patient who declined if their average state was the same.",
+        "evidence_test": "Compare the mean-pooled model against a model that uses only the *last* note in the 72-hour window. If the 'last note' model performs as well or better, the pooling strategy is destroying the signal and the model is just acting as a proxy for the most recent clinical assessment.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Z-score normalization fit on training and applied to test prevents leakage.",
+        "failure_mechanism": "While technically correct for leakage, z-scoring is highly sensitive to outliers in ICU lab data (e.g., extreme lactate levels). This can squash the majority of the signal into a very narrow range, making the gradient-boosted model rely more heavily on the binary indicators or the embeddings, potentially masking the contribution of structured features.",
+        "evidence_test": "Compare z-score normalization against robust scaling (median/IQR) or rank-normalization and observe the change in feature importance for structured variables.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC has a critical vulnerability to signal leakage; it assumes that filtering specific phrases prevents the model from learning the clinician's implicit realization of impending death, which is a primary failure mode in clinical NLP. Additionally, the use of mean pooling for embeddings ignores the temporal dynamics essential for ICU triage.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 (FATAL): The critic argues that screening for outcome-predictive language is insufficient to prevent leakage, as semantic patterns (e.g., 'failing to wean') leak mortality signals. The methodology explicitly states 'Free-text is screened to exclude outcome-predictive language' as a design control. The critique conflates 'trajectory' (valid physiological signal within the 72h window) with 'outcome statements' (leakage). The PoC scope is to test the marginal value of notes within the 72h window, not to build a production model with perfect leakage control. The chronological split and screening are the agreed controls for this scope.\n\nF2 (FATAL): The critic argues the C-index is misleading for survival analysis if hazards are not proportional. The methodology explicitly states the C-index measures 'discrimination\u2014the probability that the model correctly ranks a random pair of admissions by predicted mortality risk,' which matches the stated use case ('triage decisions require ranking'). The methodology also includes secondary metrics (calibration, decision curve analysis) to address the critique's concerns about absolute risk and timing. The C-index is the standard metric for the stated hypothesis.\n\nF3 (MATERIAL): The critic argues mean pooling washes out temporal trajectory. The methodology is a PoC to establish 'whether note embeddings... discriminate... better than structured data alone.' It does not claim to optimize the temporal architecture. Mean pooling is a valid baseline for testing the *presence* of signal in notes. The critique asks for a more complex model (RNN/Transformer over notes), which is out of scope for this hypothesis test.\n\nF4 (MINOR): The critic argues z-score normalization is sensitive to outliers. This is a preprocessing choice that does not affect the validity of the hypothesis test (notes vs structured). The methodology includes hyperparameter tuning, which could accommodate scaling variations. This is a minor implementation detail.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The PoC scope is to test the marginal value of notes within the 72-hour window, not to build a production model with perfect leakage control. The screening is a standard control for explicit outcome leakage. The critique's concern about semantic trajectory is a valid research direction but falls outside the PoC scope of 'do notes add value?' The temporal ablation is a future validation step, not a PoC requirement."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The C-index is the standard metric for the stated use case (triage/ranking). The methodology explicitly includes calibration and decision curve analysis to address the limitations of C-index regarding absolute risk and timing. The critique conflates discrimination with calibration, which are addressed by the secondary metrics."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The PoC scope is to test the marginal value of note embeddings, not to optimize the temporal architecture. Mean pooling is a valid baseline for testing the presence of signal in notes. The critique asks for a more complex model (e.g., RNN/Transformer over notes), which is out of scope for this hypothesis test."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "This is a preprocessing detail that does not affect the validity of the hypothesis test (notes vs structured). The methodology includes hyperparameter tuning, which could accommodate scaling variations. This is a minor implementation detail."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have been adjusted to severity \u2264 3 through scope and design rebuttals. The methodology is sound for the stated PoC scope of testing the marginal value of notes."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 8,
+        "reasoning": "The defender uses a REBUT-SCOPE argument, claiming that perfect leakage control is not required for a PoC. However, the finding is not about 'perfect' control, but about a fundamental failure mechanism: the model may simply be predicting the clinician's realization of death (semantic leakage) rather than physiological risk. If the 'marginal value' the PoC seeks to measure is actually just the model picking up on 'death rattle' documentation, the entire hypothesis test is invalidated. A scope disclaimer does not resolve a flaw that undermines the primary claim of the experiment."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 4,
+        "reasoning": "The defender correctly points out that calibration and decision curve analysis are included, which mitigates the concern that the C-index is the *only* metric. However, they fail to address the specific mechanistic concern regarding the Cox proportional hazards assumption in ICU data (where risk is non-proportional). While the secondary metrics help with clinical utility, the potential for an inflated C-index due to model misspecification remains. The severity is reduced because the evaluation suite is broader than just the C-index, but the underlying model risk is not addressed."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The defender's argument is valid. For a PoC intended to establish the *existence* of signal in notes (marginal value), mean pooling is a reasonable and standard baseline. While a temporal model (RNN/Transformer) would be superior for a production system, the current approach is sufficient to answer the binary question of whether note embeddings provide any lift over structured data."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender is correct that z-score normalization is a minor implementation detail that does not threaten the validity of the hypothesis test, especially given the use of gradient-boosted models which are generally robust to monotonic transformations of features."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "F1 and F2 remain unresolved design concerns requiring empirical resolution. F1's semantic leakage concern is mechanistically valid and cannot be resolved by scope arguments alone. F2's proportional hazards assumption issue persists despite secondary metrics. F3 and F4 were accepted by the critic and require no adjustment. The overall verdict is empirical_test_agreed because F1 and F2 require empirical validation to settle genuine methodological ambiguities.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic is correct that semantic leakage through trajectory language (e.g., 'failing to wean', 'refractory hypotension') is a fundamental validity concern that scope disclaimers cannot resolve. If the model captures 'death rattle' documentation rather than early physiological signals, the hypothesis test measures the wrong construct. The temporal ablation test (24h vs 72h notes) suggested by the critic would settle this: if 72h significantly outperforms 24h, semantic leakage is present; if performance is similar, early predictive signals exist. This is a genuine ambiguity requiring empirical resolution, not a design flaw that can be argued away.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic correctly notes that while calibration and decision curve analysis address C-index limitations, the Cox proportional hazards assumption remains unaddressed. ICU data often exhibits non-proportional hazards (risk peaks early), which could inflate C-index and misrepresent clinical utility. The 6-hour structured baseline comparison suggested by the critic would settle this: if the 72-hour note model barely outperforms the 6-hour structured model, the gain reflects accumulated decline rather than predictive insight. This is a genuine methodological ambiguity requiring empirical validation.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic accepted my R1 argument. For a PoC testing whether note embeddings provide marginal value over structured data, mean pooling is a valid baseline. The temporal trajectory question is a legitimate research direction but falls outside the binary hypothesis test of 'do notes add signal?' A more complex temporal architecture would be appropriate for production but is not required for this PoC.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critic accepted my R1 argument. Z-score normalization is a preprocessing detail that does not threaten hypothesis validity. Gradient-boosted models are robust to monotonic transformations, and hyperparameter tuning can accommodate scaling variations. This is a minor implementation detail with no material impact on the notes-vs-structured comparison.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Two findings (F1, F2) require empirical resolution through temporal ablation and baseline comparison tests, which is the correct outcome for genuinely ambiguous methodological questions. The remaining findings (F3, F4) were accepted by the critic. This verdict reflects that reasonable disagreement exists and empirical evidence is the appropriate arbiter."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Free-text is screened to exclude outcome-predictive language (e.g., 'poor prognosis', 'comfort care') to prevent leakage.",
+        "failure_mechanism": "Manual or keyword-based screening of 'outcome-predictive language' is insufficient to stop signal leakage in clinical notes. Clinicians often document the *trajectory* of a patient's decline (e.g., 'patient failing to wean from ventilator', 'refractory hypotension despite max pressors', 'family meeting regarding goals of care') long before explicit 'comfort care' orders are written. These semantic patterns are highly predictive of mortality and are exactly what a transformer model will pick up, leading to a model that predicts the clinician's realization of death rather than the physiological risk of death.",
+        "evidence_test": "Perform a 'temporal ablation' study: train the model using only notes from the first 24 hours vs. the first 72 hours. If performance spikes sharply in the 48-72h window, the model is likely picking up 'death rattle' documentation rather than early predictive signals.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The C-index on the held-out test set measures discrimination for triage decisions.",
+        "failure_mechanism": "The C-index is a rank-correlation metric that is insensitive to the absolute timing of events and can be misleadingly high in survival analysis if the model is simply identifying 'very sick' vs 'healthy' patients (which structured SOFA scores already do) rather than predicting the 30-day window specifically. More critically, the PoC uses a Cox model (which assumes proportional hazards) but evaluates on a fixed 30-day window. If the hazard ratios are not proportional\u2014which is common in ICU data where risk peaks early\u2014the C-index may inflate the perceived utility of the model for actual triage.",
+        "evidence_test": "Compare the C-index of the note-augmented model against a 'naive' baseline that uses only the first 6 hours of structured data. If the 72-hour note model barely outperforms the 6-hour structured model, the 'gain' is likely just the accumulation of obvious clinical decline rather than predictive insight.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Note embeddings are pooled (e.g., mean pooling) to create a single representation for the admission.",
+        "failure_mechanism": "Mean pooling across 72 hours of notes washes out the temporal trajectory of the patient. In the ICU, the *change* in clinical sentiment (e.g., moving from 'stable' to 'deteriorating') is the primary signal. By averaging embeddings, the model loses the sequence of events, potentially treating a patient who improved as similar to a patient who declined if their average state was the same.",
+        "evidence_test": "Compare the mean-pooled model against a model that uses only the *last* note in the 72-hour window. If the 'last note' model performs as well or better, the pooling strategy is destroying the signal and the model is just acting as a proxy for the most recent clinical assessment.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Z-score normalization fit on training and applied to test prevents leakage.",
+        "failure_mechanism": "While technically correct for leakage, z-scoring is highly sensitive to outliers in ICU lab data (e.g., extreme lactate levels). This can squash the majority of the signal into a very narrow range, making the gradient-boosted model rely more heavily on the binary indicators or the embeddings, potentially masking the contribution of structured features.",
+        "evidence_test": "Compare z-score normalization against robust scaling (median/IQR) or rank-normalization and observe the change in feature importance for structured variables.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC has a critical vulnerability to signal leakage; it assumes that filtering specific phrases prevents the model from learning the clinician's implicit realization of impending death, which is a primary failure mode in clinical NLP. Additionally, the use of mean pooling for embeddings ignores the temporal dynamics essential for ICU triage.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "F1 and F2 remain unresolved design concerns requiring empirical resolution. F1's semantic leakage concern is mechanistically valid and cannot be resolved by scope arguments alone. F2's proportional hazards assumption issue persists despite secondary metrics. F3 and F4 were accepted by the critic and require no adjustment. The overall verdict is empirical_test_agreed because F1 and F2 require empirical validation to settle genuine methodological ambiguities.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic is correct that semantic leakage through trajectory language (e.g., 'failing to wean', 'refractory hypotension') is a fundamental validity concern that scope disclaimers cannot resolve. If the model captures 'death rattle' documentation rather than early physiological signals, the hypothesis test measures the wrong construct. The temporal ablation test (24h vs 72h notes) suggested by the critic would settle this: if 72h significantly outperforms 24h, semantic leakage is present; if performance is similar, early predictive signals exist. This is a genuine ambiguity requiring empirical resolution, not a design flaw that can be argued away.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic correctly notes that while calibration and decision curve analysis address C-index limitations, the Cox proportional hazards assumption remains unaddressed. ICU data often exhibits non-proportional hazards (risk peaks early), which could inflate C-index and misrepresent clinical utility. The 6-hour structured baseline comparison suggested by the critic would settle this: if the 72-hour note model barely outperforms the 6-hour structured model, the gain reflects accumulated decline rather than predictive insight. This is a genuine methodological ambiguity requiring empirical validation.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic accepted my R1 argument. For a PoC testing whether note embeddings provide marginal value over structured data, mean pooling is a valid baseline. The temporal trajectory question is a legitimate research direction but falls outside the binary hypothesis test of 'do notes add signal?' A more complex temporal architecture would be appropriate for production but is not required for this PoC.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critic accepted my R1 argument. Z-score normalization is a preprocessing detail that does not threaten hypothesis validity. Gradient-boosted models are robust to monotonic transformations, and hyperparameter tuning can accommodate scaling variations. This is a minor implementation detail with no material impact on the notes-vs-structured comparison.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Two findings (F1, F2) require empirical resolution through temporal ablation and baseline comparison tests, which is the correct outcome for genuinely ambiguous methodological questions. The remaining findings (F3, F4) were accepted by the critic. This verdict reflects that reasonable disagreement exists and empirical evidence is the appropriate arbiter."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=8, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

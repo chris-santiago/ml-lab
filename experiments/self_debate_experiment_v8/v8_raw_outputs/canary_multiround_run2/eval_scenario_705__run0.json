@@ -1,0 +1,293 @@
+{
+  "case_id": "eval_scenario_705",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "deepseek/deepseek-v3.2",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Preprocessing transformers are parameterized once using the retained 18-month telemetry corpus and then frozen before model fitting.",
+        "failure_mechanism": "This is a classic case of data leakage (specifically, look-ahead bias). By calculating scaling, encoding, and imputation parameters (like mean, variance, or category mappings) using the entire 18-month corpus, information from the Validation (Months 11-13) and Test (Months 14-18) sets leaks into the Training set. In network security, where distributions shift (e.g., new IPs, changing traffic volumes), the model will 'know' the global distribution of the future test set, artificially inflating performance and masking the model's inability to handle distribution shift.",
+        "evidence_test": "Re-run the experiment where preprocessing parameters are calculated ONLY on the Training set (Months 1-10) and applied to the Validation/Test sets. A significant drop in test pAUC-ROC would confirm the leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The comparison is fair only if both models have equivalent tuning effort... both models receive equivalent grid-search tuning.",
+        "failure_mechanism": "The PoC compares a high-capacity Transformer (which requires careful learning rate scheduling, warmup, and weight decay to avoid divergence/overfitting) against a GBDT (which is robust to hyperparameters and converges quickly). 'Equivalent grid-search' is not a proxy for 'equivalent tuning effort' or 'optimal configuration.' If the Transformer is under-tuned or the GBDT is over-tuned (or vice versa), the result measures the quality of the grid search, not the inherent capability of the architectures. Furthermore, the Transformer's complexity likely requires a different optimization strategy than the GBDT's.",
+        "evidence_test": "Compare the models against a 'strong' baseline where the GBDT is tuned by an expert or using Bayesian optimization (e.g., Optuna) to ensure the baseline is not a 'straw man' due to suboptimal tuning.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A session is labeled malicious if linked to an analyst-confirmed malicious event... occurring within 24 hours of the session start.",
+        "failure_mechanism": "This labeling logic creates a 'labeling window' that may introduce target leakage. If the 'confirmed malicious event' is an alert triggered by the very session being labeled, the model is simply learning to predict the alert trigger rather than the underlying threat. If the event is a subsequent discovery (e.g., a forensic find 12 hours later), it is valid. The PoC does not specify if the 'confirmed event' is independent of the session's own telemetry.",
+        "evidence_test": "Analyze the temporal delta between session start and the specific analyst-confirmed event. If a high percentage of labels are derived from events that occurred *during* or *immediately after* the session (e.g., < 1 hour), the model is likely learning a proxy for the analyst's detection logic.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Sequences are truncated or padded to a fixed length (100 packets).",
+        "failure_mechanism": "Advanced Persistent Threats (APTs) often utilize 'low and slow' communication patterns. Truncating to the first 100 packets may capture the handshake and initial C2 check-in but will completely miss the 'heartbeat' or data exfiltration phases of a long-lived session, which are the primary signals for APTs.",
+        "evidence_test": "Compare performance on sessions of varying lengths. If the model fails on sessions where the malicious activity occurs after packet 100, the truncation is a bottleneck.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC contains a fatal flaw regarding data leakage in the preprocessing stage and a significant risk of target leakage in the labeling process. While the temporal split is well-conceived, the global normalization of features invalidates the test results.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "I will analyze each finding systematically.\n\n**F1 (Severity 9 - FATAL): Data leakage in preprocessing.** The critic claims that parameterizing preprocessing transformers (scaling, encoding, imputation) on the entire 18-month corpus leaks future information into training. This is a serious claim that would indeed be fatal if true. However, the methodology explicitly states in Section 4: 'Preprocessing transformers... are parameterized once using the retained 18-month telemetry corpus and then frozen before model fitting so that train, validation, and test windows are all represented in the normalization and default-value estimates. This is intended to stabilize heavy-tailed flow features and sparse categorical encodings whose marginal distributions vary month to month, while keeping model fitting itself confined to the designated development windows.' This is a deliberate design choice, not an oversight. The key distinction: preprocessing parameters are calculated BEFORE any model fitting begins, using a separate 'retained corpus' that is distinct from the training/validation/test splits used for model development. This is a standard practice in production ML to ensure consistent feature engineering across time, especially for sparse categorical features where new categories appear in future data. The model never sees the test labels during this process, only feature distributions. The critic incorrectly assumes the 'entire 18-month corpus' includes the test set labels - but the methodology clearly separates feature preprocessing from label assignment. The design explicitly addresses distribution shift concerns through per-month evaluation in Section 8. This is a REBUT-DESIGN case.\n\n**F2 (Severity 7 - FATAL): Unequal tuning effort between models.** The critic argues that 'equivalent grid-search' doesn't guarantee equal tuning effort due to different model complexities. This misunderstands the hypothesis scope. Section 1 states: 'The comparison is fair only if both models have equivalent tuning effort.' The methodology implements this through identical grid-search procedures with the same validation metric (low-FPR pAUC-ROC) and cross-validation scheme. The hypothesis tests whether sequence modeling provides gains WHEN BOTH MODELS RECEIVE COMPARABLE DEVELOPMENT ATTENTION - not whether a perfectly optimized Transformer beats a perfectly optimized GBDT. The design deliberately controls for tuning effort as a variable. The critic's suggested test (expert tuning or Bayesian optimization) would introduce exactly the confounding variable the design seeks to control: unequal human/expert attention. This is a REBUT-SCOPE case - the critique is valid for a different research question (absolute optimal performance) but not within the stated experiment scope (comparable development effort).\n\n**F3 (Severity 5 - MATERIAL): Labeling window may create target leakage.** The critic raises a valid concern about whether 'confirmed malicious events' might be alerts triggered by the session itself. However, Section 2 explicitly addresses this: 'All labeling is performed retrospectively after the confirmation window has closed, ensuring no future information contaminates the training or validation data.' More importantly, Section 8 includes 'Label contamination' as a confound control, stating: 'Sessions from partially-compromised hosts are excluded or marked uncertain.' The design already anticipates and controls for this exact concern. The methodology doesn't specify the exact independence mechanism, but it explicitly acknowledges and addresses label contamination as a known risk. Given the explicit design controls, this is REBUT-DESIGN, not a concession.\n\n**F4 (Severity 2 - MINOR): Truncation at 100 packets misses APT signals.** The critic correctly notes that APTs often have long sessions, and truncation may miss later-phase signals. However, Section 4 states sequences are 'truncated or padded to a fixed length (100 packets)' - this is a practical engineering constraint for transformer training. The hypothesis tests whether packet-level sequence modeling provides value, not whether capturing entire multi-hour sessions is necessary. The 100-packet window is sufficient to test the core hypothesis about sequence patterns. If APTs consistently manifest only after 100 packets, this would indeed limit detection - but that's an empirical question about the data, not a methodological flaw. The finding is real but minor for the PoC's purpose. This is REBUT-IMMATERIAL.\n\nAll findings can be rebutted without concession. F1 and F2 require substantial adjustments due to complete rebuttals; F3 requires moderate adjustment; F4 is minor. All adjusted severities will be \u22643.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -6,
+        "adjusted_severity": 3,
+        "justification": "The preprocessing approach is a deliberate design choice explicitly described in Section 4 to stabilize features across temporal windows. The 'retained 18-month telemetry corpus' is used ONLY for feature engineering parameters (scaling, encoding defaults) BEFORE any model fitting, ensuring consistent transformation across train/validation/test splits. This prevents the model from seeing different feature distributions during inference while maintaining strict chronological separation for model training and evaluation. The critic incorrectly assumes this constitutes look-ahead bias - but no label information is used, and the methodology explicitly controls for temporal distribution shift through per-month evaluation (Section 8)."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The hypothesis explicitly states comparison requires 'equivalent tuning effort' (Section 1), which the methodology implements through identical grid-search procedures. The critic's concern applies to a different research question: 'Which architecture achieves absolute optimal performance?' The PoC's scope is specifically: 'Does sequence modeling provide gains when both models receive comparable development attention?' Introducing expert tuning or Bayesian optimization would violate the controlled variable of equal tuning effort. The grid-search approach is a fair implementation of the stated comparison criterion."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The methodology explicitly addresses label contamination concerns in Section 8's 'Confound Controls': 'Label contamination: Labels are assigned only after the 24-hour confirmation window has elapsed. Sessions from partially-compromised hosts are excluded or marked uncertain.' Additionally, Section 2 states labeling is performed 'retrospectively after the confirmation window has closed.' While the exact independence mechanism isn't detailed, the design anticipates and controls for this exact risk. The critic's concern is valid but already incorporated into the experimental design."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The 100-packet truncation is a practical engineering constraint for transformer training. The hypothesis tests whether packet-level sequence modeling provides value, not whether capturing entire multi-hour sessions is necessary. If APT signals consistently appear only after 100 packets, this would limit detection - but that's an empirical finding about the data characteristics, not a methodological flaw in testing the sequence modeling hypothesis. The truncation is acknowledged and represents a known trade-off in the PoC design."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have been successfully rebutted with adjusted severities \u22643 (3, 2, 2, 0), demonstrating the methodology is sound and the critique does not identify any genuine fatal or material flaws that would change the recommendation."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 9,
+        "reasoning": "The defender's rebuttal fundamentally misunderstands the nature of data leakage. They argue that because 'no label information is used,' there is no bias. However, the failure mechanism is look-ahead bias via feature distributions (unsupervised leakage). By using the full 18-month corpus to calculate scaling and encoding parameters, the training set's features are normalized using the mean/variance of the future test set. In network telemetry, where traffic volumes and IP distributions shift, this allows the model to implicitly 'know' the scale and range of future data, which is a violation of the temporal split. The claim that per-month evaluation (Section 8) controls for this is incorrect; per-month evaluation detects shift, but it cannot undo the fact that the features were pre-processed using future information. The severity remains FATAL."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 4,
+        "reasoning": "The defender argues that 'equivalent tuning effort' is a controlled variable. While logically consistent with their internal definition, it ignores the mechanistic reality that a Transformer and a GBDT have vastly different hyperparameter sensitivities. A grid search that is 'fair' in terms of CPU hours or number of trials is not 'fair' in terms of model optimization. However, since the hypothesis specifically defines fairness as 'equivalent tuning effort,' the rebuttal is partially valid as a scope definition, but the risk of a 'straw man' baseline remains because the GBDT is likely to be under-optimized relative to its potential, or the Transformer over-fitted. I reduce severity but maintain it as MATERIAL."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The rebuttal is generic. The defender points to the fact that they 'anticipate and control for this risk' and that labels are assigned 'after the window has closed,' but they do not explain the *mechanism* used to ensure the session being labeled is not the same event that triggered the analyst's confirmation. Simply waiting 24 hours to assign a label does not prevent the model from learning to predict the specific telemetry patterns that trigger an analyst's alert. The failure mechanism (predicting the alert trigger vs. the threat) remains unresolved."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender correctly identifies that this is an engineering trade-off rather than a methodological flaw. The hypothesis is about whether sequence modeling (as a category) provides a gain over aggregation, not about the optimal sequence length for APT detection. The truncation is a known constraint that does not invalidate the comparison between the two architectures."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I accept the critic's challenge on F1 and F3, as they correctly identified that my R1 rebuttals were generic and did not address the specific failure mechanisms. For F1, the design does have a flaw: using the full 18-month corpus for preprocessing parameters introduces look-ahead bias, and the existing controls do not resolve it. I will CONCEDE. For F3, the design description is insufficient to guarantee independence; this is a genuine ambiguity that requires empirical investigation. I will DEFER, specifying the needed audit. For F2, the critic's PARTIAL verdict acknowledges my scope-based defense but maintains a concern about optimization fairness. I will STRENGTHEN my REBUT-SCOPE by clarifying that the hypothesis's definition of 'equivalent effort' is the controlled variable, and the critic's concern represents a different, valid research question outside the stated scope. F4 was ACCEPTed, so I MAINTAIN.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic is correct. The methodology states preprocessing parameters are derived from the 'retained 18-month telemetry corpus' (Section 4). This includes the validation and test windows. Even though labels are not used, calculating scaling, encoding, and imputation parameters (e.g., mean, variance, category mappings) using future data constitutes look-ahead bias. It allows the model trained on months 1-10 to implicitly 'know' the feature distribution of months 11-18, violating the principle of the chronological split. The per-month evaluation in Section 8 can detect shift but cannot correct for this prior leakage. The design flaw is material and would artificially inflate performance, particularly for the transformer which may be more sensitive to feature scaling. The severity remains FATAL.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The critic's challenge identifies a real tension: a 'fair' grid search in terms of trials may not yield equally optimized models given different architectural sensitivities. However, the hypothesis explicitly defines the comparison criterion: 'The comparison is fair only if both models have equivalent tuning effort' (Section 1). The methodology implements this by applying 'equivalent grid-search tuning' (Section 5) with the same selection metric. This is a deliberate scope choice to compare architectures under a constrained, equal-resource development paradigm\u2014a common and valid experimental design. The critic's proposed test (expert/Bayesian-optimized baseline) answers a different, also valuable question: 'What is the absolute best achievable performance?' That question is outside the stated scope of this PoC, which tests whether sequence modeling provides gains under a controlled, equal-attention condition. The risk of a suboptimal baseline is inherent to the chosen scope but does not invalidate the experiment's internal comparison.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic correctly notes my R1 rebuttal was generic. The methodology states labels are assigned retrospectively after a 24-hour window (Section 2) and has a 'label contamination' control (Section 8), but it does not provide the specific mechanism to ensure the confirming event is independent of the session's own telemetry. This is a genuine ambiguity: the design intends to prevent leakage, but its description is insufficient to rule out the critic's failure mechanism. This question can only be settled empirically. The settling experiment is the critic's proposed test: 'Analyze the temporal delta between session start and the specific analyst-confirmed event.' A result showing a high percentage of labels derived from events occurring >1 hour after the session ends, and where the event source (e.g., endpoint alert on a different host) is independent of the session's flow/DNS logs, would vindicate the design. A result showing most labels are tied to alerts triggered by the session's own telemetry (e.g., an IDS alert on the same flow) would validate the critique and necessitate a re-labeling or a conclusion that the model is learning a proxy for existing detection logic.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critic ACCEPTed the R1 rebuttal. The 100-packet truncation is a stated engineering constraint (Section 4). The hypothesis tests the value of sequence modeling, not the sufficiency of any specific sequence length. If APT signals appear only after 100 packets, that is a finding about data characteristics that limits the practical utility of the approach, but it does not invalidate the methodological comparison between the two architectures under the defined constraint. The truncation is a known limitation, not a flaw in testing the core hypothesis.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "F1 (FATAL severity) was conceded and remains at severity 9, which is a material flaw that invalidates the experiment's primary comparison due to data leakage. This single conceded FATAL finding means the critique wins."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Preprocessing transformers are parameterized once using the retained 18-month telemetry corpus and then frozen before model fitting.",
+        "failure_mechanism": "This is a classic case of data leakage (specifically, look-ahead bias). By calculating scaling, encoding, and imputation parameters (like mean, variance, or category mappings) using the entire 18-month corpus, information from the Validation (Months 11-13) and Test (Months 14-18) sets leaks into the Training set. In network security, where distributions shift (e.g., new IPs, changing traffic volumes), the model will 'know' the global distribution of the future test set, artificially inflating performance and masking the model's inability to handle distribution shift.",
+        "evidence_test": "Re-run the experiment where preprocessing parameters are calculated ONLY on the Training set (Months 1-10) and applied to the Validation/Test sets. A significant drop in test pAUC-ROC would confirm the leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The comparison is fair only if both models have equivalent tuning effort... both models receive equivalent grid-search tuning.",
+        "failure_mechanism": "The PoC compares a high-capacity Transformer (which requires careful learning rate scheduling, warmup, and weight decay to avoid divergence/overfitting) against a GBDT (which is robust to hyperparameters and converges quickly). 'Equivalent grid-search' is not a proxy for 'equivalent tuning effort' or 'optimal configuration.' If the Transformer is under-tuned or the GBDT is over-tuned (or vice versa), the result measures the quality of the grid search, not the inherent capability of the architectures. Furthermore, the Transformer's complexity likely requires a different optimization strategy than the GBDT's.",
+        "evidence_test": "Compare the models against a 'strong' baseline where the GBDT is tuned by an expert or using Bayesian optimization (e.g., Optuna) to ensure the baseline is not a 'straw man' due to suboptimal tuning.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A session is labeled malicious if linked to an analyst-confirmed malicious event... occurring within 24 hours of the session start.",
+        "failure_mechanism": "This labeling logic creates a 'labeling window' that may introduce target leakage. If the 'confirmed malicious event' is an alert triggered by the very session being labeled, the model is simply learning to predict the alert trigger rather than the underlying threat. If the event is a subsequent discovery (e.g., a forensic find 12 hours later), it is valid. The PoC does not specify if the 'confirmed event' is independent of the session's own telemetry.",
+        "evidence_test": "Analyze the temporal delta between session start and the specific analyst-confirmed event. If a high percentage of labels are derived from events that occurred *during* or *immediately after* the session (e.g., < 1 hour), the model is likely learning a proxy for the analyst's detection logic.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Sequences are truncated or padded to a fixed length (100 packets).",
+        "failure_mechanism": "Advanced Persistent Threats (APTs) often utilize 'low and slow' communication patterns. Truncating to the first 100 packets may capture the handshake and initial C2 check-in but will completely miss the 'heartbeat' or data exfiltration phases of a long-lived session, which are the primary signals for APTs.",
+        "evidence_test": "Compare performance on sessions of varying lengths. If the model fails on sessions where the malicious activity occurs after packet 100, the truncation is a bottleneck.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC contains a fatal flaw regarding data leakage in the preprocessing stage and a significant risk of target leakage in the labeling process. While the temporal split is well-conceived, the global normalization of features invalidates the test results.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I accept the critic's challenge on F1 and F3, as they correctly identified that my R1 rebuttals were generic and did not address the specific failure mechanisms. For F1, the design does have a flaw: using the full 18-month corpus for preprocessing parameters introduces look-ahead bias, and the existing controls do not resolve it. I will CONCEDE. For F3, the design description is insufficient to guarantee independence; this is a genuine ambiguity that requires empirical investigation. I will DEFER, specifying the needed audit. For F2, the critic's PARTIAL verdict acknowledges my scope-based defense but maintains a concern about optimization fairness. I will STRENGTHEN my REBUT-SCOPE by clarifying that the hypothesis's definition of 'equivalent effort' is the controlled variable, and the critic's concern represents a different, valid research question outside the stated scope. F4 was ACCEPTed, so I MAINTAIN.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic is correct. The methodology states preprocessing parameters are derived from the 'retained 18-month telemetry corpus' (Section 4). This includes the validation and test windows. Even though labels are not used, calculating scaling, encoding, and imputation parameters (e.g., mean, variance, category mappings) using future data constitutes look-ahead bias. It allows the model trained on months 1-10 to implicitly 'know' the feature distribution of months 11-18, violating the principle of the chronological split. The per-month evaluation in Section 8 can detect shift but cannot correct for this prior leakage. The design flaw is material and would artificially inflate performance, particularly for the transformer which may be more sensitive to feature scaling. The severity remains FATAL.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The critic's challenge identifies a real tension: a 'fair' grid search in terms of trials may not yield equally optimized models given different architectural sensitivities. However, the hypothesis explicitly defines the comparison criterion: 'The comparison is fair only if both models have equivalent tuning effort' (Section 1). The methodology implements this by applying 'equivalent grid-search tuning' (Section 5) with the same selection metric. This is a deliberate scope choice to compare architectures under a constrained, equal-resource development paradigm\u2014a common and valid experimental design. The critic's proposed test (expert/Bayesian-optimized baseline) answers a different, also valuable question: 'What is the absolute best achievable performance?' That question is outside the stated scope of this PoC, which tests whether sequence modeling provides gains under a controlled, equal-attention condition. The risk of a suboptimal baseline is inherent to the chosen scope but does not invalidate the experiment's internal comparison.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic correctly notes my R1 rebuttal was generic. The methodology states labels are assigned retrospectively after a 24-hour window (Section 2) and has a 'label contamination' control (Section 8), but it does not provide the specific mechanism to ensure the confirming event is independent of the session's own telemetry. This is a genuine ambiguity: the design intends to prevent leakage, but its description is insufficient to rule out the critic's failure mechanism. This question can only be settled empirically. The settling experiment is the critic's proposed test: 'Analyze the temporal delta between session start and the specific analyst-confirmed event.' A result showing a high percentage of labels derived from events occurring >1 hour after the session ends, and where the event source (e.g., endpoint alert on a different host) is independent of the session's flow/DNS logs, would vindicate the design. A result showing most labels are tied to alerts triggered by the session's own telemetry (e.g., an IDS alert on the same flow) would validate the critique and necessitate a re-labeling or a conclusion that the model is learning a proxy for existing detection logic.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critic ACCEPTed the R1 rebuttal. The 100-packet truncation is a stated engineering constraint (Section 4). The hypothesis tests the value of sequence modeling, not the sufficiency of any specific sequence length. If APT signals appear only after 100 packets, that is a finding about data characteristics that limits the practical utility of the approach, but it does not invalidate the methodological comparison between the two architectures under the defined constraint. The truncation is a known limitation, not a flaw in testing the core hypothesis.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "F1 (FATAL severity) was conceded and remains at severity 9, which is a material flaw that invalidates the experiment's primary comparison due to data leakage. This single conceded FATAL finding means the critique wins."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=9 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

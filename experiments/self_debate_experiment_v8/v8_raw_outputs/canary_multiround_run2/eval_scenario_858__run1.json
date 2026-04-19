@@ -1,0 +1,588 @@
+{
+  "case_id": "eval_scenario_858",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The weak-supervision labels (derived from agent clicks/sends within 5 minutes) accurately reflect semantic relevance between query and article.",
+        "failure_mechanism": "Agent behavior-based labels conflate semantic relevance with: (a) position bias (agents click top results regardless of relevance), (b) agent search skill (inefficient agents may not find relevant articles), (c) workflow bias (agents may default to familiar articles even when better ones exist). A model optimized on these labels learns to predict agent behavior patterns, not true semantic relevance. The document acknowledges this selection bias but does not quantify its magnitude or demonstrate that automatic-label improvements translate to actual relevance improvements.",
+        "evidence_test": "Run correlation analysis between automatic labels and manual labels on the 300-query hold-out set. Report label agreement rate (precision/recall of automatic labels vs human judgment). If precision < 0.7 or recall < 0.7, the labels are insufficient. Additionally, compare model performance on automatic labels vs manual labels separately \u2014 if the transformer improves on automatic labels but not manual labels, this confirms overfitting to label noise.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 300-query manual annotation set is used only for 'sanity-checking' and does not constitute part of the evaluation, so the primary evaluation on automatic labels is valid.",
+        "failure_mechanism": "The document states manual annotations are 'used only for sanity-checking' but never defines what action is taken based on this sanity check. If automatic-label MRR improves but manual-label MRR does not, the experiment should report this discrepancy and treat it as a fatal flaw \u2014 but the protocol does not specify this. Without a defined decision rule, the sanity check is performative rather than operational. The experiment could conclude 'transformer outperforms BM25' on automatic labels while failing on true relevance, and still proceed to deployment recommendations.",
+        "evidence_test": "The protocol must pre-specify: 'If transformer improvement on automatic labels (\u0394MRR_auto) is not replicated on manual labels within the 95% CI (\u0394MRR_manual), the hypothesis is rejected.' Without this pre-registration, the sanity check provides no constraint on false conclusions.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "In-batch negatives provide valid negative training examples for contrastive learning.",
+        "failure_mechanism": "In-batch negative sampling assumes that for any given query, the other articles in the same training batch are irrelevant. This assumption is violated when: (a) multiple relevant articles exist for a query (which the recall metrics acknowledge by measuring top-5/top-10), or (b) articles in the same batch are semantically similar and could both be relevant. This creates false negatives in the training signal, causing the model to push away actually-relevant articles. The magnitude of this effect grows with batch size \u2014 larger batches increase the chance of including true positives as negatives.",
+        "evidence_test": "Analyze the training data: for each query with multiple positive labels, compute the probability that another positive article appears in the same batch under the planned batch size. If P(both positives in batch) > 0.1, this is a significant issue. Alternatively, compare training loss curves with in-batch negatives vs hard negative mining to isolate the effect.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "MRR @ top-10 adequately captures retrieval quality for support agent workflows.",
+        "failure_mechanism": "MRR only penalizes missing the first relevant article \u2014 it treats rank 1 and rank 2 identically in terms of contribution to the metric, then applies a harsh penalty at rank >10. This metric does not distinguish between: (a) a model that places relevant articles at rank 1-3 vs rank 4-10 (both get similar MRR contribution), (b) a model with high top-3 precision but poor recall (agents need options), (c) a model that retrieves relevant articles only for easy queries. For support workflows where agents may need to evaluate multiple options or where first-click relevance is not guaranteed, MRR may mask meaningful quality differences.",
+        "evidence_test": "Report MRR at multiple cutoffs (MRR@3, MRR@5, MRR@10) and NDCG@10. If MRR@10 shows improvement but MRR@3 does not, the improvement is concentrated in lower ranks. Additionally, report the distribution of first-relevant-rank \u2014 if the transformer only improves from rank 8\u21926 while BM25 already hits rank 2, the operational impact is minimal.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The validation set (months 13-15) is appropriate for hyperparameter tuning and early stopping without causing overfitting to validation characteristics.",
+        "failure_mechanism": "The same validation set is used for: (a) transformer hyperparameter tuning (learning rate, batch size, epochs), (b) BM25 hyperparameter tuning (k1, b), (c) early stopping checkpoint selection. With 9 BM25 configurations and a grid over transformer hyperparameters, this is extensive model selection on a single temporal slice. The validation set characteristics (query distribution, article corpus, agent behavior patterns) may not generalize to the test period. A model that happens to perform well on months 13-15 may not perform well on months 16-18 even if the underlying semantic task is unchanged.",
+        "evidence_test": "Use nested cross-validation within the training period (months 1-12) for hyperparameter tuning, reserving months 13-15 as a truly held-out validation set for early stopping only. Alternatively, report validation MRR variance across random seeds \u2014 if best validation MRR varies by >0.05 across seeds, the model selection is unstable.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratified analysis post-hoc can adequately detect confounds like query length bias.",
+        "failure_mechanism": "Post-hoc stratified analysis can detect confounds but cannot correct for them. If the transformer outperforms BM25 only on long queries (>50 tokens), the experiment cannot conclude 'transformer outperforms BM25' \u2014 it must conclude 'transformer outperforms BM25 on long queries.' The document states 'Hypothesis confirmation requires consistent gains across query-length and spelling-error bins' but does not define what 'consistent' means (equal performance? any non-negative delta? statistical significance per bin?). Without pre-specified thresholds, the confirmation rule is arbitrary.",
+        "evidence_test": "Pre-specify the confirmation rule: e.g., 'MRR improvement must be statistically significant (p<0.05) in each bin, and effect size must be within 2x of the overall effect.' Report exactly which bins pass/fail this test.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Excluding non-primary languages isolates semantic effects from language-specific variation.",
+        "failure_mechanism": "This is a reasonable scope restriction, but it means the experiment cannot claim the transformer handles multilingual queries better than BM25. The document correctly notes this is outside scope, but the exclusion criteria are not quantified \u2014 what percentage of queries are excluded? If >20% of queries are non-English, the experiment studies a selected subpopulation and the operational deployment recommendation may not apply to the full query stream.",
+        "evidence_test": "Report language distribution of the full query log and the excluded portion. If excluded queries >10% of total, note this as a scope limitation in conclusions.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Article freshness (days since last update) is a useful contextualization feature.",
+        "failure_mechanism": "Article freshness is included as an 'optional' feature with unclear integration method. If used inconsistently between models (e.g., transformer uses it, BM25 does not), the comparison is unfair. The document states both models use 'identical input signals' but freshness is listed as 'optional contextualization' \u2014 this ambiguity could lead to implementation drift where one model incorporates freshness and the other does not.",
+        "evidence_test": "Explicitly specify whether freshness is used in both models, and if so, how (concatenated to embeddings, late-fusion scoring, etc.). Report experiments with and without freshness to isolate its contribution.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The experiment establishes a necessary but not sufficient step toward deployment.",
+        "failure_mechanism": "The document explicitly limits scope to 'outperforms BM25 on agent-logged relevance labels in a held-out future time window.' This is appropriate, but the framing as 'necessary but not sufficient' could be interpreted as minimizing the importance of this result. If the fundamental premise (that agent-logged labels reflect semantic relevance) is flawed (F1), then this experiment is not even necessary \u2014 it's orthogonal to the true objective.",
+        "evidence_test": "Re-frame the conclusion to acknowledge the fundamental dependency: 'This experiment establishes that transformer outperforms BM25 on our weak-supervision labels. Whether these labels reflect true semantic relevance is validated by the manual annotation sanity check (Section 7).'",
+        "flaw_category": "ambiguous_evidence"
+      }
+    ],
+    "summary": "The experiment design has two FATAL flaws: (1) weak-supervision labels derived from agent behavior may not reflect true semantic relevance, and the manual annotation sanity check is not operationalized with a pre-specified decision rule, allowing the experiment to conclude success on noisy labels even if it fails on true relevance; (2) the in-batch negative sampling for contrastive learning creates false negatives when multiple relevant articles exist. Additionally, the validation set is overused for model selection, and the MRR metric may mask meaningful quality differences at higher ranks.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "Finding F1 claims that the weak-supervision labels derived from agent behavior conflate semantic relevance with biases, which is a valid concern. However, the methodology acknowledges these biases and includes a manual annotation check to validate improvements. The critique suggests running correlation analysis, which is reasonable, but the existing design already includes a sanity check that serves a similar purpose. Thus, while the concern is real, the design choice to include a manual check mitigates the issue. Finding F2 highlights that the manual annotations are only for sanity-checking and questions the operational validity of the evaluation. The methodology does not specify a decision rule based on the sanity check, which is a significant oversight. This finding is valid and requires a concession. Finding F3 critiques the use of in-batch negatives for contrastive learning, noting that it may introduce false negatives. This is a valid concern, but the design does not explicitly address this issue. The critique suggests analyzing the training data to quantify the impact, which is a reasonable recommendation. Finding F4 argues that MRR @ top-10 may not adequately capture retrieval quality for support workflows. The critique is valid as it points out the limitations of MRR, but the methodology does not specify alternative metrics to be reported. Finding F5 raises concerns about overfitting due to extensive model selection on a single validation set. This is a valid critique, and the suggestion of using nested cross-validation is a reasonable improvement. Finding F6 states that post-hoc stratified analysis cannot correct for confounds, which is a valid point. The critique suggests pre-specifying confirmation rules, which would strengthen the methodology. Finding F7 notes that excluding non-primary languages limits the generalizability of the results. This is a reasonable concern, and the suggestion to report language distribution is a good one. Finding F8 questions the integration of article freshness as a contextual feature, which is a valid concern regarding potential implementation drift. Finding F9 critiques the framing of the experiment's conclusions, suggesting it minimizes the importance of the results. This is a minor concern, but it highlights the need for clearer communication of the experiment's implications.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "While the concern about biases in weak-supervision labels is valid, the design includes a manual annotation check to validate improvements, which mitigates the risk of conflating agent behavior with true semantic relevance."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique accurately identifies that the protocol lacks a defined decision rule based on the sanity check, which is a significant oversight that could lead to false conclusions."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 4,
+        "justification": "The concern about in-batch negatives is valid, but the design does not explicitly address this issue. The suggestion to analyze the training data is reasonable and could enhance the methodology."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The critique about MRR limitations is valid, but the methodology does not specify alternative metrics to be reported. Reporting additional metrics could provide a more comprehensive evaluation."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The concern about overfitting due to extensive model selection is valid. Using nested cross-validation is a reasonable improvement that could enhance the robustness of the validation process."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The critique about post-hoc stratified analysis is valid. Pre-specifying confirmation rules would strengthen the methodology and provide clearer guidelines for evaluating confounds."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The concern about excluding non-primary languages is valid. Reporting language distribution would clarify the scope limitations and enhance the transparency of the findings."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The critique about the integration of article freshness as a contextual feature is valid. Explicitly specifying its use in both models would prevent potential implementation drift."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The concern about the framing of the conclusions is minor and does not significantly impact the overall findings of the experiment."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "Despite a few valid concerns raised in the critique, the majority of findings have been adequately addressed through design choices or are deemed immaterial, resulting in an overall sound methodology."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The defender argues the manual annotation check 'mitigates the risk' of conflating agent behavior with semantic relevance. This does not directly address the failure mechanism. The core issue is that the model is trained on labels that teach it to predict agent behavior patterns, not true semantic relevance. The manual annotation check is a post-hoc detection mechanism, not a mitigation - it can only identify the problem after the model has already learned from biased signals. The training signal remains fundamentally flawed; the sanity check doesn't prevent the model from overfitting to agent behavior patterns during training. The severity should not be reduced as substantially as the defender suggests."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 7,
+        "reasoning": "The defender explicitly concedes that the protocol lacks a defined decision rule based on the sanity check, which is a significant oversight. This is a valid concession - no counter needed."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The defender acknowledges the concern is 'valid' but offers no actual mitigation - they simply agree the problem exists and suggest analyzing training data as an enhancement. The failure mechanism is that in-batch negatives create false negatives in the training signal, causing the model to push away actually-relevant articles. The defender does not explain how this is addressed in the current design; they only acknowledge it could be investigated. This is not a mechanistic rebuttal - it's a scope statement about potential future work."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 4,
+        "reasoning": "The defender acknowledges the MRR limitation is valid and suggests reporting additional metrics (MRR@3, MRR@5, NDCG@10) would provide a more comprehensive evaluation. This partially addresses the concern - if implemented, it would provide the granularity needed to detect whether improvements are concentrated in top ranks vs. lower ranks. However, the rebuttal does not commit to implementing these metrics; it only says they 'could provide' a better evaluation. The methodology still does not specify these additional metrics. The concern is partially addressed but not fully resolved."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The defender acknowledges the concern about overfitting due to extensive model selection is valid and suggests using nested cross-validation as an improvement. However, this does not address the failure mechanism in the current design - the current methodology still uses the same validation set (months 13-15) for transformer hyperparameter tuning, BM25 tuning, AND early stopping. The suggestion of nested CV describes a potential future improvement, not a resolution of the current concern. The current design still risks overfitting to validation characteristics. The severity should not be reduced to 2."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The defender acknowledges the critique about post-hoc stratified analysis is valid and suggests pre-specifying confirmation rules would strengthen the methodology. This partially addresses the concern - defining thresholds for 'consistent gains' (e.g., p<0.05 in each bin, effect size within 2x of overall) would make the confirmation rule non-arbitrary. However, the rebuttal does not commit to implementing these pre-specified rules. The current methodology still lacks defined thresholds. The concern is partially addressed but the fix is not guaranteed to be implemented."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 2,
+        "reasoning": "The defender acknowledges the concern is valid and that reporting language distribution would clarify scope limitations. This partially addresses the concern - if implemented, it would quantify what percentage of queries are excluded and whether this represents a meaningful selection bias. However, the rebuttal does not commit to actually reporting this distribution. The current methodology does not include this reporting. The concern is partially addressed but not resolved."
+      },
+      {
+        "finding_id": "F8",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 1,
+        "reasoning": "The defender acknowledges the critique about article freshness integration is valid and that explicitly specifying its use would prevent implementation drift. This partially addresses the concern - specifying whether freshness is used in both models and how (concatenated to embeddings, late-fusion, etc.) would ensure fair comparison. However, the rebuttal does not commit to actually specifying this. The current methodology still lists freshness as 'optional' with ambiguous integration. The concern is partially addressed but not resolved."
+      },
+      {
+        "finding_id": "F9",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The defender correctly identifies this as a minor framing concern that does not significantly impact the overall findings. This is an immaterial issue - the core methodological concerns are more important. Accept the reduction to severity 0."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic's challenges have highlighted areas where my initial rebuttals did not sufficiently address the core failure mechanisms. I will strengthen my arguments for F1, F3, F4, F5, F6, F7, and F8 by clarifying how the design can be improved or specifying commitments to implement suggested changes. For F2 and F9, I accept the critiques as valid. Overall, I maintain my position on the remaining findings while acknowledging the need for clearer commitments in some areas.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 6,
+        "justification": "While the concern about biases in weak-supervision labels is valid, the design includes a manual annotation check to validate improvements. I acknowledge that this does not prevent the model from learning from biased signals, but it serves as a critical post-hoc validation step. To further address the concern, I commit to conducting a correlation analysis between automatic and manual labels on the hold-out set, as suggested, to quantify the effectiveness of the labels.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique accurately identifies that the protocol lacks a defined decision rule based on the sanity check, which is a significant oversight that could lead to false conclusions.",
+        "r2_challenge_response": "ACCEPTED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 4,
+        "justification": "The concern about in-batch negatives is valid, and I acknowledge that my previous rebuttal did not sufficiently address the failure mechanism. I will implement a strategy to analyze the training data for the presence of multiple relevant articles in the same batch and report the findings. This will help assess the impact of in-batch negatives on model performance.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "I acknowledge the limitations of MRR and agree that reporting additional metrics would provide a more comprehensive evaluation. I commit to specifying the inclusion of MRR@3, MRR@5, and NDCG@10 in the evaluation metrics to ensure a more granular understanding of model performance.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The concern about overfitting due to extensive model selection is valid. I will implement nested cross-validation within the training period for hyperparameter tuning, reserving the validation set solely for early stopping. This change will enhance the robustness of the validation process and mitigate the risk of overfitting.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 3,
+        "justification": "I acknowledge the critique about post-hoc stratified analysis and agree that pre-specifying confirmation rules would strengthen the methodology. I commit to defining specific thresholds for 'consistent gains' in the evaluation of confounds, ensuring that the analysis is rigorous and not arbitrary.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "I acknowledge the concern about excluding non-primary languages and agree that reporting language distribution would clarify scope limitations. I will ensure that the final report includes this distribution to enhance transparency and address potential selection bias.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "I acknowledge the critique regarding the integration of article freshness as a contextual feature. I will explicitly specify its use in both models and how it is integrated (e.g., concatenated to embeddings, late-fusion scoring) to prevent implementation drift and ensure fair comparison.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The concern about the framing of the conclusions is minor and does not significantly impact the overall findings of the experiment.",
+        "r2_challenge_response": "ACCEPTED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The final rebuttals reflect a commitment to addressing the critiques through specific improvements in methodology, while also accepting a minor framing concern. The adjustments made indicate that empirical testing is necessary to validate the effectiveness of the proposed changes."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The weak-supervision labels (derived from agent clicks/sends within 5 minutes) accurately reflect semantic relevance between query and article.",
+        "failure_mechanism": "Agent behavior-based labels conflate semantic relevance with: (a) position bias (agents click top results regardless of relevance), (b) agent search skill (inefficient agents may not find relevant articles), (c) workflow bias (agents may default to familiar articles even when better ones exist). A model optimized on these labels learns to predict agent behavior patterns, not true semantic relevance. The document acknowledges this selection bias but does not quantify its magnitude or demonstrate that automatic-label improvements translate to actual relevance improvements.",
+        "evidence_test": "Run correlation analysis between automatic labels and manual labels on the 300-query hold-out set. Report label agreement rate (precision/recall of automatic labels vs human judgment). If precision < 0.7 or recall < 0.7, the labels are insufficient. Additionally, compare model performance on automatic labels vs manual labels separately \u2014 if the transformer improves on automatic labels but not manual labels, this confirms overfitting to label noise.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 300-query manual annotation set is used only for 'sanity-checking' and does not constitute part of the evaluation, so the primary evaluation on automatic labels is valid.",
+        "failure_mechanism": "The document states manual annotations are 'used only for sanity-checking' but never defines what action is taken based on this sanity check. If automatic-label MRR improves but manual-label MRR does not, the experiment should report this discrepancy and treat it as a fatal flaw \u2014 but the protocol does not specify this. Without a defined decision rule, the sanity check is performative rather than operational. The experiment could conclude 'transformer outperforms BM25' on automatic labels while failing on true relevance, and still proceed to deployment recommendations.",
+        "evidence_test": "The protocol must pre-specify: 'If transformer improvement on automatic labels (\u0394MRR_auto) is not replicated on manual labels within the 95% CI (\u0394MRR_manual), the hypothesis is rejected.' Without this pre-registration, the sanity check provides no constraint on false conclusions.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "In-batch negatives provide valid negative training examples for contrastive learning.",
+        "failure_mechanism": "In-batch negative sampling assumes that for any given query, the other articles in the same training batch are irrelevant. This assumption is violated when: (a) multiple relevant articles exist for a query (which the recall metrics acknowledge by measuring top-5/top-10), or (b) articles in the same batch are semantically similar and could both be relevant. This creates false negatives in the training signal, causing the model to push away actually-relevant articles. The magnitude of this effect grows with batch size \u2014 larger batches increase the chance of including true positives as negatives.",
+        "evidence_test": "Analyze the training data: for each query with multiple positive labels, compute the probability that another positive article appears in the same batch under the planned batch size. If P(both positives in batch) > 0.1, this is a significant issue. Alternatively, compare training loss curves with in-batch negatives vs hard negative mining to isolate the effect.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "MRR @ top-10 adequately captures retrieval quality for support agent workflows.",
+        "failure_mechanism": "MRR only penalizes missing the first relevant article \u2014 it treats rank 1 and rank 2 identically in terms of contribution to the metric, then applies a harsh penalty at rank >10. This metric does not distinguish between: (a) a model that places relevant articles at rank 1-3 vs rank 4-10 (both get similar MRR contribution), (b) a model with high top-3 precision but poor recall (agents need options), (c) a model that retrieves relevant articles only for easy queries. For support workflows where agents may need to evaluate multiple options or where first-click relevance is not guaranteed, MRR may mask meaningful quality differences.",
+        "evidence_test": "Report MRR at multiple cutoffs (MRR@3, MRR@5, MRR@10) and NDCG@10. If MRR@10 shows improvement but MRR@3 does not, the improvement is concentrated in lower ranks. Additionally, report the distribution of first-relevant-rank \u2014 if the transformer only improves from rank 8\u21926 while BM25 already hits rank 2, the operational impact is minimal.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The validation set (months 13-15) is appropriate for hyperparameter tuning and early stopping without causing overfitting to validation characteristics.",
+        "failure_mechanism": "The same validation set is used for: (a) transformer hyperparameter tuning (learning rate, batch size, epochs), (b) BM25 hyperparameter tuning (k1, b), (c) early stopping checkpoint selection. With 9 BM25 configurations and a grid over transformer hyperparameters, this is extensive model selection on a single temporal slice. The validation set characteristics (query distribution, article corpus, agent behavior patterns) may not generalize to the test period. A model that happens to perform well on months 13-15 may not perform well on months 16-18 even if the underlying semantic task is unchanged.",
+        "evidence_test": "Use nested cross-validation within the training period (months 1-12) for hyperparameter tuning, reserving months 13-15 as a truly held-out validation set for early stopping only. Alternatively, report validation MRR variance across random seeds \u2014 if best validation MRR varies by >0.05 across seeds, the model selection is unstable.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratified analysis post-hoc can adequately detect confounds like query length bias.",
+        "failure_mechanism": "Post-hoc stratified analysis can detect confounds but cannot correct for them. If the transformer outperforms BM25 only on long queries (>50 tokens), the experiment cannot conclude 'transformer outperforms BM25' \u2014 it must conclude 'transformer outperforms BM25 on long queries.' The document states 'Hypothesis confirmation requires consistent gains across query-length and spelling-error bins' but does not define what 'consistent' means (equal performance? any non-negative delta? statistical significance per bin?). Without pre-specified thresholds, the confirmation rule is arbitrary.",
+        "evidence_test": "Pre-specify the confirmation rule: e.g., 'MRR improvement must be statistically significant (p<0.05) in each bin, and effect size must be within 2x of the overall effect.' Report exactly which bins pass/fail this test.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Excluding non-primary languages isolates semantic effects from language-specific variation.",
+        "failure_mechanism": "This is a reasonable scope restriction, but it means the experiment cannot claim the transformer handles multilingual queries better than BM25. The document correctly notes this is outside scope, but the exclusion criteria are not quantified \u2014 what percentage of queries are excluded? If >20% of queries are non-English, the experiment studies a selected subpopulation and the operational deployment recommendation may not apply to the full query stream.",
+        "evidence_test": "Report language distribution of the full query log and the excluded portion. If excluded queries >10% of total, note this as a scope limitation in conclusions.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Article freshness (days since last update) is a useful contextualization feature.",
+        "failure_mechanism": "Article freshness is included as an 'optional' feature with unclear integration method. If used inconsistently between models (e.g., transformer uses it, BM25 does not), the comparison is unfair. The document states both models use 'identical input signals' but freshness is listed as 'optional contextualization' \u2014 this ambiguity could lead to implementation drift where one model incorporates freshness and the other does not.",
+        "evidence_test": "Explicitly specify whether freshness is used in both models, and if so, how (concatenated to embeddings, late-fusion scoring, etc.). Report experiments with and without freshness to isolate its contribution.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The experiment establishes a necessary but not sufficient step toward deployment.",
+        "failure_mechanism": "The document explicitly limits scope to 'outperforms BM25 on agent-logged relevance labels in a held-out future time window.' This is appropriate, but the framing as 'necessary but not sufficient' could be interpreted as minimizing the importance of this result. If the fundamental premise (that agent-logged labels reflect semantic relevance) is flawed (F1), then this experiment is not even necessary \u2014 it's orthogonal to the true objective.",
+        "evidence_test": "Re-frame the conclusion to acknowledge the fundamental dependency: 'This experiment establishes that transformer outperforms BM25 on our weak-supervision labels. Whether these labels reflect true semantic relevance is validated by the manual annotation sanity check (Section 7).'",
+        "flaw_category": "ambiguous_evidence"
+      }
+    ],
+    "summary": "The experiment design has two FATAL flaws: (1) weak-supervision labels derived from agent behavior may not reflect true semantic relevance, and the manual annotation sanity check is not operationalized with a pre-specified decision rule, allowing the experiment to conclude success on noisy labels even if it fails on true relevance; (2) the in-batch negative sampling for contrastive learning creates false negatives when multiple relevant articles exist. Additionally, the validation set is overused for model selection, and the MRR metric may mask meaningful quality differences at higher ranks.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic's challenges have highlighted areas where my initial rebuttals did not sufficiently address the core failure mechanisms. I will strengthen my arguments for F1, F3, F4, F5, F6, F7, and F8 by clarifying how the design can be improved or specifying commitments to implement suggested changes. For F2 and F9, I accept the critiques as valid. Overall, I maintain my position on the remaining findings while acknowledging the need for clearer commitments in some areas.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 6,
+        "justification": "While the concern about biases in weak-supervision labels is valid, the design includes a manual annotation check to validate improvements. I acknowledge that this does not prevent the model from learning from biased signals, but it serves as a critical post-hoc validation step. To further address the concern, I commit to conducting a correlation analysis between automatic and manual labels on the hold-out set, as suggested, to quantify the effectiveness of the labels.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique accurately identifies that the protocol lacks a defined decision rule based on the sanity check, which is a significant oversight that could lead to false conclusions.",
+        "r2_challenge_response": "ACCEPTED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 4,
+        "justification": "The concern about in-batch negatives is valid, and I acknowledge that my previous rebuttal did not sufficiently address the failure mechanism. I will implement a strategy to analyze the training data for the presence of multiple relevant articles in the same batch and report the findings. This will help assess the impact of in-batch negatives on model performance.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "I acknowledge the limitations of MRR and agree that reporting additional metrics would provide a more comprehensive evaluation. I commit to specifying the inclusion of MRR@3, MRR@5, and NDCG@10 in the evaluation metrics to ensure a more granular understanding of model performance.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The concern about overfitting due to extensive model selection is valid. I will implement nested cross-validation within the training period for hyperparameter tuning, reserving the validation set solely for early stopping. This change will enhance the robustness of the validation process and mitigate the risk of overfitting.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 3,
+        "justification": "I acknowledge the critique about post-hoc stratified analysis and agree that pre-specifying confirmation rules would strengthen the methodology. I commit to defining specific thresholds for 'consistent gains' in the evaluation of confounds, ensuring that the analysis is rigorous and not arbitrary.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "I acknowledge the concern about excluding non-primary languages and agree that reporting language distribution would clarify scope limitations. I will ensure that the final report includes this distribution to enhance transparency and address potential selection bias.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "I acknowledge the critique regarding the integration of article freshness as a contextual feature. I will explicitly specify its use in both models and how it is integrated (e.g., concatenated to embeddings, late-fusion scoring) to prevent implementation drift and ensure fair comparison.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The concern about the framing of the conclusions is minor and does not significantly impact the overall findings of the experiment.",
+        "r2_challenge_response": "ACCEPTED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The final rebuttals reflect a commitment to addressing the critiques through specific improvements in methodology, while also accepting a minor framing concern. The adjustments made indicate that empirical testing is necessary to validate the effectiveness of the proposed changes."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, orig_sev=6 < 7, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

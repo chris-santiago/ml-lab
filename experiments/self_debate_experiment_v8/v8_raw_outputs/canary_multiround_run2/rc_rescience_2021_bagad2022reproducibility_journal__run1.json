@@ -1,0 +1,588 @@
+{
+  "case_id": "rc_rescience_2021_bagad2022reproducibility_journal",
+  "stratum": "mixed",
+  "flaw_category": "ambiguous_evidence",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The CGN learns latent factors that correspond to true causal mechanisms (shape, texture, background) in the data-generating process.",
+        "failure_mechanism": "The paper trains generative models with adversarial objectives and auxiliary losses, but provides no verification that the learned latent factors actually correspond to the intended semantic factors. Unsupervised discovery of causal factors is an unsolved problem \u2014 the training objectives (adversarial losses, reconstruction) only guarantee the model can generate realistic images, not that it has decomposed the true causal structure. The 'shape', 'texture', and 'background' factors are design assumptions, not learned discoveries.",
+        "evidence_test": "A proper validation would require: (1) intervention tests \u2014 fixing all factors except one and verifying the generated images change only in the intended semantic dimension (e.g., intervening on 'texture' should preserve shape and background); (2) independence tests \u2014 verifying the learned factors are statistically independent in the training data; (3) downstream task tests \u2014 showing that classifier reliance on each factor matches causal structure. The PoC does not present any such validation.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The generated counterfactual examples are valid counterfactuals \u2014 they represent true causal interventions rather than merely plausible-looking image edits.",
+        "failure_mechanism": "A valid counterfactual requires that the intervention changes the targeted factor while the causal mechanisms for all other factors remain fixed. If the CGN's learned factors do not correspond to true causal factors (F1), then 'intervening' on them produces synthetic images that may look like counterfactuals but do not represent valid counterfactual queries. The classifier trained on these invalid counterfactuals would learn spurious correlations between the modified features and labels, potentially worsening OOD performance.",
+        "evidence_test": "Counterfactual validity requires: (1) showing the counterfactual preserves class-relevant information (the classifier should still predict the same label); (2) showing the counterfactual changes only the targeted attribute (requires labeled attribute data or human evaluation); (3) ideally, comparison against ground-truth counterfactuals from controlled experiments. The PoC presents none of these.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The benchmark datasets used for evaluation have known spurious correlations or environment shifts that are relevant to the hypothesis.",
+        "failure_mechanism": "The PoC states evaluation on 'benchmark image datasets with known spurious correlations or environment shifts' but does not specify which datasets, how the spurious correlations are defined, or how the distribution shift is operationalized. Different benchmarks define 'spurious correlation' differently (e.g., Waterbirds uses background-foreground correlation, CelebA uses attribute correlations). The effectiveness of counterfactual augmentation depends critically on whether the CGN can intervene on the specific nuisance factors that cause the distribution shift. Without specifying the benchmark, the claim cannot be evaluated.",
+        "evidence_test": "The PoC should name specific benchmarks (e.g., Waterbirds, CelebA, MNIST-C, CIFAR-10.1) and explicitly state which nuisance factors in each benchmark the CGN is designed to intervene on. It should show that these factors align with the CGN's learned latent dimensions.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The evaluation metric accurately measures out-of-distribution generalization.",
+        "failure_mechanism": "The PoC claims to evaluate OOD generalization but does not specify the evaluation metric. Common choices (accuracy, AUC, calibration) have different properties. More critically, if the evaluation set comes from the same data source as training (just with different environment/background), there may be unobserved confounding \u2014 the CGN could exploit correlations between the intervention targets and the label that exist in both train and test environments. The evaluation design does not guarantee a true OOD setting.",
+        "evidence_test": "The PoC should specify: (1) exact train/test splits (which environments in the benchmark are in train vs. test); (2) whether the test environments contain novel combinations of factors not seen during training; (3) the metric used and why it measures the intended OOD objective.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The comparison against 'standard empirical risk minimization and related baselines' is sufficient to attribute improvements to the counterfactual mechanism.",
+        "failure_mechanism": "The PoC does not specify which baselines are included. A fair comparison requires: (1) standard data augmentation (random crop, flip, color jitter) as a baseline \u2014 if simple augmentation achieves similar gains, the causal mechanism adds no value; (2) alternative counterfactual generation methods (e.g., gradient-based methods like Grad-CAM counterfactuals, or other generative approaches); (3) an ablation of the CGN itself (e.g., using random latent perturbations vs. structured interventions). Without these, any improvement could be attributed to the generative model providing additional training data (generic benefit of more data) rather than the specific counterfactual mechanism.",
+        "evidence_test": "The evaluation should include: (1) ERM with standard augmentation; (2) ERM with CGN-generated data but random latent sampling (not structured intervention); (3) alternative counterfactual methods if available. The claim requires showing that structured interventions outperform both random augmentation and random latent perturbations.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The CGN training process does not introduce leakage between the counterfactual generation and downstream evaluation.",
+        "failure_mechanism": "If the CGN is trained on the full dataset and then generates counterfactuals for training a classifier, there is potential for leakage: the CGN may have memorized training examples and generate near-duplicates during counterfactual synthesis. Additionally, if the same data is used to train both the CGN and the downstream classifier, and the CGN's training objective includes classification-related losses, the classifier may benefit from factors learned by the CGN that are directly predictive of the label, rather than from true causal intervention.",
+        "evidence_test": "The PoC should specify: (1) whether the CGN training uses a held-out set or the full data; (2) if counterfactuals are generated for training examples, whether these are excluded from classifier evaluation; (3) whether the CGN training includes any supervised signal about the classification task (beyond any class-conditioning of generators).",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The adversarial training objectives ensure each generator captures its designated factor without entanglement.",
+        "failure_mechanism": "The PoC relies on adversarial training with auxiliary losses to ensure factor-specific generators capture their designated factors. However, disentanglement in generative models is notoriously difficult \u2014 adversarial objectives can find degenerate solutions where factors are entangled or where the model ignores certain factors entirely. Without quantitative disentanglement metrics (e.g., MIG, SAP, DCI) or intervention tests, there is no evidence the generators have actually learned to separate the intended factors.",
+        "evidence_test": "The PoC should report quantitative disentanglement metrics on the learned representations, or present qualitative examples showing that intervening on each factor produces the expected semantic change.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The method generalizes to arbitrary image domains beyond the training dataset.",
+        "failure_mechanism": "The PoC does not discuss domain limitations. The causal factorization into 'shape, texture, background' may be domain-appropriate for natural images but may not apply to other domains (medical imaging, satellite imagery, abstract data). The method's claimed benefit for OOD generalization depends on the existence of a decomposable causal structure that can be discovered or assumed.",
+        "evidence_test": "If the method is intended to be domain-agnostic, the PoC should discuss the assumptions required for the causal factorization to hold. If intended for natural images, this should be stated explicitly.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The composed image remains realistic and class-consistent after intervening on latent factors.",
+        "failure_mechanism": "The auxiliary losses intended to ensure realism and class-consistency may not guarantee these properties hold for all possible interventions. Edge cases where interventions produce unrealistic or class-inconsistent images may exist but be rare enough not to affect aggregate metrics.",
+        "evidence_test": "Report the rate of failed interventions (unrealistic or class-inconsistent outputs) and show examples of failure cases.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC has fundamental methodology gaps that prevent it from validating the central hypothesis. The most critical issues are: (1) no verification that the learned latent factors correspond to true causal mechanisms; (2) no validation that generated counterfactuals are semantically valid; (3) unspecified evaluation benchmarks and metrics; (4) insufficient baselines. Without addressing F1-F4, the experiment cannot produce an interpretable verdict on whether CGN-based counterfactual augmentation improves OOD generalization.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "The critique presents several findings, primarily FATAL and MATERIAL, that question the validity of the CGN methodology. Finding F1 argues that the CGN does not verify that learned latent factors correspond to true causal mechanisms, which is a valid concern. However, the design intent was to create a generative framework that allows for controlled interventions, and while the critique highlights a lack of empirical validation, the methodology does not claim to fully verify causal structures in the way the reviewer suggests. Finding F2 builds on F1, claiming that without valid causal interventions, the generated counterfactuals may not be valid. This is a reasonable concern, but the design's intent is to explore counterfactual generation, and the lack of empirical validation does not invalidate the approach itself. Finding F3 raises issues about the lack of specificity regarding benchmark datasets, which is a significant oversight that could impact the evaluation of the methodology. Finding F4 also points out that the evaluation metric is unspecified, which is critical for assessing OOD generalization. Finding F5 questions the sufficiency of comparisons against baselines, which is a valid point, but it does not necessarily invalidate the findings of the PoC. Finding F6 raises concerns about potential leakage in the training process, which is a significant issue that needs to be addressed. Finding F7 discusses the challenges of ensuring disentanglement in adversarial training, which is a known difficulty but does not necessarily invalidate the approach. Findings F8 and F9, while valid, are minor concerns that do not significantly impact the overall conclusions of the PoC. Overall, the critique raises important points, but many findings can be addressed through clarifications and adjustments to the methodology rather than being outright flaws.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "While the critique raises valid concerns about the verification of learned latent factors, the design intent was to explore counterfactual generation through a structured causal framework. The PoC acknowledges the challenges of unsupervised causal discovery, and while empirical validation is ideal, the methodology does not claim to have fully verified causal structures."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The critique's concern about the validity of counterfactuals is valid, but the design intent was to generate plausible counterfactuals based on the learned structure. The lack of empirical validation does not negate the potential for generating useful counterfactuals, and the methodology is focused on exploring these possibilities."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique correctly identifies that the PoC lacks specificity regarding benchmark datasets and how spurious correlations are defined, which is a significant oversight that affects the evaluation of the methodology."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique is valid in pointing out that the evaluation metric is unspecified, which is critical for assessing out-of-distribution generalization. This oversight needs to be addressed in the methodology."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "While the critique raises important points about baseline comparisons, the design intent was to demonstrate the effectiveness of CGN against standard methods. The PoC can be adjusted to include more comprehensive baseline comparisons, but the current findings still provide valuable insights."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The concern about potential leakage is valid, but the design can be adjusted to ensure that counterfactuals are generated without introducing leakage. The methodology can clarify its training process to mitigate this issue."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The critique highlights a known difficulty in ensuring disentanglement in generative models. While this is a challenge, the design intent was to explore the potential for disentanglement through adversarial training, and the methodology can include metrics to assess this."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "The concern about domain limitations is valid but does not significantly impact the overall conclusions of the PoC. The methodology can clarify its intended domain applicability."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The critique raises a minor concern about the realism and class-consistency of generated images, but this does not significantly affect the overall findings. The methodology can report failure rates to address this."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "While several findings were conceded, the adjustments to severity indicate that the methodology still holds potential. The remaining findings warrant empirical testing to fully validate the claims made in the PoC."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 8,
+        "reasoning": "The rebuttal is generic design intent language that does not address the specific failure mechanism. The finding claims that 'the CGN learns latent factors that correspond to true causal mechanisms' \u2014 the failure mechanism is that this claim is made without verification. The rebuttal states 'the design intent was to explore' and 'the methodology does not claim to have fully verified causal structures.' This is a scope disclaimer, not a mechanistic defense. The core issue remains: if the learned factors don't correspond to true causal factors, the entire counterfactual framework is invalid. The severity adjustment from 9 to 5 is disproportionate \u2014 a FATAL finding reduced by 4 requires demonstrating how the design accounts for the failure mechanism, not merely acknowledging the concern."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The rebuttal does not address the specific failure mechanism. The finding claims generated counterfactuals are 'valid counterfactuals' \u2014 the failure mechanism is that without verified causal factors (F1), interventions produce synthetic images that may look like counterfactuals but do not represent valid causal queries. The rebuttal says 'the design intent was to generate plausible counterfactuals' and 'the lack of empirical validation does not negate the potential.' This is circular: the claim is that the counterfactuals are valid, and the defense is that they might have potential. The mechanism of counterfactual validity (preserving class-relevant information, changing only targeted attributes) is not addressed. The severity adjustment from 8 to 4 is disproportionate."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 7,
+        "reasoning": "CONCEDE \u2014 the defender correctly acknowledges the PoC lacks specificity regarding benchmark datasets and how spurious correlations are defined. No counter needed."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 7,
+        "reasoning": "CONCEDE \u2014 the defender correctly acknowledges the evaluation metric is unspecified, which is critical for assessing OOD generalization. No counter needed."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 5,
+        "reasoning": "The rebuttal is generic design intent language that does not address the specific failure mechanism. The finding claims baseline comparisons are sufficient \u2014 the failure mechanism is that without comparing against standard augmentation and random latent perturbations, improvements cannot be attributed to the specific counterfactual mechanism. The rebuttal says 'the design intent was to demonstrate effectiveness' and 'the PoC can be adjusted.' This does not explain how the current design accounts for the concern \u2014 it merely states intent and promises future adjustment. The mechanism (attributing improvements to counterfactual vs. generic data augmentation) is not addressed."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The rebuttal is generic design intent language that does not address the specific failure mechanism. The finding claims no leakage \u2014 the failure mechanism is that CGN trained on full data may memorize training examples, and if CGN training includes classification-related losses, the classifier may benefit from directly predictive factors. The rebuttal says 'the design can be adjusted' and 'the methodology can clarify.' This does not explain how the current design prevents leakage \u2014 it merely promises future clarification. The specific mechanism of potential leakage (memorization, shared classification signal) is not addressed."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 3,
+        "reasoning": "The rebuttal is generic design intent language that does not address the specific failure mechanism. The finding claims adversarial training ensures disentanglement \u2014 the failure mechanism is that adversarial objectives can find degenerate solutions without quantitative disentanglement metrics. The rebuttal says 'the design intent was to explore the potential' and 'the methodology can include metrics.' This does not explain how the current design ensures disentanglement \u2014 it merely states intent and promises future metrics. The specific mechanism (how adversarial training prevents degenerate solutions) is not addressed."
+      },
+      {
+        "finding_id": "F8",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 2,
+        "reasoning": "The rebuttal is REBUT-IMMATERIAL, claiming the domain limitation concern does not significantly impact conclusions. This is partially valid \u2014 the core claims about the method's mechanism are indeed the primary concern, and domain applicability is secondary. However, the finding explicitly states the causal factorization assumption may not hold across domains, which is a legitimate limitation that should be acknowledged. The rebuttal correctly notes this is less critical than the core mechanism concerns, but the severity adjustment from 3 to 2 is reasonable given the finding's minor nature."
+      },
+      {
+        "finding_id": "F9",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal is REBUT-IMMATERIAL, correctly noting this is a minor concern about failure rates. The finding has severity 1 (MINOR), and the rebuttal appropriately notes this doesn't significantly affect overall findings. The severity adjustment to 0 is reasonable given the minor nature of the concern."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "The critic has challenged several findings, particularly F1, F2, F5, F6, and F7, for not adequately addressing the specific failure mechanisms. I will strengthen my rebuttals for these findings by providing clearer explanations of how the design addresses the concerns raised. For F3 and F4, I accept the critic's challenges as valid and will concede those findings. For F8 and F9, I will maintain my position but acknowledge the critic's points about their relevance.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 6,
+        "justification": "While the critique raises valid concerns about the verification of learned latent factors, the design incorporates mechanisms such as adversarial training and auxiliary losses aimed at promoting the separation of factors. Although empirical validation is ideal, the methodology is grounded in causal inference principles, which suggest that the structured approach can lead to meaningful latent representations. Future work can include targeted intervention tests to verify the learned factors.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "The design aims to generate valid counterfactuals by ensuring that interventions are based on learned factors that ideally correspond to causal mechanisms. While the critique rightly points out the need for empirical validation, the framework is built on the premise that if the latent factors are appropriately learned, the generated counterfactuals should preserve class-relevant information and change only the targeted attributes. Future validation efforts can focus on intervention tests to confirm these properties.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique correctly identifies that the PoC lacks specificity regarding benchmark datasets and how spurious correlations are defined, which is a significant oversight that affects the evaluation of the methodology.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique is valid in pointing out that the evaluation metric is unspecified, which is critical for assessing out-of-distribution generalization. This oversight needs to be addressed in the methodology.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The design includes the potential for baseline comparisons, and while the current PoC may not specify all comparisons, it is structured to allow for such evaluations. Future iterations can explicitly include comparisons against standard augmentation methods and alternative counterfactual generation techniques to strengthen the claims about the effectiveness of the CGN. This will help clarify whether improvements are due to the counterfactual mechanism or simply the availability of more training data.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The design can be adjusted to mitigate the risk of leakage by ensuring that the CGN is trained on a held-out dataset and that counterfactuals generated for training do not overlap with the evaluation set. Additionally, clarifying the training process to separate classification-related losses from the counterfactual generation will help address concerns about potential leakage. This adjustment will enhance the integrity of the evaluation process.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The design acknowledges the challenges of disentanglement in generative models. While adversarial training is employed to encourage separation of factors, the methodology can be enhanced by incorporating quantitative disentanglement metrics to provide evidence that the generators are effectively capturing distinct factors. This will address the concern about potential degenerate solutions and strengthen the overall validity of the approach.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "The concern about domain limitations is valid but does not significantly impact the overall conclusions of the PoC. The methodology can clarify its intended domain applicability, acknowledging that the causal factorization may not hold universally across all domains, particularly in specialized fields like medical imaging.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The critique raises a minor concern about the realism and class-consistency of generated images, but this does not significantly affect the overall findings. The methodology can report failure rates to address this, but the overall impact on the conclusions remains minimal.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The rebuttals have strengthened the defense against several findings, but the concessions on F3 and F4 indicate significant gaps in the methodology that warrant empirical testing. The remaining findings still present valid concerns that require further validation, thus leading to an agreement on the need for empirical evidence."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The CGN learns latent factors that correspond to true causal mechanisms (shape, texture, background) in the data-generating process.",
+        "failure_mechanism": "The paper trains generative models with adversarial objectives and auxiliary losses, but provides no verification that the learned latent factors actually correspond to the intended semantic factors. Unsupervised discovery of causal factors is an unsolved problem \u2014 the training objectives (adversarial losses, reconstruction) only guarantee the model can generate realistic images, not that it has decomposed the true causal structure. The 'shape', 'texture', and 'background' factors are design assumptions, not learned discoveries.",
+        "evidence_test": "A proper validation would require: (1) intervention tests \u2014 fixing all factors except one and verifying the generated images change only in the intended semantic dimension (e.g., intervening on 'texture' should preserve shape and background); (2) independence tests \u2014 verifying the learned factors are statistically independent in the training data; (3) downstream task tests \u2014 showing that classifier reliance on each factor matches causal structure. The PoC does not present any such validation.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The generated counterfactual examples are valid counterfactuals \u2014 they represent true causal interventions rather than merely plausible-looking image edits.",
+        "failure_mechanism": "A valid counterfactual requires that the intervention changes the targeted factor while the causal mechanisms for all other factors remain fixed. If the CGN's learned factors do not correspond to true causal factors (F1), then 'intervening' on them produces synthetic images that may look like counterfactuals but do not represent valid counterfactual queries. The classifier trained on these invalid counterfactuals would learn spurious correlations between the modified features and labels, potentially worsening OOD performance.",
+        "evidence_test": "Counterfactual validity requires: (1) showing the counterfactual preserves class-relevant information (the classifier should still predict the same label); (2) showing the counterfactual changes only the targeted attribute (requires labeled attribute data or human evaluation); (3) ideally, comparison against ground-truth counterfactuals from controlled experiments. The PoC presents none of these.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The benchmark datasets used for evaluation have known spurious correlations or environment shifts that are relevant to the hypothesis.",
+        "failure_mechanism": "The PoC states evaluation on 'benchmark image datasets with known spurious correlations or environment shifts' but does not specify which datasets, how the spurious correlations are defined, or how the distribution shift is operationalized. Different benchmarks define 'spurious correlation' differently (e.g., Waterbirds uses background-foreground correlation, CelebA uses attribute correlations). The effectiveness of counterfactual augmentation depends critically on whether the CGN can intervene on the specific nuisance factors that cause the distribution shift. Without specifying the benchmark, the claim cannot be evaluated.",
+        "evidence_test": "The PoC should name specific benchmarks (e.g., Waterbirds, CelebA, MNIST-C, CIFAR-10.1) and explicitly state which nuisance factors in each benchmark the CGN is designed to intervene on. It should show that these factors align with the CGN's learned latent dimensions.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The evaluation metric accurately measures out-of-distribution generalization.",
+        "failure_mechanism": "The PoC claims to evaluate OOD generalization but does not specify the evaluation metric. Common choices (accuracy, AUC, calibration) have different properties. More critically, if the evaluation set comes from the same data source as training (just with different environment/background), there may be unobserved confounding \u2014 the CGN could exploit correlations between the intervention targets and the label that exist in both train and test environments. The evaluation design does not guarantee a true OOD setting.",
+        "evidence_test": "The PoC should specify: (1) exact train/test splits (which environments in the benchmark are in train vs. test); (2) whether the test environments contain novel combinations of factors not seen during training; (3) the metric used and why it measures the intended OOD objective.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The comparison against 'standard empirical risk minimization and related baselines' is sufficient to attribute improvements to the counterfactual mechanism.",
+        "failure_mechanism": "The PoC does not specify which baselines are included. A fair comparison requires: (1) standard data augmentation (random crop, flip, color jitter) as a baseline \u2014 if simple augmentation achieves similar gains, the causal mechanism adds no value; (2) alternative counterfactual generation methods (e.g., gradient-based methods like Grad-CAM counterfactuals, or other generative approaches); (3) an ablation of the CGN itself (e.g., using random latent perturbations vs. structured interventions). Without these, any improvement could be attributed to the generative model providing additional training data (generic benefit of more data) rather than the specific counterfactual mechanism.",
+        "evidence_test": "The evaluation should include: (1) ERM with standard augmentation; (2) ERM with CGN-generated data but random latent sampling (not structured intervention); (3) alternative counterfactual methods if available. The claim requires showing that structured interventions outperform both random augmentation and random latent perturbations.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The CGN training process does not introduce leakage between the counterfactual generation and downstream evaluation.",
+        "failure_mechanism": "If the CGN is trained on the full dataset and then generates counterfactuals for training a classifier, there is potential for leakage: the CGN may have memorized training examples and generate near-duplicates during counterfactual synthesis. Additionally, if the same data is used to train both the CGN and the downstream classifier, and the CGN's training objective includes classification-related losses, the classifier may benefit from factors learned by the CGN that are directly predictive of the label, rather than from true causal intervention.",
+        "evidence_test": "The PoC should specify: (1) whether the CGN training uses a held-out set or the full data; (2) if counterfactuals are generated for training examples, whether these are excluded from classifier evaluation; (3) whether the CGN training includes any supervised signal about the classification task (beyond any class-conditioning of generators).",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The adversarial training objectives ensure each generator captures its designated factor without entanglement.",
+        "failure_mechanism": "The PoC relies on adversarial training with auxiliary losses to ensure factor-specific generators capture their designated factors. However, disentanglement in generative models is notoriously difficult \u2014 adversarial objectives can find degenerate solutions where factors are entangled or where the model ignores certain factors entirely. Without quantitative disentanglement metrics (e.g., MIG, SAP, DCI) or intervention tests, there is no evidence the generators have actually learned to separate the intended factors.",
+        "evidence_test": "The PoC should report quantitative disentanglement metrics on the learned representations, or present qualitative examples showing that intervening on each factor produces the expected semantic change.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The method generalizes to arbitrary image domains beyond the training dataset.",
+        "failure_mechanism": "The PoC does not discuss domain limitations. The causal factorization into 'shape, texture, background' may be domain-appropriate for natural images but may not apply to other domains (medical imaging, satellite imagery, abstract data). The method's claimed benefit for OOD generalization depends on the existence of a decomposable causal structure that can be discovered or assumed.",
+        "evidence_test": "If the method is intended to be domain-agnostic, the PoC should discuss the assumptions required for the causal factorization to hold. If intended for natural images, this should be stated explicitly.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The composed image remains realistic and class-consistent after intervening on latent factors.",
+        "failure_mechanism": "The auxiliary losses intended to ensure realism and class-consistency may not guarantee these properties hold for all possible interventions. Edge cases where interventions produce unrealistic or class-inconsistent images may exist but be rare enough not to affect aggregate metrics.",
+        "evidence_test": "Report the rate of failed interventions (unrealistic or class-inconsistent outputs) and show examples of failure cases.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC has fundamental methodology gaps that prevent it from validating the central hypothesis. The most critical issues are: (1) no verification that the learned latent factors correspond to true causal mechanisms; (2) no validation that generated counterfactuals are semantically valid; (3) unspecified evaluation benchmarks and metrics; (4) insufficient baselines. Without addressing F1-F4, the experiment cannot produce an interpretable verdict on whether CGN-based counterfactual augmentation improves OOD generalization.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "The critic has challenged several findings, particularly F1, F2, F5, F6, and F7, for not adequately addressing the specific failure mechanisms. I will strengthen my rebuttals for these findings by providing clearer explanations of how the design addresses the concerns raised. For F3 and F4, I accept the critic's challenges as valid and will concede those findings. For F8 and F9, I will maintain my position but acknowledge the critic's points about their relevance.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 6,
+        "justification": "While the critique raises valid concerns about the verification of learned latent factors, the design incorporates mechanisms such as adversarial training and auxiliary losses aimed at promoting the separation of factors. Although empirical validation is ideal, the methodology is grounded in causal inference principles, which suggest that the structured approach can lead to meaningful latent representations. Future work can include targeted intervention tests to verify the learned factors.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "The design aims to generate valid counterfactuals by ensuring that interventions are based on learned factors that ideally correspond to causal mechanisms. While the critique rightly points out the need for empirical validation, the framework is built on the premise that if the latent factors are appropriately learned, the generated counterfactuals should preserve class-relevant information and change only the targeted attributes. Future validation efforts can focus on intervention tests to confirm these properties.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique correctly identifies that the PoC lacks specificity regarding benchmark datasets and how spurious correlations are defined, which is a significant oversight that affects the evaluation of the methodology.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique is valid in pointing out that the evaluation metric is unspecified, which is critical for assessing out-of-distribution generalization. This oversight needs to be addressed in the methodology.",
+        "r2_challenge_response": "CONCEDED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The design includes the potential for baseline comparisons, and while the current PoC may not specify all comparisons, it is structured to allow for such evaluations. Future iterations can explicitly include comparisons against standard augmentation methods and alternative counterfactual generation techniques to strengthen the claims about the effectiveness of the CGN. This will help clarify whether improvements are due to the counterfactual mechanism or simply the availability of more training data.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The design can be adjusted to mitigate the risk of leakage by ensuring that the CGN is trained on a held-out dataset and that counterfactuals generated for training do not overlap with the evaluation set. Additionally, clarifying the training process to separate classification-related losses from the counterfactual generation will help address concerns about potential leakage. This adjustment will enhance the integrity of the evaluation process.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The design acknowledges the challenges of disentanglement in generative models. While adversarial training is employed to encourage separation of factors, the methodology can be enhanced by incorporating quantitative disentanglement metrics to provide evidence that the generators are effectively capturing distinct factors. This will address the concern about potential degenerate solutions and strengthen the overall validity of the approach.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "The concern about domain limitations is valid but does not significantly impact the overall conclusions of the PoC. The methodology can clarify its intended domain applicability, acknowledging that the causal factorization may not hold universally across all domains, particularly in specialized fields like medical imaging.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The critique raises a minor concern about the realism and class-consistency of generated images, but this does not significantly affect the overall findings. The methodology can report failure rates to address this, but the overall impact on the conclusions remains minimal.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The rebuttals have strengthened the defense against several findings, but the concessions on F3 and F4 indicate significant gaps in the methodology that warrant empirical testing. The remaining findings still present valid concerns that require further validation, thus leading to an agreement on the need for empirical evidence."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "2 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

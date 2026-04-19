@@ -1,0 +1,293 @@
+{
+  "case_id": "hyp_240",
+  "stratum": "mixed",
+  "flaw_category": "context_dependent",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The chronological split (Months 1-8 train, 9-10 val, 11-12 test) prevents signal leakage and simulates deployment.",
+        "failure_mechanism": "In account takeover (ATO) detection, 'entities' (IPs, Devices) are the primary vectors. If a device is used in a campaign in Month 7 (Train) and the same device is used in Month 11 (Test), the Graph Neural Network (GNN) can 'memorize' the node identity of the malicious device. The GNN isn't learning the *pattern* of ATO, but rather a blacklist of known-bad nodes. This creates an artificial performance boost that vanishes in production when attackers rotate infrastructure.",
+        "evidence_test": "Compare model performance on 'Seen Entities' (nodes present in training) vs 'Unseen Entities' (nodes appearing for the first time in the test set). If the GNN's lead over the GBT disappears or reverses on unseen entities, the gain is due to identity memorization, not relational reasoning.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The GBT baseline is a fair comparison for the GNN's relational capabilities.",
+        "failure_mechanism": "The GNN's 'relational' advantage is often just the ability to aggregate features from neighbors (e.g., 'how many other users used this IP?'). If the GBT baseline does not include these same graph-derived aggregates as tabular features (e.g., node degree, neighborhood risk scores), the experiment measures the value of *feature engineering* rather than the value of *graph neural architectures*.",
+        "evidence_test": "Add 'Graph-derived Tabular Features' (e.g., 1st-order neighborhood aggregates) to the GBT baseline. If the GBT performance matches the GNN, the GNN's architecture is not providing unique value.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding unresolved cases prevents label noise.",
+        "failure_mechanism": "This introduces 'Selection Bias'. In real-world security operations, analysts often prioritize the most obvious or 'loudest' attacks for closure. The 'unresolved' cases likely contain the hardest, most subtle ATOs. By training only on closed cases, the model is optimized for 'easy' detections, potentially inflating Average Precision and failing on the very cases where a GNN's relational reasoning would be most beneficial.",
+        "evidence_test": "Analyze the distribution of features (e.g., alert volume, signal strength) between resolved and unresolved cases. If they differ significantly, the PoC is evaluating a simplified version of the problem.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 24-hour alert window/session is an appropriate prediction unit.",
+        "failure_mechanism": "ATOs often span multiple days (reconnaissance -> access -> exfiltration). A strict 24-hour window may fragment a single attack into multiple prediction units, some of which lack the necessary signal to be labeled positive, potentially diluting the precision/recall metrics.",
+        "evidence_test": "Compare performance using a 'Session-based' window (grouped by entity) versus the 'Fixed 24-hour' window.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC has a critical flaw regarding entity-based signal leakage; the GNN may simply be memorizing malicious node IDs across the chronological split rather than learning generalizable relational patterns. Additionally, the baseline is potentially underspecified, risking a 'straw man' comparison.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "F1 (FATAL): The critic argues that chronological splits allow GNNs to memorize entity identities (IPs/Devices) rather than learning patterns, creating a fatal leakage risk. However, the methodology explicitly addresses this in the 'Confound Controls' section: 'report results separately for previously seen versus newly observed users and devices.' This is the exact evidence test the critic proposes. The design does not claim to prevent entity persistence; it claims to measure its impact. Thus, the 'fatal' flaw is mitigated by the experimental design's specific control for this risk.\n\nF2 (MATERIAL): The critic argues the GBT baseline is unfair without graph-derived aggregates, conflating feature engineering with architecture. The methodology's hypothesis is explicitly 'whether relational structure adds predictive value beyond strong hand-engineered aggregates.' Adding graph aggregates to the GBT baseline would change the hypothesis to 'GNN vs. GBT with Graph Features,' which tests feature engineering parity rather than architectural advantage. The design choice isolates the GNN's message-passing capability. This is a deliberate design control, not a flaw.\n\nF3 (MATERIAL): The critic argues excluding unresolved cases introduces selection bias towards 'easy' detections. The methodology explicitly justifies this exclusion: 'delayed security investigations otherwise inject label noise.' In security ML, label fidelity is prioritized over coverage of ambiguous cases to ensure training stability. While selection bias is a valid concern for production, it is a deliberate trade-off for label quality in this PoC context.\n\nF4 (MINOR): The critic argues 24-hour windows fragment multi-day ATOs. The methodology defines the prediction unit as 'user/session or 24-hour alert window' to match operational triage constraints. This is a scope definition aligned with the experiment's goal of evaluating detection within a 24-hour window. The critique proposes a different scope (Session-based), which is outside the stated experiment boundaries.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The methodology explicitly includes the control the critic requests: 'report results separately for previously seen versus newly observed users and devices.' The design anticipates entity persistence and plans to measure it, preventing it from being a fatal flaw in the evaluation of the hypothesis."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The hypothesis isolates 'relational structure' from 'hand-engineered aggregates.' Adding graph aggregates to the GBT baseline would conflate feature engineering with architecture. The design choice is deliberate to test the GNN's message-passing capability specifically."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The methodology prioritizes label fidelity ('delayed security investigations otherwise inject label noise') over coverage of unresolved cases. This is a deliberate trade-off for training stability in security ML, not an oversight."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The experiment scope is defined as 24-hour windows for triage. The critique proposes a different prediction unit (Session-based), which falls outside the stated experiment boundaries."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have been rebutted with design or scope arguments that reduce their adjusted severity to \u22643 (F1: 3, F2: 2, F3: 1, F4: 0), satisfying the EXONERATE condition. The methodology explicitly addresses the primary concerns regarding entity leakage, baseline fairness, and label noise."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 3,
+        "reasoning": "The defender correctly pointed out that the methodology already includes the specific evidence test I requested ('report results separately for previously seen versus newly observed users and devices'). Since the design explicitly measures the delta between seen and unseen entities, the risk of undetected identity memorization is mitigated. The severity reduction is proportionate."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 6,
+        "reasoning": "The rebuttal is generic and avoids the failure mechanism. The defender argues that adding aggregates would 'conflate feature engineering with architecture,' but this misses the point: if a simple GBT with 1st-order aggregates (e.g., 'count of users on this IP') matches the GNN, then the GNN's complex message-passing architecture is not providing unique value. To prove the GNN's 'relational' advantage, one must prove it outperforms the best possible tabular representation of that same relational data. The current design only proves GNNs are better than a baseline that lacks those features."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 3,
+        "reasoning": "The defender justifies the choice as a 'deliberate trade-off' for label fidelity. While this explains *why* they did it, it does not resolve the *failure mechanism* (selection bias). The model is still being trained on a biased subset of 'easy' cases. While not fatal, it remains a material concern for the generalizability of the results to real-world, subtle ATOs. The severity is lowered slightly because it is an acknowledged trade-off, but not eliminated."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 0,
+        "reasoning": "The rebuttal is a valid scope statement. The experiment is designed to evaluate a triage queue (which operates on alerts/windows), not a forensic session-reconstruction tool. The prediction unit is consistent with the stated goal of the experiment."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "F1 and F4 were accepted by the critic, so I maintain those positions. F2 and F3 present genuine empirical ambiguities where both the design and critique have valid points. For F2, the question of whether GNN architecture provides value beyond graph-derived tabular features requires additional empirical testing. For F3, whether excluding unresolved cases materially affects generalizability is an empirical question. Both warrant DEFER rather than CONCEDE, as the methodology acknowledges these limitations and they can be resolved through additional experimentation.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The methodology explicitly includes the control the critic requested: 'report results separately for previously seen versus newly observed users and devices.' The design anticipates entity persistence and plans to measure it, preventing it from being a fatal flaw in the evaluation of the hypothesis. The critic accepted this in R2.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "This is a genuine empirical question. The methodology states it will 'not by itself prove that every observed gain comes from abstract graph reasoning rather than specific recurrent entity patterns.' To settle whether GNN architecture provides unique value beyond graph-derived tabular features, a follow-up experiment is needed: Add 1st-order neighborhood aggregates (node degree, neighbor risk scores) to the GBT baseline. If GNN still outperforms, the architecture provides value. If GBT matches or exceeds, the gain is from feature engineering. The current design cannot resolve this without additional testing.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "This is a genuine trade-off between label fidelity and coverage. The methodology prioritizes label fidelity ('delayed security investigations otherwise inject label noise'). To settle whether excluding unresolved cases materially affects generalizability: Analyze whether unresolved cases differ systematically in feature distribution from resolved cases. If they do, the model may be optimized for 'easy' detections. If they don't, the exclusion is justified. This requires empirical analysis of the unresolved case distribution, which the current design does not include.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The experiment scope is defined as 24-hour windows for triage. The critique proposes a different prediction unit (Session-based), which falls outside the stated experiment boundaries. The methodology explicitly states the goal is to evaluate 'analyst triage under heavy class imbalance,' which operates on alert windows, not forensic sessions. The critic accepted this in R2.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Two findings (F2, F3) are deferred to empirical testing rather than conceded, as both represent genuine ambiguities where additional experimentation can resolve the question. The design acknowledges these limitations and provides a clear path for follow-up validation."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The chronological split (Months 1-8 train, 9-10 val, 11-12 test) prevents signal leakage and simulates deployment.",
+        "failure_mechanism": "In account takeover (ATO) detection, 'entities' (IPs, Devices) are the primary vectors. If a device is used in a campaign in Month 7 (Train) and the same device is used in Month 11 (Test), the Graph Neural Network (GNN) can 'memorize' the node identity of the malicious device. The GNN isn't learning the *pattern* of ATO, but rather a blacklist of known-bad nodes. This creates an artificial performance boost that vanishes in production when attackers rotate infrastructure.",
+        "evidence_test": "Compare model performance on 'Seen Entities' (nodes present in training) vs 'Unseen Entities' (nodes appearing for the first time in the test set). If the GNN's lead over the GBT disappears or reverses on unseen entities, the gain is due to identity memorization, not relational reasoning.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The GBT baseline is a fair comparison for the GNN's relational capabilities.",
+        "failure_mechanism": "The GNN's 'relational' advantage is often just the ability to aggregate features from neighbors (e.g., 'how many other users used this IP?'). If the GBT baseline does not include these same graph-derived aggregates as tabular features (e.g., node degree, neighborhood risk scores), the experiment measures the value of *feature engineering* rather than the value of *graph neural architectures*.",
+        "evidence_test": "Add 'Graph-derived Tabular Features' (e.g., 1st-order neighborhood aggregates) to the GBT baseline. If the GBT performance matches the GNN, the GNN's architecture is not providing unique value.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding unresolved cases prevents label noise.",
+        "failure_mechanism": "This introduces 'Selection Bias'. In real-world security operations, analysts often prioritize the most obvious or 'loudest' attacks for closure. The 'unresolved' cases likely contain the hardest, most subtle ATOs. By training only on closed cases, the model is optimized for 'easy' detections, potentially inflating Average Precision and failing on the very cases where a GNN's relational reasoning would be most beneficial.",
+        "evidence_test": "Analyze the distribution of features (e.g., alert volume, signal strength) between resolved and unresolved cases. If they differ significantly, the PoC is evaluating a simplified version of the problem.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 24-hour alert window/session is an appropriate prediction unit.",
+        "failure_mechanism": "ATOs often span multiple days (reconnaissance -> access -> exfiltration). A strict 24-hour window may fragment a single attack into multiple prediction units, some of which lack the necessary signal to be labeled positive, potentially diluting the precision/recall metrics.",
+        "evidence_test": "Compare performance using a 'Session-based' window (grouped by entity) versus the 'Fixed 24-hour' window.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC has a critical flaw regarding entity-based signal leakage; the GNN may simply be memorizing malicious node IDs across the chronological split rather than learning generalizable relational patterns. Additionally, the baseline is potentially underspecified, risking a 'straw man' comparison.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "F1 and F4 were accepted by the critic, so I maintain those positions. F2 and F3 present genuine empirical ambiguities where both the design and critique have valid points. For F2, the question of whether GNN architecture provides value beyond graph-derived tabular features requires additional empirical testing. For F3, whether excluding unresolved cases materially affects generalizability is an empirical question. Both warrant DEFER rather than CONCEDE, as the methodology acknowledges these limitations and they can be resolved through additional experimentation.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The methodology explicitly includes the control the critic requested: 'report results separately for previously seen versus newly observed users and devices.' The design anticipates entity persistence and plans to measure it, preventing it from being a fatal flaw in the evaluation of the hypothesis. The critic accepted this in R2.",
+        "r2_challenge_response": "MAINTAINED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "This is a genuine empirical question. The methodology states it will 'not by itself prove that every observed gain comes from abstract graph reasoning rather than specific recurrent entity patterns.' To settle whether GNN architecture provides unique value beyond graph-derived tabular features, a follow-up experiment is needed: Add 1st-order neighborhood aggregates (node degree, neighbor risk scores) to the GBT baseline. If GNN still outperforms, the architecture provides value. If GBT matches or exceeds, the gain is from feature engineering. The current design cannot resolve this without additional testing.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "This is a genuine trade-off between label fidelity and coverage. The methodology prioritizes label fidelity ('delayed security investigations otherwise inject label noise'). To settle whether excluding unresolved cases materially affects generalizability: Analyze whether unresolved cases differ systematically in feature distribution from resolved cases. If they do, the model may be optimized for 'easy' detections. If they don't, the exclusion is justified. This requires empirical analysis of the unresolved case distribution, which the current design does not include.",
+        "r2_challenge_response": "DEFERRED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The experiment scope is defined as 24-hour windows for triage. The critique proposes a different prediction unit (Session-based), which falls outside the stated experiment boundaries. The methodology explicitly states the goal is to evaluate 'analyst triage under heavy class imbalance,' which operates on alert windows, not forensic sessions. The critic accepted this in R2.",
+        "r2_challenge_response": "MAINTAINED"
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Two findings (F2, F3) are deferred to empirical testing rather than conceded, as both represent genuine ambiguities where additional experimentation can resolve the question. The design acknowledges these limitations and provides a clear path for follow-up validation."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 4,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}
