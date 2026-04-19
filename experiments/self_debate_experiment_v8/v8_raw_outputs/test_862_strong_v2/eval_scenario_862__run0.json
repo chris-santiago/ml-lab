@@ -1,0 +1,182 @@
+{
+  "case_id": "eval_scenario_862",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (train: Q1-12, val: Q13-15, test: Q16) guarantees that the test set contains truly novel, previously unseen attack patterns.",
+        "failure_mechanism": "Phishing campaigns often span multiple quarters. If a multi-quarter campaign persists into Q16, the model could appear to generalize to 'future' threats by memorizing patterns from the same campaign seen in Q13-15. The validation set (Q13-15) is immediately adjacent to the test set (Q16), providing no guardrail against this type of leakage. A model that overfits to persistent campaigns in the validation set would be selected and then show artificially high performance on the test set.",
+        "evidence_test": "Perform a temporal cross-correlation analysis of threat indicators (sender domains, IPs, TTPs) across quarters. Compute the fraction of phishing emails in Q16 that share strong feature overlap with campaigns present in Q13-15. A high overlap would indicate the test set is not novel.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The primary evaluation metric (PR-AUC) is sufficient to demonstrate the transformer model's operational advantage over the hand-engineered baseline.",
+        "failure_mechanism": "PR-AUC integrates performance across all recall thresholds, which can hide critical failures at the low-FPR operating point where security teams actually deploy (e.g., 1% FPR). A model could achieve a marginally higher PR-AUC by being significantly better at high-recall/low-precision regions irrelevant to deployment, while being worse at the low-FPR region. The hypothesis implicitly assumes that an improvement in PR-AUC translates to better real-world performance, which is not guaranteed.",
+        "evidence_test": "Compare the models' performance on the secondary metric 'Recall at 1% FPR (R@FPR=0.01)' on the test set. If the transformer has a higher PR-AUC but a lower R@FPR=0.01, its claimed advantage is operationally invalid.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The hand-engineered baseline's features capture the full signal value of the available metadata, isolating the test to the value of learned text representations.",
+        "failure_mechanism": "The baseline's feature set (e.g., 'sender reputation score (historical frequency and flagging rate from training data)') is a lossy, human-engineered summary of raw data. The transformer receives raw sender/recipient text and could learn richer, non-linear interactions from it that the baseline's pre-binned features cannot capture. Therefore, any observed transformer advantage could be attributed to superior encoding of metadata, not textual understanding of the email body/subject. The ablation study (removing metadata) only tests if metadata is necessary, not if the baseline's encoding of it is sufficient.",
+        "evidence_test": "Augment the baseline with a simple bag-of-words or TF-IDF representation of the sender/recipient/attachment metadata text fields. If this enriched baseline closes the performance gap with the transformer, the hypothesis about text understanding is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The model's performance on the held-out test quarter (Q16) is indicative of its robustness to future distribution shift.",
+        "failure_mechanism": "A single quarter (3 months) of test data provides a point estimate of performance on 'the future.' It cannot characterize performance degradation over longer timeframes, sensitivity to abrupt shifts (e.g., a new major phishing campaign type), or seasonal effects. The experiment assumes stationarity between Q16 and any future operational period, which is a strong and unverified assumption in cybersecurity.",
+        "evidence_test": "Evaluate the 'temporal robustness' check (PR-AUC per week) and report the variance and trend. A flat or improving trend would support the claim of short-term robustness; a declining trend would refute it. A more robust test would require multiple disjoint test periods (e.g., Q14, Q16, Q18) to estimate performance variance over time.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The label filtering ('only emails with a final review status... excluding uncertain or disputed cases') is sufficient to produce a dataset with minimal label noise.",
+        "failure_mechanism": "Final reviewed labels can still be incorrect due to analyst error, evolving definitions of 'phishing,' or sophisticated attacks that evade initial review. Systematic label noise correlated with specific features (e.g., highly persuasive spear-phishing) could bias both models, but the impact on their relative performance is unknown. The experiment assumes label noise is random or affects both models equally.",
+        "evidence_test": "Perform a manual audit on a stratified sample of the test set, focusing on high-scoring false positives and false negatives from both models. A high rate of discovered label errors in these contentious cases would indicate the evaluation is noisy.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "N1",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The transformer's sequence truncation to 512 tokens (prioritizing subject/sender, truncating body) does not materially impact its ability to detect phishing signals that may be deep in the email body.",
+        "failure_mechanism": "Some phishing lures or malicious links may appear late in long email bodies. By truncating the body, the model may miss these signals. The baseline, which uses keyword density features over the full body text, might not suffer the same loss.",
+        "evidence_test": "Analyze the token length distribution of phishing emails in the training set. If a significant portion exceeds 512 tokens, the truncation is a meaningful source of signal loss. Compare the transformer's false negative rate on long (>512 token) vs. short phishing emails in the test set.",
+        "flaw_category": "context_dependent"
+      }
+    ],
+    "summary": "The experimental design is rigorous in its temporal splitting and focus on operational metrics, but contains a potentially fatal flaw in its reliance on PR-AUC without validating the low-FPR performance critical for deployment. Material concerns exist regarding the novelty of the test set and the completeness of the hand-engineered baseline.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critique raises several valid concerns regarding the experiment design, including temporal leakage, metric limitations, baseline feature sufficiency, temporal robustness, label noise, and truncation impact. Each concern's validity and potential impact on the experiment's conclusions are assessed.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The experiment explicitly acknowledges the risk of campaign persistence across quarters. While a cross-correlation analysis would be informative, the temporal split is a standard approach to mitigate memorization of specific campaigns. The validation set is used for model selection, not training, reducing the risk of overfitting to validation set campaigns."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The experiment includes secondary metrics like 'Recall at 1% FPR' to validate performance at the low-FPR operating point. If the transformer outperforms the baseline on this metric, it supports the PR-AUC advantage being operationally relevant."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The experiment is designed to test the value of learned text representations, not the encoding of metadata. Augmenting the baseline with text representations (bag-of-words/TF-IDF) could be seen as outside the original hypothesis, which focuses on the transformer's text understanding capability."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The experiment includes a 'temporal robustness' check by evaluating PR-AUC per week in Q16. This assesses short-term stability. While a single quarter is a limitation, it is a common constraint in evaluating future performance."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Label noise is a known issue, but both models are trained and evaluated on the same labels. Unless label noise is systematically correlated with model predictions, it is unlikely to significantly bias the relative comparison."
+      },
+      {
+        "finding_id": "N1",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Truncation is a common limitation of transformer models. Analyzing the token length distribution and false negative rates for long emails can provide insight into its impact. However, given the MINOR severity, this is not a critical flaw."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "After rebuttals, all advancing findings have adjusted severity \u2264 3, indicating the methodology is sound and the critique does not materially alter the experiment's conclusions."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "N1",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

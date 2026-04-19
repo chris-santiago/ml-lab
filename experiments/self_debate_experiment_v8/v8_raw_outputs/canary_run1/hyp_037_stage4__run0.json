@@ -1,0 +1,167 @@
+{
+  "case_id": "hyp_037_stage4",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline model's performance is an appropriate lower bound for evaluating the improvement from sequence embeddings.",
+        "failure_mechanism": "The baseline model (logistic regression with fixed regularization) is intentionally under-optimized relative to the proposed model (gradient-boosted model with full hyperparameter tuning and early stopping). This creates an evaluation asymmetry: any observed improvement could be due to the optimization effort, model class (non-linear vs. linear), or capacity differences, not the signal from transaction sequences. The baseline's design (a 'stable linear reference point') deliberately handicaps it, making the comparison unfair and uninterpretable for the specific hypothesis about sequence information.",
+        "evidence_test": "Compare the proposed model (with sequence features) against an equivalently optimized gradient-boosted model trained *only* on baseline features (i.e., same hyperparameter tuning, early stopping, and capacity). The true test of the hypothesis is whether adding sequence features improves performance when everything else (including model architecture and optimization effort) is held constant.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The merchant-category co-occurrence statistics for embedding initialization are stationary across the full modeling corpus and the deployment period.",
+        "failure_mechanism": "Merchant relationships and spending patterns change over time (seasonality, new merchants, economic shifts). Embeddings initialized from global corpus statistics (months 1-18) may encode outdated or non-representative relationships for the test period (months 16-18). If these embeddings are frozen, they may not capture the signal present in the test window, leading to an underestimation of the potential value of sequence features. The design tries to 'freeze' the feature space to prevent drift, but if the underlying semantic relationships between merchant categories drift, the frozen embeddings become misaligned with reality.",
+        "evidence_test": "Measure the cosine similarity between merchant-category embeddings derived from different time windows (e.g., training vs. test). If significant drift exists, test the hypothesis with embeddings learned separately (and frozen) per time window versus the global approach.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Precision at a fixed recall (or top 5% of accounts) is the correct primary metric for business impact, and improvements in this metric directly translate to better retention outcomes.",
+        "failure_mechanism": "The metric assumes the intervention budget (top 5%) is fixed and that precision at this cutoff is linearly related to business value. However, if the model's calibration differs between baseline and proposed models, the ranking itself might change the composition of the top 5%. A model could achieve higher precision by being more confident on easy cases while missing harder, more valuable cases. Furthermore, the business objective is likely to minimize churn or maximize ROI, not precision at an arbitrary threshold; a model with slightly lower precision but much higher recall (by ranking more true positives just below the cutoff) could be more valuable if the intervention capacity is flexible.",
+        "evidence_test": "Perform a cost-benefit analysis simulation using the predicted probabilities and a simple business model (cost of intervention, value of retained customer). Compare the models on expected profit, not just a single threshold metric.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Including tenure as a feature and verifying similar distributions across splits is sufficient to control for tenure effects.",
+        "failure_mechanism": "Tenure may have non-linear or interaction effects with other features (like transaction sequences) that a simple linear term in a model may not capture. If the relationship between tenure and churn changes over time (e.g., a macroeconomic event affects newer customers differently), the model trained on past data may not generalize, even if the marginal distribution of tenure is similar. This is a form of distribution shift where the conditional distribution P(Churn | Tenure, Features) changes.",
+        "evidence_test": "Stratify model performance (e.g., AUC) by tenure buckets (e.g., 0-6 months, 6-12 months, etc.) on the test set. A material drop in performance for specific buckets would indicate inadequate control.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 90-day feature window is sufficient to capture all predictive signal from transaction sequences for 30-day churn.",
+        "failure_mechanism": "Some churn behavior may be predicted by longer-term patterns (e.g., gradual disengagement over 6+ months) or very short-term shocks (last 7 days). The 90-day window is an arbitrary choice. If the optimal predictive signal exists outside this window, both models are handicapped, but the sequence model might be disproportionately affected if it relies on capturing medium-term patterns.",
+        "evidence_test": "Ablation study on the feature window length: train models with 30, 90, 180-day sequence windows and compare performance. If performance monotonically improves with longer windows, the chosen 90 days is suboptimal.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The daily aggregation of transaction sequences is the optimal representation for a gradient-boosted tree model.",
+        "failure_mechanism": "Daily aggregation loses intra-day timing information and sequence order across days. Alternative representations (e.g., weekly aggregates, raw sequences with positional encoding) might preserve more signal.",
+        "evidence_test": "Compare performance of the proposed model using daily aggregates versus alternative sequence representations (e.g., weekly, or using a learned sequence encoder) on the validation set.",
+        "flaw_category": "below_threshold"
+      }
+    ],
+    "summary": "The primary methodological flaw is the asymmetric optimization between the proposed and baseline models, which invalidates a clean test of the sequence-embedding hypothesis. Secondary concerns involve potential distributional drift in embeddings and the limitations of a single-threshold business metric.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 claims the baseline is under-optimized because it uses Logistic Regression with fixed regularization while the proposed model uses GBDT with tuning. The hypothesis is specifically whether 'transaction sequence embeddings' add value. However, the critic is correct that by changing both the model architecture (LR vs GBDT) and the feature set (Baseline vs Baseline+Sequences) simultaneously, the experiment confounds the signal of the sequence embeddings with the power of the GBDT architecture. To isolate the effect of sequence features, the baseline should be a GBDT trained on the same baseline features with the same tuning process. This is a material flaw in experimental isolation.\n\nF2 concerns the stationarity of merchant-category embeddings. The design explicitly freezes preprocessing artifacts (including co-occurrence statistics) to prevent data leakage and ensure a consistent feature space. While embeddings can drift, the critic's suggestion to learn them per window would introduce data leakage or inconsistent feature mapping across the split. Given this is a PoC to establish if sequences are predictive, a global frozen embedding is a standard and acceptable simplification. The drift is likely immaterial relative to the signal of 'churning behavior'.\n\nF3 argues that precision at top 5% is an arbitrary metric and suggests cost-benefit analysis. However, the design explicitly states this is the 'primary metric' because it 'reflects the operational constraint that retention resources are finite'. In a business context, the intervention budget is usually the hard constraint. Precision at the budget threshold is the most direct proxy for the success of a fixed-capacity campaign. This is a deliberate design choice based on operational reality.\n\nF4 suggests that marginal distribution checks of tenure are insufficient and that non-linear interactions might exist. However, the proposed model is a GBDT, which is specifically designed to capture non-linear interactions automatically. Therefore, including tenure as a feature in a GBDT inherently addresses the critic's concern about non-linear effects better than the critic implies. The distribution check ensures no cohort bias in the split.\n\nF5 claims the 90-day window is arbitrary. This is a typical hyperparameter choice. While other windows might be better, this does not invalidate the comparison between the two models as both are subject to the same window constraint. It is a minor optimization point, not a methodological flaw.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic is correct. By using a linear model for the baseline and a GBDT for the proposed model, we confound the benefit of the sequence features with the benefit of a more powerful model class and optimization effort. To isolate the value of the features, the baseline must also be a tuned GBDT."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "Freezing preprocessing artifacts from the full corpus is a deliberate choice to ensure a consistent feature space across train/val/test splits and prevent temporal leakage. For a PoC, this is the standard approach to establish signal existence before optimizing for drift."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The choice of Precision@Top 5% is explicitly tied to the 'operational constraint' of a finite business intervention budget. This is the most relevant metric for the specific business deployment scenario described."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The proposed model is a Gradient Boosted Tree ensemble, which inherently captures the non-linear interactions and conditional distributions the critic is concerned about. Including tenure as a feature in a GBDT is sufficient."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The 90-day window is a standard hyperparameter choice for a PoC. Since it applies to both models, it does not bias the comparison of the sequence features against the baseline."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "The critic identified a fatal flaw in the experimental control (F1): the baseline is under-powered relative to the proposed model, meaning any gain could be attributed to the model architecture/tuning rather than the sequence features. This remains a material flaw that must be corrected."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "case_id": "hyp_240",
+  "stratum": "mixed",
+  "flaw_category": "context_dependent",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "z-ai/glm-4.7-flash",
+    "defender": "x-ai/grok-4.1-fast",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The binary label 'Account Takeover' can be assigned strictly based on event-level features available at the time of the login, independent of relational context revealed during investigation.",
+        "failure_mechanism": "Analyst-confirmed investigation outcomes are not mutually exclusive from the graph signals used to confirm them. If an analyst closes a case as ATO only after discovering 'Impossible Travel' (a graph signal) or a correlation between a 'New Device' and 'Multiple Failed Passwords' (an edge signal), the label implies the presence of that relational structure. The model is therefore learning from 'ground truth' that relies on the specific features (relationships) it is trying to predict, violating the temporal causality required for the experiment's 'future-window' claim.",
+        "evidence_test": "Perform an Ablation study where the target variable is shifted by 24 hours. If the model relies on analyst intuition (graph context), this shift should cause a precipitous drop in performance. Additionally, qualitatively review a sample of 'Training ATOs' to see if any are resolved as 'User Error' or 'False Alarm' once the full graph context was assembled.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Average Precision (AP) is an adequate proxy for the utility of the model to a security analyst triaging a ranked queue.",
+        "failure_mechanism": "AP assumes that all positive examples (ATOs) are equally distributed across the feature space and should be ranked similarly. However, ATOs manifest in two distinct modes: 'Campaign Attacks' (e.g., credential stuffing) which generate dense clusters of alerts from a single malicious device, and 'High-Risk Anomalies' (e.g., anomalous typing patterns) which generate sparse, scattered alerts. AP will score a high-AP ranking of 100 Campaign alerts identically to a high-AP ranking of 1 Anomaly alert, yet in practice the 100 Campaign alerts constitute a false positive burden that degrades analyst utility.",
+        "evidence_test": "Calculate AP specifically stratified by 'Attack Velocity' (alerts per minute). Compare this against AP on the aggregate level. Report the distribution of detected ATOs per rank bucket (e.g., 'Avg ATOs per Top 100 Alert').",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The Heterogeneous GNN can generalize its learned embeddings to entities (Users/Devices/IPs) that appear exclusively in the test window (new entities).",
+        "failure_mechanism": "The PoC assumes that learned node embeddings (or frozen normalization of features) provide sufficient context for 'novel' entities. GNNs typically initialize node vectors randomly or with zero vectors for unseen entities. They lack the inductive bias to generalize that 'A Device with a generic embedding and a high login failure rate' is risky, unless they have seen that *type* of device before. A Gradient Boosted Tree, which operates on hand-engineered summary statistics (e.g., 'Device Fails=15 in 10m'), does not require prior exposure to the entity ID to score it correctly. The experiment tests Relational Structure against Summary Aggregation but implicitly assumes the GNN's embedding space covers the 'universe of threats', which it likely does not.",
+        "evidence_test": "Separate the test set into 'Novel Entities' (users/devices appearing for the first time in Month 11-12) and 'Repeated Entities' (seen in Train). Compare GNN vs GBT performance strictly on the Novel Entity subset. The gap should reveal if the GNN relies on specific observed embeddings or generalizable structural properties.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The PoC suffers from a critical temporal leakage where analyst confirmation of ATOs implicitly uses graph signals; it misuses Average Precision to evaluate campaign vs. solitary attacks; and it makes an untested assumption about the GNN's ability to generalize to zero-shot new entities without sufficient inductive bias.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Analyzing F1 (MATERIAL, severity 8, signal_leakage): The critic claims that analyst-confirmed ATO labels inherently leak relational/graph signals because investigations use full context (e.g., impossible travel, new device correlations) to assign labels, violating temporal causality for future-window predictions. This is a theoretical concern about label purity in security ML, where ground truth always reflects post-hoc investigation. However, the design intent is prospective prediction using only signals available at scoring time (login/MFA patterns, etc.) up to the split boundary, with labels derived from outcomes closed by supervision cutoff to avoid delay noise\u2014standard for time-respecting eval. Chronological splits prevent future data leakage into training/inference graphs. Confounds explicitly addressed via ablations removing raw high-cardinality IDs (preserving behavioral summaries) and separate reporting for seen/new users/devices, isolating recurrent entity effects from relational structure. Evidence test (label shift, qualitative review) is reasonable but not fatal; performance drops on shifts would validate timing discipline already enforced, and PoC outputs would confirm via held-out test. No genuine flaw\u2014the methodology anticipates this by design controls, testing if relations add value beyond aggregates without assuming label independence from investigation process.\n\nAnalyzing F2 (MATERIAL, severity 5, metric_limitations): Critic argues AP inadequately proxies analyst utility due to bimodal ATOs (dense campaign clusters vs. sparse anomalies), as AP equates ranking 100 campaign alerts to 1 anomaly without penalizing FP burden. Valid point on AP's ranking focus under imbalance, but design uses AP as primary for true positive concentration at top (analyst triage), supplemented by precision@top100/top500 alerts per week (directly measures queue utility, penalizing clusters), recall@fixed precision, AUROC, and calibration\u2014explicitly mitigating unimodal assumptions. Evidence test (stratified AP by velocity, rank bucket ATOs) aligns with already-planned top-K metrics. No flaw; secondary metrics cover the concern, keeping AP suitable for hypothesis (relational lift on ranking).\n\nAnalyzing F3 (MATERIAL, severity 6, unverified_prereqs): Claims GNN fails on novel test entities (unseen users/devices/IPs/senders) due to poor embedding init/generalization, unlike GBT's entity-agnostic summaries. Partially valid for vanilla GNNs, but design controls directly via 'report results separately for previously seen versus newly observed users and devices' in confounds section, plus ablations stripping raw IDs to test structural vs. recurrent patterns. Graphs use recency/interaction weights on behavioral edges, enabling inductive bias for new entities (e.g., new device with high failures linked to user). GBT aggregates (e.g., first-seen flags, burstiness) handle new entities equivalently. Evidence test (novel/repeated subset perf) is precisely what confounds section mandates\u2014no unverified prereq, as PoC will output stratified results proving/disproving generalization. All findings stem from overlooking explicit confound controls (ablations, seen/new splits, top-K metrics); no uncertainties remain unresolved by design rationale. Methodology sound, hypothesis tested correctly.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "Labels reflect post-hoc investigations standard in security ML; design enforces prospective prediction via chrono splits, frozen preprocessing, supervision cutoff exclusions, and confound ablations removing raw IDs plus seen/new entity splits\u2014directly isolating relational value without causality violation."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "AP targets top-rank concentration under imbalance; top-100/500 precision per week explicitly penalizes campaign clusters/FP burden for analyst queues, with additional recall@prec covering sparse anomalies\u2014no metric gap for hypothesis."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "Confounds section mandates separate reporting for seen vs. newly observed users/devices and ablations stripping raw IDs\u2014precisely tests GNN generalization on novel entities vs. GBT summaries, resolving the prereq empirically."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings rebutted via explicit design controls (confounds ablations, seen/new splits, top-K metrics), yielding adjusted severities \u22643. No concessions or deferrals needed; methodology fully anticipates critiques and sound for hypothesis."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

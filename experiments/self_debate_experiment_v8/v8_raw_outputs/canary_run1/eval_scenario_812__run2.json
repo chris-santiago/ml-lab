@@ -1,0 +1,182 @@
+{
+  "case_id": "eval_scenario_812",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "anthropic/claude-3-haiku",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Using a domain-aware Transformer tokenizer (SciBERT/BioBERT) with vocabulary fit on the training set only is appropriate and will not harm performance.",
+        "failure_mechanism": "If the tokenizer is retrained (e.g., learning new WordPiece vocab) on the training data, the pretrained token embeddings no longer correspond to the new tokens, causing representation mismatch unless embeddings are reinitialized or fine-tuned sufficiently to recover. This can degrade performance and confound the comparison between Transformer and CRF.",
+        "evidence_test": "Compare performance using the pretrained tokenizer (fixed vocab) vs a tokenizer refit on training data with embeddings reinitialized (or frozen). Also inspect tokenization divergence (e.g., percentage of tokens mapped to [UNK]) and embedding similarity.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Annotation quality (inter-rater kappa >=0.75) established on a held-out gold-standard sample of 200 reports ensures reliable labels across all splits.",
+        "failure_mechanism": "Annotation difficulty may vary across hospital sites, time periods, or report types; the gold-sample may not capture this variability, leading to systematic label noise in certain splits (e.g., newer reports with different templates). This could cause apparent performance differences due to label quality rather than model capability.",
+        "evidence_test": "Compute inter-rater agreement separately for each split (train, val, test, cross-site) and compare; also examine label distribution shifts; if agreement drops significantly in any split, the claim is weakened.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Report-level recall aligns with the clinical screening goal of not missing reports containing actionable follow-up language, and maximizing it is sufficient for model selection.",
+        "failure_mechanism": "While recall captures sensitivity, it ignores precision; a model could achieve high recall by predicting many false positive spans, increasing workload for downstream registry creation and causing alert fatigue. Selecting models solely on recall may inflate apparent performance and overlook precision trade-offs.",
+        "evidence_test": "Report precision alongside recall; compute F1 or cost-benefit analysis; if precision is low, the claim of utility is weakened.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The held-out cross-site test (all reports from one hospital system) directly tests whether Transformer fine-tuning generalizes beyond the training hospital systems.",
+        "failure_mechanism": "Generalization to a single unseen site may be due to site-specific factors (e.g., that site happens to be similar to training sites) and not indicative of true cross-site generalization; the estimate of cross-site performance may have high variance and not represent broader population.",
+        "evidence_test": "Include multiple held-out sites or perform cross-validation across sites; compare variance in performance across sites.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Computing character 4-gram similarity and flagging if >5% of test reports >0.8 similar to training reports controls for template leakage.",
+        "failure_mechanism": "The threshold is arbitrary; leakage could exist below threshold and still affect performance; also similarity metric may not capture semantic/template similarity adequately. If leakage exists, performance may be inflated.",
+        "evidence_test": "Vary threshold and see impact on performance; also use more sophisticated similarity (e.g., TF-IDF cosine) and see if any leakage correlates with performance drops.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Both models receive equivalent hyperparameter tuning effort (grid search on validation data with same budget).",
+        "failure_mechanism": "Transformer tuning includes learning rate and batch size (2 dimensions) while CRF only L2 (1 dimension). Even with same number of trials, Transformer may explore more combinations; also early stopping based on validation report-level recall may benefit Transformer more due to its capacity to overfit.",
+        "evidence_test": "Perform a matched tuning where CRF also tunes learning rate (if using neural CRF) or use same number of trials and compare; or use random search with same trials.",
+        "flaw_category": "eval_inflation"
+      }
+    ],
+    "summary": "The PoC raises several methodological concerns: potential silent misconfiguration from tokenizer retraining, unverified annotation quality across splits, evaluation design choices that may inflate Transformer's advantage (metric selection, leakage detection, hyperparameter search), and limited cross-site testing. While these do not outright invalidate the hypothesis, they weaken the confidence in the claimed superiority of the Transformer over the CRF baseline.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic has raised several valid concerns about potential confounds and biases in the experimental design, which could inflate the apparent performance of the Transformer model compared to the CRF baseline. I will carefully evaluate each finding and provide a rebuttal or concession as appropriate.\n\nF1 is a valid concern about the tokenizer vocabulary being fit on the training data, which could lead to a representation mismatch. This needs to be empirically tested to ensure the performance difference is not an artifact of the tokenization process.\n\nF2 raises a reasonable point about potential annotation quality differences across sites and time periods. The claim about high inter-rater agreement on the held-out sample may not generalize, and systematic label noise could affect model performance in unpredictable ways.\n\nF3 is a thoughtful critique about the limitations of using report-level recall as the sole optimization and model selection metric. While this aligns with the clinical screening use case, it ignores precision trade-offs that could impact downstream application.\n\nF4 questions whether a single held-out site is sufficient to capture true cross-site generalization, as that site may happen to be similar to the training distribution. Multiple held-out sites or cross-validation would provide a more robust estimate.\n\nF5 rightfully points out that the 4-gram similarity threshold for template leakage is arbitrary, and more sophisticated similarity metrics should be explored.\n\nF6 highlights a valid concern about the hyperparameter tuning budget and early stopping potentially favoring the Transformer model over the simpler CRF.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The claim about using a domain-aware Transformer tokenizer with vocabulary fit on training data only is reasonable, but the critic's concern about representation mismatch is not supported by evidence. The methodology states that the tokenizer vocabulary is fit on training data and 'frozen' for validation and test, which should prevent this issue. An empirical test comparing performance with a retrained tokenizer would provide stronger evidence, but the current design choice is justified."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The critic raises a valid point about potential annotation quality differences across splits. However, the methodology already addresses this by stating that annotation quality will be monitored and reported separately for each split. If systematic differences are observed, that would be a limitation of the study scope, but the current design is appropriate for the stated goals."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The critic's concern about the limitations of using report-level recall as the sole optimization metric is reasonable. However, the methodology also specifies that secondary extraction metrics (span-level precision and recall, per-entity F1) will be reported, which should provide a more comprehensive view of model performance. While optimizing solely for report-level recall has drawbacks, the additional metrics mitigate this concern."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The critic is correct that a single held-out site may not be sufficient to fully capture cross-site generalization. However, the methodology states that this held-out test is intended to 'directly test whether Transformer fine-tuning generalizes beyond the training hospital systems,' which is a valid and important evaluation, even if it does not provide a complete picture of cross-site performance. Expanding the evaluation to multiple held-out sites or cross-validation would strengthen the conclusions, but the current design is appropriate for the stated scope."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The critic's point about the arbitrariness of the 5% threshold for 4-gram similarity is valid. However, the methodology also states that the presence of template leakage will be documented, which suggests that the researchers are aware of this potential issue and will report on it, even if the threshold is not perfect. Since this is a minor control and the main results will still be interpretable in light of any observed leakage, this is not a critical flaw."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The critic raises a fair point about the potential for the Transformer model to benefit more from the hyperparameter tuning process, given the additional dimensions (learning rate and batch size) compared to the simpler CRF model. However, the methodology states that 'Both models use the same label scheme and are trained with identical computational resources and development time,' which suggests the researchers have accounted for this potential confound. While a more closely matched tuning process would provide stronger evidence, the current design is justified and the limitations can be acknowledged in the analysis."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "After carefully evaluating each of the critique findings, I believe the overall methodology is sound and the concerns raised, while valid, do not fundamentally undermine the ability to draw meaningful conclusions from the experiment. Several of the findings were rebutted as being within the stated scope of the design or as having immaterial impact on the primary conclusions. No fatal flaws were identified, and the remaining potential limitations can be acknowledged and explored in future work. Therefore, the verdict is 'defense_wins.'"
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

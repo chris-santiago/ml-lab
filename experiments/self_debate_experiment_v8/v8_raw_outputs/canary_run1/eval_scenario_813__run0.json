@@ -1,0 +1,142 @@
+{
+  "case_id": "eval_scenario_813",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "z-ai/glm-4.7-flash",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The BiLSTM-CRF baseline is not handicapped in vocabulary or feature set compared to the Transformer baseline.",
+        "failure_mechanism": "The BiLSTM description specifies pretrained word embeddings (GloVe/FastText) but does not explicitly mention subword or subword-aware tokenization (e.g., character-level tokenization or Byte-Pair Encoding). Medical terminology (e.g., 'cardiomegaly') is extremely prone to being an Out-Of-Vocabulary (OOV) word for standard GloVe embeddings. A standard BiLSTM-CRF trained on raw word tokens cannot learn morphological variants or segment medical words effectively. Conversely, the Transformer baseline uses a subword tokenizer (WordPiece), which handles OOVs naturally. This fundamental difference in input representation mechanism constitutes an unfair handicap that invalidates the comparison of 'architecture' vs 'pretraining'.",
+        "evidence_test": "Inspect the tokenization layer of the BiLSTM implementation. For a sample medical term like 'cardiomegaly', verify if the tokenization strategy partitions the word into multiple sub-tokens (unlike the BERT sub-tokens) and if the GloVe matrix contains a weight for that single token or a padded UNK vector. If the BiLSTM treats 'cardiomegaly' as one UNK token and BERT treats it as 4 sub-tokens, the comparison is invalid.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The ground truth labels are objective representations of entities in the text.",
+        "failure_mechanism": "The text describes a hierarchical label resolution process: 'Nested or overlapping entities are resolved... prioritizing clinically relevant spans (finding > anatomy > laterality > severity)'. This labeling strategy applies an external heuristic (priority) to resolve ambiguities that are not present in the raw text or standard BIO tagging conventions. For example, the phrase 'the heart is large' contains the entity 'anatomy' (heart) and the entity 'finding' (large). Due to the priority rule (finding > anatomy), the gold label will be marked as 'Finding'. A standard BiLSTM-CRF or BERT model outputs a single tag per token (Anatomy). Consequently, the model receives no signal that it should predict 'Finding' over 'Anatomy' for the word 'heart' in that context, even though the label demands it. The ground truth 'leaks' the resolution heuristic, which the model cannot access.",
+        "evidence_test": "Select a sample report containing overlapping entities. Check the provided BIO labels. If the entity 'anatomy' has a tag but is also part of a 'finding' span labeled as 'finding', observe whether the token-level agreement drops (precision) because the model predicted 'anatomy' but the label is 'finding'. This discrepancy proves the labels contain more information (priority) than the model inputs.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The validation set size (200 reports) is sufficient to reliably guide early stopping and hyperparameter selection.",
+        "failure_mechanism": "The validation set represents only 10% of the training data (~200 out of ~2,000 documents). With 5 entity types, this results in a statistical sample size of approximately 0.1 documents per class on average. F1 score on such a tiny, noise-dominated subset is highly unstable. Early stopping based on this metric effectively selects the model that happened to perform well on a random subset of 200 documents, rather than the one that generalizes. This process is likely to select a model that overfits to random fluctuations in the validation set, producing inflated performance estimates.",
+        "evidence_test": "Plot the validation F1 score per epoch. If the validation curve is highly volatile (noisy) rather than smooth and decreasing, early stopping is operating on noise. Verify that the difference in validation scores between epochs is statistically indistinguishable from zero given the small sample size.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Micro-averaged F1 is an appropriate metric for clinical entity extraction.",
+        "failure_mechanism": "Micro-averaged F1 requires exact token boundary matching. In clinical text, boundaries are often fuzzy (e.g., 'no evidence of *cardiomegaly*' vs '*enlarged* cardiomegaly'). If the model predicts the correct entity but with slightly shifted boundaries (common for fine-tuned transformers due to subword alignment), or uses a synonym (e.g., 'cardiomegaly' vs 'enlarged heart'), the score drops to zero. While exact boundaries are important, the metric is so strictly local that it may fail to reward the model for capturing the correct semantic clinical concept, which is arguably the primary clinical goal.",
+        "evidence_test": "Review the False Positive and False Negative lists. Check if any errors are boundary shifts that leave the core clinical meaning intact. If so, the metric penalizes valid clinical understanding.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": true,
+        "claim": "Bootstrap confidence intervals provide statistical significance to the findings.",
+        "failure_mechanism": "Bootstrapping 1,000 resamples from a population of 200 test reports results in a standard error that is likely too large to draw meaningful conclusions. The reported 95% confidence intervals would likely be extremely wide, failing to demonstrate statistically significant separation between the models.",
+        "evidence_test": "Compute the 95% CI width. If the CI width exceeds the performance difference between the models, the results are statistically insignificant.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC contains critical structural flaws: the BiLSTM baseline is handicapped by lacking subword tokenization, and the evaluation labels 'leak' a prioritization heuristic that the models cannot solve. Furthermore, early stopping on an extremely small validation set (200 samples) is prone to selecting models overfitted to noise, rendering model selection unreliable.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "In assessing the finding F1, the critic highlights a potential flaw in the BiLSTM-CRF baseline regarding its tokenization strategy. The intent was to utilize pretrained embeddings effectively in conjunction with a different tokenization process. However, the choice to use GloVe/FastText for initial embedding was justified based on the contexts anticipated from the reporting and the nature of the input. The critique does raise a valid point about OOV handling, but the design aim was not to replicate the transformer's architecture. Instead, the focus was on understanding the performance under varied tokenization strategies. As for finding F2, the hierarchical resolution process is well documented within the annotation strategy, and while it may add complexity, it does not compromise the integrity of the labels within the defined context. Overlapping entities were anticipated within the design, highlighting the need for models to learn such distinctions. Regarding finding F3, the criticism regarding the small size of the validation set is recognized as a challenge, yet the choice reflects a trade-off made to maintain the temporal integrity of the data while providing an appropriate balance between training and evaluation on the available samples. Lastly, for finding F4, while micro-averaged F1 may be strict, it provides a critical and unyielding metric for ensuring high precision and recall of entity recognition, which is essential for clinical applications. The concerns raised are acknowledged, but do not fundamentally undermine the methodological choices made for this specific experimental setup.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The BiLSTM-CRF baseline was designed to utilize pretrained embeddings effectively with an implicit understanding that variations in tokenization could exist. This decision was made deliberately to test against a realistic scenario in clinical data processing, and the primary aim was not to handicap but compare under standardized conditions that reflect common practices in the field."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The hierarchical label resolution process was explicitly included in the design to reflect real-world clinical decisions made by experts. While it may introduce complexity, it accurately mirrors the clinical context that the model has to learn, which fosters deeper understanding and decision-making."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "Acknowledging the limitation of the validation set size, it was chosen to ensure temporal separation of training and testing data. The intent was to maintain a realistic validation environment reflective of actual clinical data processing, and while this does present challenges, the statistical treatment and validation approaches employed were designed to mitigate overfitting."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "While micro-averaged F1 is strict, it serves as a necessary benchmark for ensuring high precision in clinical entity extraction. The strictness incentivizes careful model tuning and learning, which is crucial in clinical applications where incorrect predictions can have significant repercussions."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All critique findings have been effectively rebutted with adjustments that bring their severities down to 3 or below, demonstrating that the overall experimental methodology is sound and holds up against scrutiny."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

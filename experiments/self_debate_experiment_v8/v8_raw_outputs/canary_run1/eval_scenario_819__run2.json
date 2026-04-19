@@ -1,0 +1,257 @@
+{
+  "case_id": "eval_scenario_819",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split (months 1-24 train, 25-30 val, 31-36 test) ensures the evaluation aligns with deployment, where the model will be applied to future ED visits.",
+        "failure_mechanism": "The 6-month test window (months 31-36) may contain systemic distribution shifts relative to training (e.g., seasonal acuity patterns, staffing changes, protocol updates, patient population shifts). If admission thresholds or triage documentation practices change over the 3-year period \u2014 a common occurrence in health systems \u2014 the model trained on years 1-2 may exhibit poor generalization to year 3. The chronological split design correctly prevents data leakage but does not guarantee temporal robustness.",
+        "evidence_test": "Measure admission rate and feature distributions across temporal segments. Report any statistically significant shifts in: (a) overall admission rate, (b) ESI acuity distribution, (c) vital sign ranges, (d) note length distribution. If shifts exist, report performance on earlier vs. later test months separately to quantify temporal degradation.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Excluding visits with missing critical vitals prevents incomplete data from degrading model performance.",
+        "failure_mechanism": "Excluding visits with missing vitals creates selection bias. Missing vitals are not random \u2014 they correlate with patient acuity, arrival mode (e.g., walk-in vs. ambulance with in-transit monitoring), and ED operational state. If sicker patients or surge-period visits have systematically more missing data, the model is trained on a biased subset that under-represents high-acuity, high-risk presentations where admission prediction matters most. The model will not be evaluated on its ability to handle the cases where it is most needed.",
+        "evidence_test": "Compare admission rates between included and excluded visits (if accessible). Report the proportion of total ED volume excluded. Evaluate model performance on a held-out subset where vitals were partially missing (simulating real-world deployment) to assess robustness to missingness.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Note length is included as a feature in both models, allowing the model to account for verbosity and preventing documentation volume from inflating multimodal performance.",
+        "failure_mechanism": "Note length may be a proxy for clinical suspicion of admission. Nurses who anticipate a patient will be admitted may write more detailed notes preemptively. If note length correlates with admission probability independently of clinical content, the model could exploit this shortcut. Even with note length as a covariate, the model may learn to rely on documentation patterns rather than clinical text content \u2014 particularly problematic if documentation practices vary by site, shift, or time period.",
+        "evidence_test": "Analyze correlation between note length and admission outcome in training data. Report permutation importance of note length. Conduct the proposed secondary analysis on standardized/minimal-text subsets and report whether multimodal advantage persists. If performance drops substantially without note length, this confirms dependency on documentation volume.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Pre-trained text embedding models (BioBERT, ClinicalBERT) are frozen and trained on external corpora, preventing overfitting to the ED dataset.",
+        "failure_mechanism": "Pre-trained biomedical language models may have been exposed to clinical notes containing admission prediction signals or similar ED triage documentation during pre-training. Even though the model is frozen and not fine-tuned, the fixed embeddings may contain latent representations that encode admission-related language patterns (e.g., specific symptom descriptions that correlate with admission in the pre-training data). This is a subtle form of leakage that is difficult to detect but could inflate multimodal performance artificially.",
+        "evidence_test": "Ablation study: replace BioBERT embeddings with random embeddings or a simple bag-of-words baseline. If multimodal performance drops substantially, the gain is attributable to learned representations. Alternatively, use a domain-random embedding model as a control to establish the upper bound of text-derived signal.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The validation set (6 months) with 5-fold CV provides sufficient data for hyperparameter tuning.",
+        "failure_mechanism": "Six months of ED data may yield insufficient sample size for robust hyperparameter tuning, particularly if the validation-set admission rate differs from training or if rare subgroups exist. Over-tuning to the validation period could produce a model that happens to perform well on months 25-30 but does not generalize to the structurally different test period (months 31-36). The final evaluation on test set is then a single-shot estimate without confidence intervals on the model selection process.",
+        "evidence_test": "Report validation-set sample size and admission count. Report stability of selected hyperparameters across CV folds (e.g., whether the same hyperparameters are selected in each fold). If hyperparameters vary substantially across folds, this indicates instability.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Site-level stratification in the split controls for site-specific triage practices and admission thresholds.",
+        "failure_mechanism": "Stratification ensures proportional representation but does not control for site-specific temporal trends. If one hospital's admission threshold shifts dramatically during the test period (e.g., due to bed capacity changes), while another remains stable, the model may perform well on stable sites and poorly on shifting ones. Aggregate AUROC masks this heterogeneity.",
+        "evidence_test": "Report per-site test-set AUROC. Analyze whether performance correlates with site-level temporal shifts in admission rate between validation and test periods. If performance varies substantially across sites, report site-stratified results.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The label is sourced from clinical disposition records independent of the narrative triage note content.",
+        "failure_mechanism": "While the label definition is independent, triage notes are written by clinical staff who have access to preliminary disposition discussions. If a preliminary admission decision is communicated to nursing staff before the note is written, the note may implicitly reflect this information. This is not classical leakage but reflects the reality of clinical workflow where information propagates forward.",
+        "evidence_test": "Analyze temporal ordering: verify that triage note timestamps precede disposition decision timestamps for all cases. Report any cases where note timestamp is ambiguous or post-dates disposition.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Using the same model architecture (gradient boosting) for both baseline and multimodal ensures a fair comparison.",
+        "failure_mechanism": "Gradient boosting may not be the optimal architecture for incorporating high-dimensional text embeddings. The comparison tests whether text features add value to gradient boosting specifically, not whether text information is generally useful. A different architecture (e.g., neural networks) might leverage text more effectively, or alternatively, gradient boosting might already capture text-like signal through structured proxies.",
+        "evidence_test": "This is an acknowledged design choice rather than a flaw. The hypothesis is narrowly scoped to gradient boosting, which is reasonable for a PoC. No evidence test required \u2014 this is a limitation of scope.",
+        "flaw_category": "defensible_unconventional"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Observation stays are excluded from the label definition.",
+        "failure_mechanism": "Observation status is a clinically meaningful disposition that may be difficult to distinguish from admission in real time. Excluding observation stays removes a gray-area population that has clinical relevance for bed planning. The model is trained only on clear-cut admissions vs. discharges, potentially limiting its utility for borderline cases.",
+        "evidence_test": "Report the proportion of visits classified as observation stays in the excluded data. If observation stays represent a non-trivial fraction of short-stay hospitalizations, consider a secondary analysis with observation stays included as a positive class or as a separate category.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The experiment design is methodologically sound in its core structure (chronological split, stratified by site, frozen embeddings, fair comparison). However, three FATAL-level concerns undermine the conclusion: (1) temporal distribution shift between training and test periods may cause poor generalization to future data; (2) excluding visits with missing vitals creates selection bias that under-represents high-acuity cases; (3) note length as a feature may allow the model to exploit documentation patterns rather than clinical content. These issues must be addressed before the hypothesis can be considered validated.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic has raised several concerns regarding the experimental design, including distribution shift, selection bias, potential leakage, and the sufficiency of the validation set. While these concerns are valid, many are addressed through proposed evidence tests and secondary analyses.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The concern about distribution shift is valid. Measuring admission rate and feature distributions across temporal segments will help quantify this risk."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "Comparing admission rates between included and excluded visits will help assess selection bias. Evaluating performance on a subset with partially missing vitals is also proposed."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The design includes note length as a feature and proposes secondary analyses on standardized/minimal-text subsets to address concerns about verbosity and documentation patterns."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "An ablation study using random embeddings or a bag-of-words baseline is proposed to assess the impact of pre-trained embeddings."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Reporting validation-set sample size and stability of selected hyperparameters across CV folds will help assess the robustness of hyperparameter tuning."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Site-level stratification is used, and reporting per-site test-set AUROC will help assess heterogeneity in performance across sites."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Analyzing temporal ordering of triage note timestamps and disposition decisions will help confirm label independence, but the impact is likely minor given the existing control."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The choice of gradient boosting is a defensible design choice within the scope of the hypothesis. It is acknowledged as a limitation but does not invalidate the comparison."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Reporting the proportion of observation stays is a reasonable request. Excluding them is a design choice that focuses the model on clear-cut admissions vs. discharges."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Several findings (F1, F2, F4) are deferred for empirical testing to quantify risks such as distribution shift and selection bias. After rebuttals, no finding remains above adjusted severity 3, but the presence of deferred findings supports an empirical_test_agreed verdict."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 7,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 7,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "3 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "case_id": "eval_scenario_848",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "z-ai/glm-4.7-flash",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The validation performance (PR-AUC) on months 13-15 accurately reflects the model's predictive power on data available at the time of deployment.",
+        "failure_mechanism": "The proposed 30-day grace period for labeling means that emails arriving in the validation period (months 13-15) may not have their final labels confirmed until months 16-18 or later. Using these validation labels for hyperparameter selection constitutes 'future ground truth leakage'. The model is effectively tuning its decision boundary using data whose ground truth was not yet established at the time of validation.",
+        "evidence_test": "Inspect the date associated with the final 'confirmed' label for every validation record. If any validation record has a final label date strictly later than its receipt date (by >1 day), the validation set is tainted. Repeat hyperparameter tuning using only labels finalized *within* the validation split to see if performance degrades significantly.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline model (Logistic Regression) receives an equivalent and fair tuning effort to the transformer model.",
+        "failure_mechanism": "The design explicitly states that the baseline's class weights are tuned 'post-hoc' to 'match the transformer's operating point'. This violates the principle of independent tuning. The baseline hyperparameters are effectively being driven by the target metric performance of the transformer, rather than the baseline's own independent optimization on the validation data. This artificially inflates the baseline's apparent performance and biases the comparison.",
+        "evidence_test": "Run the baseline tuning procedure strictly on the validation set without consulting the transformer's operating point. Verify if the baseline's PR-AUC drops below the transformer's PR-AUC. If it does, the previous result was an artifact of targeted tuning.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Optimizing for Precision-Recall AUC (PR-AUC) directly reflects the SOC's operational priority of maintaining a low false positive rate.",
+        "failure_mechanism": "PR-AUC is a global summary metric that balances precision and recall across the entire range of operating points. However, the SOC's requirement ('prioritizes catching malicious emails at low false-positive rates') is a constraint on a specific operating point (e.g., Precision at 95% Recall). A model could have a high PR-AUC due to excellent performance at low recall but fail completely at the high-precision threshold required for deployment.",
+        "evidence_test": "Plot the Precision-Recall curve for both models. Calculate 'Precision at 95% Recall' for both. Compare this metric to the PR-AUC value. Optimizing for PR-AUC might result in a model that scores high on the area but performs poorly at the specific recall threshold required for the SOC's workflow.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The chronological split strategy provides a statistically valid test set to claim significant uplift in performance.",
+        "failure_mechanism": "The test set consists of only 3 months (16\u201318) of data, representing a fraction (approx. 1/6) of the training period. With the high class imbalance inherent in phishing detection (low prevalence), a 3-month test window contains very few malicious samples. This results in a high-variance estimate, making it statistically difficult to confidently claim a 'significant uplift' over a baseline without large confidence intervals or bootstrapping on the test set.",
+        "evidence_test": "Calculate the 95% confidence interval for the PR-AUC of the models on the test set using a bootstrap resampling method. If the confidence intervals for the Transformer and Baseline overlap significantly, the claim of 'outperformance' is not statistically substantiated by this sample size.",
+        "flaw_category": "eval_inflation"
+      }
+    ],
+    "summary": "The proposed design suffers from a critical 'future ground truth' leakage flaw in the validation set labeling strategy (FATAL) and employs questionable tuning methodologies for the baseline comparison that artificially inflate fairness (MATERIAL). Additionally, the primary metric (PR-AUC) may not align with the operational requirement for a specific precision threshold (MATERIAL).",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The analysis addresses each critique finding in detail, evaluating the validity of the critic's claims against the design intent and evidence.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The 30-day grace period is a deliberate design choice to ensure label accuracy. While it's true that some validation labels are finalized after the validation period, the alternative (using potentially inaccurate labels) would be worse."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Matching the baseline's operating point to the transformer's is a justified design choice to ensure a fair comparison at the relevant operating threshold."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "While PR-AUC is a global metric, it is still relevant for the SOC's priority because it reflects performance across various thresholds, including high recall. The additional metric 'Precision at 95% Recall' is also tracked."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 2,
+        "justification": "The critic raises a valid concern about the test set size and statistical validity. Calculating confidence intervals via bootstrap resampling is necessary to resolve this question empirically."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The methodology is sound with one finding deferred for empirical testing to assess statistical validity."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "defense_wins",
+        "rule_applied": "constitutional: DEFER + adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

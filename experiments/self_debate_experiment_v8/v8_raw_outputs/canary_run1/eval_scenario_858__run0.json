@@ -1,0 +1,232 @@
+{
+  "case_id": "eval_scenario_858",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Weak supervision labels derived from agent behavior (clicks, sends, citations within 5 minutes) accurately reflect article relevance to the query",
+        "failure_mechanism": "Agent behavior labels capture agent familiarity and workflow patterns, not pure semantic relevance. An article may be clicked/sent because: (a) it's popular/familiar to agents rather than best match; (b) agents send proactively before validating relevance; (c) the 5-minute window captures exploratory clicks unrelated to actual resolution; (d) articles cited in resolution notes may be tangential context rather than direct answers. The model trained on these noisy labels optimizes for agent behavior patterns, not human-judged relevance.",
+        "evidence_test": "Compare model performance on automatic labels vs. held-out manual labels (the 300-query set). If MRR improves on automatic labels but degrades or stays flat on manual labels, the labels are misaligned with true relevance. This is the critical check the hypothesis acknowledges but undersizes.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 300-query manual annotation set is sufficient to validate that improvements on automatic labels translate to true relevance",
+        "failure_mechanism": "300 queries is too small to detect systematic differences. With typical IR evaluation variance, you'd need 1000+ queries per bin to detect meaningful MRR differences of 0.05-0.10 with 80% power. The sanity check is underpowered to catch label misalignment - the model could improve on agent-behavior patterns while degrading on actual relevance, and this would not be reliably detected.",
+        "evidence_test": "Power analysis: compute minimum detectable effect size given 300 queries, \u03b1=0.05, 80% power. If MDE > expected MRR improvement (typically 0.03-0.05), the check is inadequate. Report confidence intervals on manual-label MRR differences.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "MRR @ top-10 is the right metric because agents need to find correct article quickly",
+        "failure_mechanism": "MRR rewards getting any relevant article high, not getting the BEST article. In support contexts, sending a partially-relevant article may cause more agent friction than sending nothing (agent must evaluate, realize it's wrong, search again). The metric doesn't penalize flooding the top-10 with multiple marginally-relevant articles. NDCG or precision-focused metrics would better capture the 'needle-in-haystack' nature of support queries.",
+        "evidence_test": "Analyze correlation between MRR gains and actual agent ticket handle time in a pilot study. If high-MRR models don't reduce handle time, the metric is misaligned with operational objectives.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Contrastive training with in-batch negatives will teach the model semantic relevance rather than article popularity",
+        "failure_mechanism": "In-batch negatives are sampled from the same time period and share corpus statistics with positives. If popular articles appear more frequently as negatives, the model may learn to demote popular articles (which have high click counts in training) rather than learn semantic matching. The negative sampling strategy doesn't control for article frequency in the corpus.",
+        "evidence_test": "Analyze whether the transformer learns to demote high-click-frequency articles by examining retrieval rankings on a held-out set of queries where ground truth is independent of click frequency. Report correlation between article click frequency in training and retrieval rank in test.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratified analysis post-hoc can detect confounds from query length or spelling errors",
+        "failure_method": "Post-hoc stratification after seeing results is a form of selective analysis. If the transformer outperforms BM25 on short queries but the authors didn't plan to check this upfront, reporting only significant splits creates publication bias. The analysis plan should be pre-registered or the stratified metrics should be reported with appropriate multiple-hypothesis correction.",
+        "evidence_test": "Check whether stratified metrics were specified in advance (pre-registered analysis plan) or added after seeing results. Apply Bonferroni or FDR correction across stratified bins.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split ensures test evaluates model generalization to future queries",
+        "failure_mechanism": "While temporal split avoids data leakage, it doesn't address that the hypothesis tests whether transformer generalizes to future data distribution - but the hypothesis framing suggests this is a feature, not a bug. However, if distribution shift between train and test is severe (e.g., new product areas, new issue types), poor test performance could be due to distribution shift rather than model failure. The experiment doesn't measure how much distribution shift occurred or control for it.",
+        "evidence_test": "Compute distribution statistics (query length, product area, topic distribution via LDA/embeddings) across splits. Report kl-divergence or cosine distance between train/val/test embedding centroids. If shift is extreme, report per-stratum performance.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Excluding non-primary languages isolates semantic effects from language-specific variation",
+        "failure_mechanism": "The experiment excludes non-English queries but the model is initialized from a pre-trained checkpoint (likely English-fine-tuned). There's no evidence the model or BM25 can handle code-mixed queries, typos in non-English words, or multilingual articles that might exist in the corpus. This limits generalizability claim.",
+        "evidence_test": "Report language distribution of queries and articles. If non-English content exists in articles but queries are English-only, document this gap.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Both models use the same validation set for model selection ensuring fair comparison",
+        "failure_mechanism": "Hyperparameter tuning on validation set creates a form of overfitting to validation data. With grid search over multiple hyperparameters for both models, the one that happens to perform best on validation may not be the best for test. The 'computational budget' framing obscures this - both models have similar budgets, but neither is guaranteed to have found the optimal configuration.",
+        "evidence_test": "Report validation performance variance across random seeds. If validation MRR varies significantly across seeds, the model selection is unstable.",
+        "flaw_category": "eval_inflation"
+      }
+    ],
+    "summary": "Two FATAL flaws undermine the experiment: (1) weak supervision labels derived from agent behavior don't measure true semantic relevance - the model may learn agent familiarity patterns rather than query-article semantic matching; (2) the 300-query manual validation set is too small to reliably detect this mismatch (underpowered sanity check). These create a scenario where the transformer could 'succeed' on automatic labels while actually degrading on true relevance. Additional MATERIAL concerns include MRR misalignment with operational objectives, untested negative sampling assumptions, and post-hoc selective analysis risk.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic raises several concerns about the experiment design, including the validity of weak supervision labels, the size of the manual annotation set, the choice of MRR as the primary metric, potential biases in contrastive training, post-hoc stratification, distribution shift, exclusion of non-primary languages, and hyperparameter tuning. Each concern is addressed in the rebuttals below.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The experiment acknowledges the limitations of weak supervision labels and includes a manual annotation check. While agent behavior labels have noise, stratification by article click frequency checks for corpus bias (Section 7: Confound Controls). The manual annotation set is intended as a sanity check, not the primary evaluation."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The manual annotation set is a sanity check, not the primary evaluation. While 300 queries may be underpowered for precise MRR differences, it can still indicate severe misalignment. The experiment is scoped to agent-logged relevance, not human-judged relevance (Section 7: Claim Scope)."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "MRR @ top-10 aligns with operational objectives (quickly finding a relevant article). While NDCG might provide additional insights, MRR is a standard metric for similar tasks. The experiment's scope is to compare model performance on agent-logged data, not to optimize for actual agent efficiency (Section 5: Evaluation Metrics, Section 7: Claim Scope)."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The experiment includes stratification by article click frequency to check for corpus bias (Section 7: Confound Controls). This analysis will indicate if the model is demoting high-click-frequency articles disproportionately."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "Stratified analysis is pre-specified to detect confounds (Section 7: Confound Controls). While post-hoc stratification can introduce bias, the key strata (query length, spelling errors) are motivated by known potential confounds."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The experiment reports corpus statistics across train/val/test splits to document distribution drift (Section 7: Temporal Non-Stationarity). This checks for severe distribution shift."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The experiment is scoped to primary languages. Generalizability to non-primary languages is out of scope (Section 7: Claim Scope). The pre-trained checkpoint is likely English-fine-tuned, but this is consistent with the language restriction."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "Both models are tuned with the same computational budget, ensuring a fair comparison. Validation performance variance across random seeds is a minor concern given the experiment's scope."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "After rebuttals, all findings have adjusted severity \u2264 3, meeting the EXONERATE conditions. The methodology is sound, and the critique does not identify significant flaws that change the recommendation."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

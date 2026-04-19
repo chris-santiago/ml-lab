@@ -1,0 +1,132 @@
+{
+  "case_id": "eval_scenario_777",
+  "stratum": "regular",
+  "flaw_category": "distribution_shift",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The analytic cohort restriction (patients with \u226512 months of observable history) ensures comparable utilization features and well-defined sequences.",
+        "failure_mechanism": "Selection bias/Spectrum bias. By requiring 12 months of prior history, the PoC excludes 'new' patients or those who only seek care when critically ill (intermittent users). In a real deployment, a significant portion of readmissions occur in patients without deep longitudinal history in that specific system. The model may appear highly performant because it is only tested on 'known' patients with dense data, but will fail or behave unpredictably on the 'cold-start' population that constitutes a primary challenge for readmission prediction.",
+        "evidence_test": "Compare the PR-AUC of the models on the current cohort versus a cohort containing patients with <12 months of history. If performance drops significantly on the latter, the '12-month' prerequisite has artificially inflated the perceived utility of the transformer's temporal sequences.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Temporal-stratified splitting (60/20/20) prevents information leakage and respects deployment scenarios.",
+        "failure_mechanism": "Implicit assumption of stationarity. Clinical coding practices (ICD updates), hospital protocols, and patient demographics often shift over a 36-month window (e.g., a new wing opening, a change in readmission policy, or a pandemic event). If the test set (the most recent 20%) differs distributionally from the train set, the Transformer\u2014which is prone to overfitting specific token patterns\u2014may degrade more sharply than the Logistic Regression. The PoC does not include a mechanism to quantify the magnitude of this drift or test if the 'win' is stable across different temporal slices.",
+        "evidence_test": "Perform a 'sliding window' validation where the model is trained on months 1-12 and tested on 13-15, then trained on 2-13 and tested on 14-16, etc. If the performance delta between Transformer and LR fluctuates wildly, the result is an artifact of the specific split rather than a robust architectural advantage.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer is compared 'apples-to-apples' because it receives the same baseline features as the LR.",
+        "failure_mechanism": "Under-powered baseline. The Logistic Regression is limited to 'hand-engineered features' and a linear decision boundary. The Transformer's advantage might not be the 'temporal sequences' specifically, but rather its ability to model complex non-linear interactions between the *baseline* features themselves. Without a non-linear baseline (e.g., XGBoost or Random Forest) using the same baseline features, the PoC cannot isolate whether the gain is due to *temporal signal* or simply *model capacity/non-linearity*.",
+        "evidence_test": "Add a Gradient Boosted Decision Tree (GBDT) baseline using only the baseline features. If GBDT performance matches the Transformer, the temporal sequences are not providing the primary value; the linear nature of LR is the bottleneck.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Permutation importance will verify that the transformer's gain comes from temporal sequences.",
+        "failure_mechanism": "Permutation importance is notoriously misleading for highly correlated features and embedded sequences. In a transformer, the 'temporal signal' is distributed across embeddings and attention weights. Permuting a raw input sequence may not effectively isolate the contribution of the temporal pattern versus the presence of specific high-risk tokens (ICD codes) that are already captured in the baseline features, leading to an overestimation of the 'temporal' value.",
+        "evidence_test": "Compare the Transformer (Baseline + Sequences) against a version of the Transformer trained *only* on Baseline features (treating them as a sequence of length 1). The difference in PR-AUC provides a cleaner measure of the temporal sequence's marginal utility than permutation importance.",
+        "flaw_category": "eval_inflation"
+      }
+    ],
+    "summary": "The PoC has a critical flaw in cohort selection (12-month history requirement) that creates a selection bias, potentially inflating performance by excluding the hardest-to-predict patients. Additionally, it lacks a non-linear baseline, making it impossible to determine if the Transformer's success is due to temporal data or simply its ability to model non-linear interactions of static features.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "1. The first finding argues that by only including patients with at least 12 months of observable history, the cohort may not generalize to 'cold-start' patients who typically do not have such data. However, the intent of this restriction is to ensure that the model is trained on patients with sufficient data for effective feature extraction and interpretation, which is critical for valid model training. Although acknowledging the concern of selection bias, the structure supports predictions on patients with robust histories, which aligns with many clinical deployment scenarios. The specific relevance of the cohort to the deployment environment diminishes the impact of excluding patients with less history. 2. The second finding raises concerns about implicit assumptions of stationarity in the temporal-stratified data split, arguing that distributional shifts could create challenges for model performance. Nonetheless, temporal stratification was explicitly included to prevent future information leaks, and the analysis aims to reflect real-world deployment conditions. While acknowledging that changes can occur over time that might affect model accuracy, this design choice aligns with the need to ensure only past data is used in prediction and can be further validated by monitoring model performance post-deployment. 3. The third finding suggests that the logistic regression (LR) model\u2019s limitations in handling non-linear relationships might skew the comparative results. However, the PoC was aimed at demonstrating the capabilities of the transformer, and the unique handling of temporal sequences serves a specific purpose. The primary goal was to determine whether the transformer model could leverage its architecture to absorb and contextualize temporal sequences effectively beyond mere non-linear capabilities. 4. The fourth finding critiques permutation importance as a method for validating the transformer\u2019s performance, noting that for models with highly correlated features, this method can misrepresent the importance of temporal data. Although permutation importance has limitations, it remains a useful starting point for assessing feature impact. The suggestion to use a baseline transformer trained only on baseline features could be beneficial; however, permutation importance still provides additional insight into feature dynamics and is part of a broader suite of evaluations planned.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 6,
+        "justification": "The cohort restriction ensures sufficient data for feature extraction and focuses predictions on patients likely to have more predictable outcomes \u2014 a design decision made to align better with clinical reality while still preparing for the majority of use cases."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 5,
+        "justification": "The temporal stratification was explicitly included to prevent future information leakage, while acknowledging potential external shifts. The design respects real-world model deployment scenarios, and further validation post-deployment can help assess model stability under changing conditions."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "While logistic regression's nature as a linear model limits its expressiveness, the hypothesis tests the specific temp-intelligence of the transformer. The results will help illustrate the potential advantage of temporal features rather than focus narrowly on baseline feature interactions alone."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "Though permutation importance has limitations, it is still an appropriate technique for assessing feature relevancy in this context. The suggested additional analysis using a simplified transformer model adds value but does not negate the utility of the current evaluation methodology."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have adjusted severities \u2264 3 after careful rebuttals, indicating that the methodology remains sound against the critique. The rebuttals addressed each concern adequately, maintaining the strength of the PoC's design and its intended contributions."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

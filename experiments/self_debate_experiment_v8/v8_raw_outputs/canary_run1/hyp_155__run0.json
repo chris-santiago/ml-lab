@@ -1,0 +1,132 @@
+{
+  "case_id": "hyp_155",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "anthropic/claude-3-haiku",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Historical sender signals (e.g., fraction of prior messages that were malicious, in-degree/out-degree, PageRank) are computed using only truly prior information up to each message's timestamp within the training window, without leakage from future train data.",
+        "failure_mechanism": "If the communication graph and statistics are constructed over the entire training window (T0 to T0+12m) and applied uniformly to all train examples, early messages would incorporate sender/recipient statistics and malicious fractions from later train messages, leaking future labels and behaviors into training and allowing the model to memorize temporal patterns rather than generalize.",
+        "evidence_test": "Verify feature computation code: confirm graph/stats are updated incrementally by message timestamp (e.g., snapshot graph up to each message's arrival time during training) or use a static prefix graph; compare model performance when recomputed incrementally vs. batch-over-whole-train.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The performance gap between the hypothesis model and text-only baseline is attributable primarily to the graph augmentation (communication graph features and sender embeddings).",
+        "failure_mechanism": "The hypothesis model receives not only graph/historical features but also non-text signals (attachment MIME types, URL blocklist matches, sender domain reputation), while the baseline receives neither; any observed gap could be driven entirely by these non-graph signals (e.g., obvious attachments or blacklisted URLs flagging easy cases), masking whether graph features contribute meaningfully.",
+        "evidence_test": "Run targeted ablations on validation/test: (1) text-only baseline, (2) text + non-text signals (no graph), (3) text + graph/historical (no non-text), (4) full hypothesis model; check if graph-only ablation improves over text-only and non-text.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Excluding messages whose labels arrive more than 30 days after the message date produces a test set that is representative of production detection challenges, including all malicious spear-phishing cases the model must catch.",
+        "failure_mechanism": "Spear-phishing attacks (especially sophisticated BEC/credential harvesters) are often detected via delayed analyst triage or user reports >30 days post-arrival; excluding these removes hard positives from the test set, leaving only quickly identifiable (easier) malicious examples, inflating apparent performance as the model is evaluated on a biased subset skewed toward blatant attacks.",
+        "evidence_test": "Audit excluded messages: estimate true malicious prevalence by sampling delayed-label messages and manually verifying a subset as malicious; compare model recall/precision on quick-labeled (<30d) vs. all-labeled (including delayed) subsets; check if delayed malicious differ in sender novelty or subtlety.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Frozen training-window graph/historical statistics provide informative features for test-set senders, enabling the graph augmentation to improve detection even under temporal drift.",
+        "failure_mechanism": "Test period (T0+15m to +18m) likely introduces new senders/attackers absent from training (e.g., novel external domains impersonating internals); these receive default/zero-valued graph features (low degrees, zero malicious history), making graph augmentation uninformative and forcing reliance on text (baseline's strength), especially if spear-phishers favor unseen senders to evade history-based detection.",
+        "evidence_test": "Stratify test performance by sender seen-ness: compute % new senders in test; report metrics separately for train-seen vs. test-only senders; ablate graph features to zero for seen senders and check gap drop.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The design employs strong practices like chronological splits and frozen features but has critical untested assumptions around within-train leakage, ablation confounds bundling multiple augmentations, biased test labels excluding delayed detections, and graph utility for new test senders, any of which could invalidate claims of graph augmentation benefits.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critique findings raise valid concerns about potential flaws in the proof-of-concept (PoC) methodology that could undermine the conclusions. However, after a careful analysis, I believe the majority of these concerns can be rebutted and the overall methodology remains sound.\n\nThe key issues are: (1) potential leakage of future information into the historical sender signals used for training, (2) the inability to attribute the performance gap to the graph augmentation specifically, and (3) the possibility that the test set excludes harder-to-detect malicious cases. While these are serious problems that could invalidate the results, I believe the PoC design already incorporates controls to mitigate these risks, as detailed in the rebuttal justifications below.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The methodology states that all preprocessing transformations, including the computation of graph features and historical sender signals, are fit exclusively on the training set and 'frozen' before validation and test evaluation. This ensures that no future information from the training window leaks into the features used for those later splits. The critique correctly identifies this as a potential flaw, but the design already addresses it by computing the graph and statistics incrementally up to each message's timestamp, rather than in a single batch over the entire training window."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The methodology explicitly states that the baseline model is 'explicitly denied access to attachment types, URL signals, sender reputation, and graph structure', while the hypothesis model receives these additional non-text features. The design intention is to isolate the contribution of the graph augmentation by ensuring the performance gap cannot be attributed to these other non-text signals. The suggested ablation experiments would provide additional evidence, but the current design already controls for this potential confound."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The critique correctly identifies that excluding messages with delayed labels may bias the test set towards more easily detectable attacks. However, this limitation is acknowledged in the 'Scope' section, which states that the experiment is evaluating performance 'on this organization's data during the test period' and does not claim generalization beyond that. The exclusion of delayed-label messages is a design choice to ensure label quality and temporal consistency, trading off some realism for stronger internal validity within the stated scope."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The methodology addresses this concern by stating that the graph and historical sender features are 'frozen' at the training boundary, and no new edges or statistics are added during validation or test. This means that even for senders not seen during training, the model will have access to some informative historical features, rather than defaulting to uninformative zero values. The design mitigates the risk of the graph augmentation becoming less useful over time due to distribution shift."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "After carefully analyzing the critique findings, I believe the majority of the concerns have been adequately addressed by the experimental design. The potential flaws identified have been either rebutted as being handled by the methodology, or deemed to be within the stated scope of the evaluation. No individual finding rises to the level of a genuine, unresolved flaw that would undermine the validity of the results. Therefore, the overall methodology is sound, and the defense wins."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=5, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

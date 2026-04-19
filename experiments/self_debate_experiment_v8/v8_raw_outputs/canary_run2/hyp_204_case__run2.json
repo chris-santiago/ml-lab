@@ -1,0 +1,132 @@
+{
+  "case_id": "hyp_204_case",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Ticket metadata features (ticket count, median resolution time, median severity) are computed using only information available at alert time (i.e., from tickets that occurred before the alert).",
+        "failure_mechanism": "If the feature computation inadvertently includes tickets generated after the alert (e.g., the ticket that would be opened in response to the alert), then these features encode label information. Since the label requires an analyst to open a ticket within 24\u202fhours, the ticket count feature becomes directly predictive of the label, creating signal leakage that inflates model performance and invalidates the comparison between ranking and classification.",
+        "evidence_test": "Inspect the feature generation pipeline to verify that ticket aggregates are calculated with a strict temporal cutoff: only tickets with timestamp < alert_timestamp are included. If any ticket with timestamp \u2265 alert_timestamp contributes to the features, leakage is present. A unit test that injects a known future ticket and checks whether the feature changes would confirm the flaw.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Recall@5 is computed as a global fraction across all alerts, which adequately reflects the per\u2011group ranking objective used by LambdaMART.",
+        "failure_mechanism": "LambdaMART is trained to rank alerts within groups (e.g., all alerts on a host in a 24\u2011hour window). A global Recall@5 aggregates over alerts without regard to group boundaries, so a model could achieve a high score by performing well in large groups while failing in many small groups. The stakeholder\u2019s interest is in seeing high\u2011priority incidents first within each triage group, not across the entire alert stream.",
+        "evidence_test": "Compute Recall@5 per group (host\u201124h window) and then average across groups. Compare this group\u2011averaged Recall@5 to the global version. A substantial difference indicates that the global metric is misleading and does not faithfully measure the intended objective.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The ranking model\u2019s added value over the baseline comes solely from the learning\u2011to\u2011rank objective, not from the extended ticket\u2011history features.",
+        "failure_mechanism": "The ablation LambdaMART trained on baseline features only is intended to isolate the effect of the ranking objective. However, if the baseline features themselves are insufficiently expressive (e.g., missing important signals like host risk trends), the ablation may underperform for reasons unrelated to the objective, causing the observed gain to be attributed to ranking when it actually stems from the additional features.",
+        "evidence_test": "Run an additional ablation where the ranking model uses the baseline features plus a richer set of hand\u2011crafted features (e.g., host\u2011level rolling statistics) but retains the pairwise loss. If performance matches or exceeds the full ranking model, then the gain is due to feature richness rather than the ranking objective.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Ticket history features will be available in real time at alert triage in production, so the model trained on historical data will generalize without degradation.",
+        "failure_mechanism": "In many SOC environments, ticket creation may be delayed (e.g., analysts triage alerts before opening a ticket) or ticket metadata may be refreshed only periodically. If the latency between alert generation and ticket availability exceeds the feature window (past 7 days), the features will be stale or missing at inference time, causing a distribution shift that the model has not seen during training.",
+        "evidence_test": "Measure the actual latency between alert generation and the corresponding ticket creation in a production log sample. If a non\u2011trivial proportion of alerts have ticket latency > 0\u202fhours (or > feature window), then the assumption fails. A deployment test that withholds ticket features until they are truly available and compares performance will reveal any degradation.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The PoC presents a thoughtful temporal design but contains a potential signal leakage via ticket\u2011history features that could invalidate the results if not strictly guarded. Additionally, evaluation aggregation, baseline comparisons, and real\u2011time feature availability assumptions weaken the confidence in the claimed superiority of learning\u2011to\u2011rank over binary classification.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Analysis of each finding:\n\n**F1 (FATAL, sev 9):** The critic correctly identifies that ticket metadata features (ticket count, median resolution time, median severity from past 7 days) could include tickets created AFTER the alert if not explicitly filtered. Since the label definition requires a ticket to be opened within 24 hours of the alert, including post-alert tickets would create direct label leakage. The methodology says 'from the past 7 days' which implies historical data, but does not explicitly state a strict temporal cutoff at alert_timestamp. This is a genuine design gap - the feature computation pipeline must explicitly exclude tickets with timestamp >= alert_timestamp. The critic's evidence test is appropriate.\n\n**F2 (MATERIAL, sev 5):** The critic correctly notes that LambdaMART optimizes per-group ranking while global Recall@5 aggregates across all alerts. This is a valid observation - the global metric could mask poor performance in small groups. However, this is a metric interpretation issue, not an invalidation of the experiment. The global metric still enables fair comparison between models. This can be addressed by adding group-level Recall@5 as an additional metric - a design enhancement, not a fundamental flaw.\n\n**F3 (MATERIAL, sev 5):** The critic argues the baseline features may be insufficiently expressive, causing the ablation to underperform for reasons unrelated to ranking. However, the design already includes the ablation (LambdaMART on baseline features) specifically to isolate ranking from features. If baseline features are too weak, the ablation will show this. The critic's suggested additional ablation (adding richer features while keeping pairwise loss) would change both variables at once and confound the comparison. The existing design controls properly for this confound. This is a misunderstanding of the ablation's purpose.\n\n**F4 (MATERIAL, sev 4):** The critic raises a valid production deployment concern about ticket latency. However, this concerns generalization to production, not experimental validity. The methodology explicitly states scope is limited to this experiment: 'It does not establish... whether the model generalizes to other organizations (scope limited to one enterprise).' Production deployment assumptions are outside the experiment's stated scope.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic correctly identifies a genuine gap in the methodology. The feature description 'from the past 7 days' implies historical data but does not explicitly state a strict temporal cutoff at alert_timestamp. Since the label definition requires a ticket within 24 hours, including post-alert tickets would create direct label leakage. The pipeline must explicitly filter to tickets with timestamp < alert_timestamp. This is a real flaw that would invalidate results if present."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The observation is technically correct - LambdaMART optimizes per-group ranking while global Recall@5 aggregates across groups. However, this is a metric interpretation issue rather than a design flaw. The global metric enables fair comparison between models. The design can be enhanced by adding group-level Recall@5 as an additional metric (per host-24h window), but this is an enhancement, not a invalidation. The comparison between ranking and classification remains valid with the current metric."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic misunderstands the ablation's purpose. The design already includes LambdaMART on baseline features to isolate ranking from feature richness. If baseline features are insufficient, the ablation will demonstrate this (poor baseline LambdaMART performance). The critic's suggested additional ablation (adding richer features to ranking model) would confound the comparison by changing both features AND objective simultaneously. The existing design controls properly for this confound."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "This is a valid production deployment concern, but it concerns generalization to production, not experimental validity. The methodology explicitly limits scope: 'It does not establish... whether the model generalizes to other organizations (scope limited to one enterprise).' Production latency assumptions are explicitly outside the experiment's stated scope. The experiment tests ranking vs. classification under controlled conditions; production deployment is a separate question."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "F1 (severity 9) is CONCEDed as a genuine FATAL flaw - the methodology does not explicitly specify that ticket metadata features exclude tickets created after the alert timestamp, creating potential label leakage. This finding cannot be rebutted as it represents a real gap in the design's leakage controls. The remaining findings (F2, F3, F4) are successfully rebutted with adjusted severities \u2264 2, but the presence of an unconceded FATAL finding at severity 9 means the overall verdict is critique_wins."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=9 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

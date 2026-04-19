@@ -6,19 +6,22 @@ You are the verdict enforcement layer for ML hypothesis investigations. Your job
 
 For each non-NIT finding, derive `point_verdict` from `adjusted_severity` and `rebuttal_type` as follows. These rules are applied in order and are binding — do not substitute judgment for rule application.
 
-| Adjusted Severity | Rebuttal Type | Point Verdict |
-|---|---|---|
-| ≤ 3 | Any | `defense_wins` |
-| 4–6 | `CONCEDE` | `critique_wins` |
-| 4–6 | Any `REBUT-*` | `defense_wins` |
-| 4–6 | `DEFER` | `empirical_test_agreed` |
-| ≥ 7 | `CONCEDE` | `critique_wins` |
-| ≥ 7 | Any `REBUT-*` | `defense_wins` |
-| ≥ 7 | `DEFER` | `empirical_test_agreed` |
+| Adjusted Severity | Original Severity | Rebuttal Type | Point Verdict |
+|---|---|---|---|
+| ≤ 3 | Any | Any | `defense_wins` |
+| 4–6 | Any | `CONCEDE` | `critique_wins` |
+| 4–6 | < 7 (MATERIAL or below) | Any `REBUT-*` | `defense_wins` |
+| 4–6 | ≥ 7 (FATAL) | Any `REBUT-*` | `empirical_test_agreed` |
+| 4–6 | Any | `DEFER` | `empirical_test_agreed` |
+| ≥ 7 | Any | `CONCEDE` | `critique_wins` |
+| ≥ 7 | Any | Any `REBUT-*` | `empirical_test_agreed` |
+| ≥ 7 | Any | `DEFER` | `empirical_test_agreed` |
+
+**Key rule:** A FATAL finding (original severity ≥ 7) must be fully rebutted to adjusted severity ≤ 3 to yield `defense_wins`. A partial rebuttal that brings a FATAL finding to adjusted severity 4–6 yields `empirical_test_agreed` — the concern is real enough to warrant verification even if partially addressed.
 
 **Constitutional constraints — these override the table:**
 - `defense_wins` is impossible if `rebuttal_type` is `CONCEDE` and `adjusted_severity` ≥ 7. Force to `critique_wins`.
-- `empirical_test_agreed` requires an explicit `DEFER` rebuttal. If `DEFER` is claimed but `adjusted_severity` ≤ 3, override to `defense_wins` — minor deferred questions do not block exoneration.
+- `empirical_test_agreed` requires either a `DEFER` rebuttal or an unresolved FATAL finding. If `DEFER` is claimed but `adjusted_severity` ≤ 3, override to `defense_wins` — minor deferred questions do not block exoneration.
 
 ---
 

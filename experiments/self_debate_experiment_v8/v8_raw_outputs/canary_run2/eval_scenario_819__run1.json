@@ -1,0 +1,217 @@
+{
+  "case_id": "eval_scenario_819",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Triage notes are validated to originate at check-in, before disposition decisions",
+        "failure_mechanism": "If triage notes contain information generated after the disposition decision (e.g., post-admission clinical updates, or notes written retrospectively), the text features would leak label information. The model would learn from content that reflects the outcome rather than predicting it.",
+        "evidence_test": "Audit a random sample of notes: compare note creation timestamp to admission order timestamp. Verify all notes pre-date disposition. Alternatively, search for content in notes that could only be known post-disposition (e.g., 'patient was admitted to floor').",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Pre-trained frozen biomedical embeddings (BioBERT/ClinicalBERT) capture relevant patterns in this ED's triage notes",
+        "failure_mechanism": "These models were trained on biomedical literature and clinical notes from other institutions. ED triage notes are informal, contain institution-specific abbreviations, and use language patterns that may differ substantially from the model's training distribution. The embeddings may not encode the signal the hypothesis assumes they carry.",
+        "evidence_test": "Evaluate embedding quality on a labeled subset: do embeddings cluster by chief complaint category? Compare multimodal vs. baseline AUROC on a small held-out sample before running full experiment. Report embedding similarity to known clinical concepts.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Patterns learned on months 1-24 generalize to months 31-36 without significant degradation",
+        "failure_mechanism": "The experiment uses chronological splits to prevent leakage but explicitly acknowledges 'operational non-stationarity.' Seasonal acuity changes, staffing shifts, protocol updates, and patient population drift can all cause distribution shift. The validation set (6 months) may not expose all failure modes that emerge in the test period (another 6 months later).",
+        "evidence_test": "Report AUROC on validation set vs. test set. Compute feature distribution shifts (PSI, KL divergence) between train/validation/test splits. If significant drift is observed, apply domain adaptation or report performance degradation transparently.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratification by hospital site and admission outcome within each temporal segment is correctly implemented",
+        "failure_mechanism": "The language 'within each temporal segment, we will stratify by both hospital site and admission outcome' is ambiguous. In a chronological split, stratification by outcome typically happens at the full-dataset level before splitting, not within each segment. Misunderstanding this could lead to silent misconfiguration where the intended balance is not achieved, potentially confounding site-specific effects.",
+        "evidence_test": "Verify in implementation that stratification is performed on the full dataset before temporal split. Confirm admission rates are similar across train/validation/test (within ~5 percentage points).",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The dataset has sufficient sample size to detect a clinically meaningful AUROC improvement",
+        "failure_mechanism": "No power analysis or minimum detectable effect size is reported. Without this, the experiment may be underpowered to detect the hypothesized improvement, leading to a false negative conclusion (concluding multimodal does not help when it actually does, or vice versa).",
+        "evidence_test": "Perform a priori power analysis: calculate required sample size for detecting a meaningful AUROC difference (e.g., 0.02-0.05) given the expected baseline admission rate and total sample size. Report confidence intervals on test-set AUROC.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "5-fold cross-validation within the 6-month validation set produces stable hyperparameter estimates",
+        "failure_mechanism": "Using random 5-fold CV within a 6-month validation set ignores temporal structure and creates very small folds (~1.2 months each). This may produce noisy estimates of hyperparameter performance and lead to over-tuning on the validation set.",
+        "evidence_test": "Report stability of selected hyperparameters across folds (e.g., standard deviation of CV AUROC). Consider using a single chronological hold-out within the validation period instead of random CV.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Note length is an adequate control for documentation volume confounding",
+        "failure_mechanism": "While note length is included as a feature, documentation quality (which correlates with both nurse diligence and patient acuity) may still confound the relationship between text features and admission. The secondary analysis is a safeguard but not a primary evaluation.",
+        "evidence_test": "The secondary analysis on minimal-text subsets is the evidence test. It must be reported regardless of whether primary results are positive.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": true,
+        "claim": "XGBoost/LightGBM optimally handle high-dimensional text embeddings",
+        "failure_mechanism": "Gradient-boosted trees may not be the optimal architecture for combining structured features with high-dimensional dense embeddings compared to neural network approaches. However, this is a design choice, not a flaw \u2014 the comparison between baseline and multimodal using the same model class is fair.",
+        "evidence_test": "Not applicable \u2014 this is a design choice that does not invalidate the comparative conclusion.",
+        "flaw_category": "defensible_unconventional"
+      }
+    ],
+    "summary": "The PoC has two FATAL-level concerns: (1) unverified temporal ordering of triage notes relative to disposition decisions \u2014 if this assumption is false, the experiment suffers from signal leakage; (2) unverified transferability of pre-trained text embeddings to this ED's documentation \u2014 the core hypothesis depends on these embeddings carrying relevant signal. A MATERIAL concern is unmeasured temporal distribution shift between training and test periods. The design is otherwise sound, with appropriate confound controls and a fair comparison structure.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Detailed analysis of each critique finding with initial assessment of rebuttal types.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "An empirical audit is required to verify that triage notes are created before disposition decisions."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 4,
+        "justification": "Using pre-trained frozen embeddings is a deliberate design choice to avoid overfitting and leverage external knowledge."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "Empirical tests are needed to assess the generalization of patterns across time."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "Verification of the stratification implementation is required."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "A power analysis is necessary to determine the experiment's sensitivity."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "5-fold CV is a common practice; reporting hyperparameter stability mitigates concerns."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "Note length and secondary analysis on minimal-text subsets address documentation volume confounding."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Multiple findings require empirical verification or further analysis to resolve concerns about data leakage, generalization, stratification, and sample size."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=9, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 4,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "5 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

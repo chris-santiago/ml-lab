@@ -1,0 +1,132 @@
+{
+  "case_id": "eval_scenario_844",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The spatial smoothing feature, described as 'a weighted average of ride counts from neighboring zones using a Gaussian kernel', uses only lagged (past) ride counts from neighbors without incorporating target-interval information for the zone being predicted.",
+        "failure_mechanism": "The feature description omits any lag specification, unlike the explicit 'lagged ride counts' for own-zone; if smoothing uses contemporaneous ride counts from the same 30-minute interval, it directly leaks spatially-correlated target demand signal from neighbors into the feature set, enabling the model to proxy unresolved local demand via neighbors and massively inflating performance beyond true forecasting ability.",
+        "evidence_test": "Explicit timestamp offset in feature construction code or docs confirming neighbor ride counts are from intervals strictly prior to the prediction target; compute feature-target correlation for the spatial feature and confirm it aligns with lagged autocorrelation decay (not near-zero lag correlation); ablation by removing spatial smoothing shows no impossible spatial pattern capture in residuals.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The Gaussian kernel bandwidth for spatial smoothing, when fitted on the training set, produces an optimal kernel that captures true spatial demand correlations without over- or under-smoothing.",
+        "failure_mechanism": "No fitting procedure is specified (e.g., CV minimizing lagged prediction loss, likelihood); arbitrary or default choice could over-smooth (erasing zone-specific event signals the hypothesis targets) or under-smooth (injecting noise from uncorrelated distant zones), yielding plausible aggregate MAE gains over baseline but failing to validate event-aware spatial smoothing on hard cases.",
+        "evidence_test": "Document the exact bandwidth fitting objective/loss and hyperparameters used on train; report fitted value and sensitivity analysis (MAE on validation across 5x bandwidth range); compare performance of fitted vs. fixed/quantile bandwidths.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The imputation methods (forward-fill or domain-appropriate), fitted on training data and applied identically to validation/test without re-fitting, process each split independently without propagating train values into later splits.",
+        "failure_mechanism": "Time-series imputation like forward-fill, if applied over concatenated splits or seeding val/test with train's last non-missing value, leaks recent train exogenous features (weather patterns, propagated event effects) into val/test, reducing apparent temporal distribution shift and inflating validation-tuned performance.",
+        "evidence_test": "Confirm per-split processing in pipeline (no cross-split carryover); post-imputation feature stats (mean, std, min/max) per split show continuity consistent with raw data trends, not artifactual smoothing at boundaries.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Exclusion of zones/intervals with 'known collection gaps or sensor failures' is applied uniformly across splits and does not selectively remove harder examples from the test set.",
+        "failure_mechanism": "If gap identification relies on post-collection analysis correlating gaps with high-error periods (e.g., event disruptions causing sensor overload), test set could be inadvertently cleaned of event-heavy or peak-demand intervals, inflating performance and masking distribution shift failure modes.",
+        "evidence_test": "Report exclusion rates (% intervals/zones removed) per split; characterize excluded data (avg demand, event prevalence, error proxy if available); confirm exclusion rule applied pre-split without hindsight.",
+        "flaw_category": "eval_inflation"
+      }
+    ],
+    "summary": "The design is strong in temporal splitting, baselines, and stratification but has critical gaps in feature construction details (potential leakage from underspecified spatial lags and fitting) that could fatally invalidate feature contribution claims, plus material risks in data prep that risk silent inflation.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 (FATAL): The critic claims spatial smoothing uses contemporaneous neighbor data, causing signal leakage. However, Section 8 explicitly defines the experiment as a '30-minute-ahead forecast'. By definition, forecasting for interval t+1 cannot use data from interval t+1. The critique assumes a 'nowcasting' capability that contradicts the stated forecasting scope. The design intent is strictly temporal (lagged), making contemporaneous data unavailable and the leakage concern inapplicable to the stated scope.\n\nF2 (MATERIAL): The critic argues bandwidth fitting is unspecified and arbitrary. Section 3 states preprocessing is 'fit on the training set only'. This constraint is the critical defense against leakage. The specific optimization function is a domain detail; the design choice to restrict fitting to training data ensures fairness and prevents validation set overfitting. The concern about 'silent misconfig' is mitigated by the strict train-only constraint.\n\nF3 (MATERIAL): The critic alleges imputation leakage via forward-fill across splits. Section 1 and 3 mandate imputation 'fit on the training set... applied... without re-fitting'. Forward-fill on validation/test sets uses only past data within those sets (or training data at the boundary, which is temporally prior). This does not constitute target leakage. The methodology explicitly prevents the critic's feared leakage mechanism.\n\nF4 (MINOR): The critic worries exclusion of gaps biases the test set. Section 1 states exclusions are applied 'upfront' based on 'known collection gaps'. This is standard data quality control, not performance-based selection. Excluding sensor failures prevents training on invalid data. The impact on the hypothesis (feature efficacy) is negligible as the exclusion criteria are independent of target errors.\n\nConclusion: The design prevents leakage through strict train-only preprocessing (F2, F3). The critique's core threat (F1) is invalid within the forecast scope. Data cleaning (F4) is standard. All adjusted severities can be brought to \u2264 3.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 3,
+        "justification": "The critique posits a contemporaneous data leakage scenario that contradicts the explicit forecast horizon (30-minute-ahead) defined in Section 8. Within the stated scope, neighbor data must be lagged to constitute a forecast; contemporaneous data is physically unavailable. The critique is valid for a different context (nowcasting) but invalid for this experiment."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "Section 3 explicitly constrains preprocessing (including bandwidth fitting) to the training set only. This design choice prevents leakage regardless of the specific optimization metric. The argument that 'no fitting procedure is specified' overlooks the critical constraint of train-only fitting which ensures a fair comparison."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Section 1 and 3 mandate preprocessing fit on training and application on validation/test without re-fitting. Forward-fill logic within splits uses only past data, and boundary fill from training data uses temporally prior values. This design explicitly isolates the model from the leakage mechanism described by the critic."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "Exclusion is based on 'known collection gaps' identified upfront (Section 1), not on prediction errors or event performance. This is a necessary data quality control step that does not alter the operational distribution or bias the comparison of feature sets."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have adjusted severity \u2264 3 (F1: 3, F2: 1, F3: 0, F4: 0). The critique's primary FATAL threat relies on a temporal scope contradiction that invalidates its premise, while other concerns are mitigated by explicit train-only design constraints."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

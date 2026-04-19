@@ -1,0 +1,192 @@
+{
+  "case_id": "eval_scenario_777",
+  "stratum": "regular",
+  "flaw_category": "distribution_shift",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 'baseline features' (including Elixhauser/Charlson indices, prior utilization counts, and recent lab values) are constructed and available in a manner that is independent of the temporal sequences and can be fed to logistic regression as a static vector without losing predictive information that the transformer captures via sequences.",
+        "failure_mechanism": "Many baseline features are derived from the same temporal data the transformer sequences use (e.g., comorbidity indices are calculated from diagnosis histories; prior utilization counts are summaries of admission sequences; recent labs are extracted from lab sequences). If the logistic regression receives aggregated/summarized versions (e.g., a count), while the transformer receives the raw sequences, the comparison is not 'fair apples-to-apples.' The transformer inherently has access to richer, untransformed data. The logistic regression's performance could be artificially limited by feature engineering choices, not by model capacity.",
+        "evidence_test": "Run logistic regression on features derived from the same raw sequence data via a different aggregation method (e.g., using the same individual diagnosis codes as categorical features, or using time-aware aggregations). If logistic regression performance improves significantly, the claimed baseline is underspecified.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratifying the temporal split by patient and by discharge unit ensures the model generalizes across clinical contexts and prevents leakage.",
+        "failure_mechanism": "Stratification by discharge unit within temporal windows may introduce bias if unit composition changes over time (e.g., a new ICU opens, a surgical unit closes). If the stratification forces equal proportions of each unit in each split, but the clinical practice or readmission risk within units evolves, the test set may not reflect the most recent operational environment. This could inflate validation performance if the model learns unit-specific patterns that are stable in the training/validation period but change in the test period.",
+        "evidence_test": "Compare the distribution of key clinical outcomes (e.g., readmission rate) per unit across the training, validation, and test temporal windows. If significant temporal drift exists within units, stratification may have created a non-representative test set.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer model's gain, if observed, comes from leveraging temporal sequences, not just from having access to the same baseline features.",
+        "failure_mechanism": "The transformer receives the baseline features *plus* sequences. If the baseline features are poorly engineered or suboptimal for logistic regression (as in F1), any performance gain could simply be due to the transformer having a better representation of the same underlying data, not due to temporal modeling. The experiment lacks a control to isolate the contribution of temporal structure.",
+        "evidence_test": "Add an intermediate baseline: a model (e.g., a feed-forward neural network) that uses the same input features as the transformer (i.e., the raw sequence data transformed into a fixed-width vector via a non-temporal aggregation method). Compare its performance to both logistic regression and the transformer. If the intermediate model matches transformer performance, the gain is not from temporal modeling.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Precision-Recall AUC (PR-AUC) is the primary metric and is sufficient to evaluate operational utility for a care team with a fixed alert budget.",
+        "failure_mechanism": "PR-AUC summarizes performance across all thresholds, but a care team with a fixed alert budget (e.g., 20% of discharges) operates at a single threshold. The optimal model for PR-AUC may not be optimal at that specific threshold. Model selection based on PR-AUC could yield a model that performs poorly under the operational constraint.",
+        "evidence_test": "Report the precision (or recall) at the exact alert budget threshold (e.g., recall at 20% alert rate) for both models. If the transformer has higher PR-AUC but lower precision at the operational threshold, the primary metric is misaligned.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Hyperparameter tuning for logistic regression ('regularization strength (L1/L2) and class weighting are tuned via cross-validation on the training set using the same validation-set metric') is equivalent in effort and fairness to transformer tuning.",
+        "failure_mechanism": "Logistic regression has a far smaller hyperparameter space (regularization type/strength, class weight) compared to the transformer (embedding dimensions, heads, layers, dropout, learning rate, sequence length). Using the same number of tuning trials (50\u2013100) for both models does not constitute 'equivalent tuning effort'; the transformer search is exploring a vastly more complex space, likely yielding a better-optimized model even if the architecture is unnecessary. This could bias the comparison.",
+        "evidence_test": "Perform a sensitivity analysis: tune logistic regression with an expanded search (including feature engineering variations, different encodings) using the same computational budget as the transformer. If performance improves substantially, the original tuning was insufficient.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The label definition (unplanned readmission within 30 days) is validated on a 5% sample via manual chart review, and if error rate >5%, labels are refined or ambiguous cases excluded.",
+        "failure_mechanism": "Refining labels or excluding ambiguous cases after validation introduces a form of data curation that is applied only after the sample is reviewed. This could inadvertently remove systematically harder-to-predict cases (e.g., borderline readmissions), making the task easier and inflating performance for both models. The process is applied to the entire dataset, not just the validation sample.",
+        "evidence_test": "Compare the distribution of features (e.g., comorbidity scores) between excluded ambiguous cases and the retained cohort. If excluded cases are systematically more complex, the evaluation is on a sanitized dataset.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The transformer model with 2\u20134 heads and 2\u20133 layers is sufficiently complex to capture relevant temporal patterns for this task.",
+        "failure_mechanism": "This is an architectural assumption without empirical support. The chosen size may be too small to model long-range dependencies in clinical sequences, or too large and prone to overfitting. However, the hyperparameter tuning includes these dimensions, so the risk is mitigated by the search.",
+        "evidence_test": "None required; tuning will address this.",
+        "flaw_category": "below_threshold"
+      }
+    ],
+    "summary": "The PoC design is robust against temporal and patient leakage but has material flaws in baseline specification and comparison fairness, potentially invalidating the core hypothesis test.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "I have analyzed each critique finding against the methodology intent. \n\nF1 (FATAL, 7): The critic argues the comparison is unfair because LR gets aggregated features while Transformer gets raw sequences. The methodology explicitly defines the hypothesis as testing whether a 'transformer model trained on temporal sequences... outperforms logistic regression on hand-engineered features.' This is a comparison of two *clinical system approaches* (Static+LR vs Temporal+Transformer), not just two model architectures on identical inputs. The critique misunderstands the scope; the value being tested is the utility of temporal sequences vs summary statistics. This is a scope mismatch.\n\nF2 (MATERIAL, 6): The critic worries unit stratification within temporal windows might create bias if unit composition changes over time. The methodology specifies a 'temporal-stratified by patient' split where the Test set is the 'final 20% (most recent)'. Stratifying by unit within each temporal window ensures *representation* (no unit is missing due to randomness), not forced static distribution. The temporal split inherently captures the evolution of unit mix in the test set, which reflects deployment. This is a design defense.\n\nF3 (MATERIAL, 5): The critic claims the lack of an intermediate baseline (MLP on flattened sequences) prevents isolating temporal structure. The experiment's scope is to determine if the *proposed system* (Temporal+Transformer) beats the *standard system* (Static+LR). An MLP baseline would test architecture alone, not the clinical value of temporal data integration. This is a scope mismatch.\n\nF4 (MATERIAL, 4): The critic argues PR-AUC is insufficient for a fixed budget. The methodology states PR-AUC is the primary metric for model ranking, but notes that if a budget is specified, threshold metrics apply. For a PoC comparing models, PR-AUC is the standard operational metric for imbalance; threshold tuning is a downstream decision. The methodology addresses this in Section 5. This is a design defense.\n\nF5 (MATERIAL, 3): The critic argues tuning effort is unequal (LR space vs Transformer space). The methodology limits trials to 50-100 for both to ensure fair computational budget. LR is robust to tuning; Transformer is sensitive. This PoC prioritizes feature/hypothesis validation over exhaustive hyperparameter search. This is a scope constraint.\n\nF6 (MINOR, 1): The critic argues label exclusion sanitizes data. Excluding ambiguous cases is standard clinical data curation to ensure signal quality for prediction. This does not invalidate the model comparison. This is immaterial.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The hypothesis explicitly defines the comparison as 'Temporal Sequences + Transformer' vs 'Hand-engineered Features + Logistic Regression' (Section 1, Objective). The critique assumes the scope is 'Same Raw Data + Different Model', which would test architecture capacity, not the clinical utility of temporal data. This is the intended system comparison."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "Section 2 specifies a temporal split (Training: earliest, Test: most recent). Stratifying by unit *within* each window ensures representation, not forced equal distribution across time. The Test set reflects the actual temporal evolution of unit mix, preventing the 'stable pattern' bias the critic fears."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The experiment scope (Section 1) is to establish whether the Transformer system outperforms the current standard (LR). An intermediate MLP baseline tests architectural efficiency, not the hypothesis that temporal modeling adds value over static features. The current design isolates the data-type contribution (Aggregate vs Sequence)."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Section 5 explicitly states: 'If the care team specifies a fixed alert budget... the primary metric is recall at that threshold.' The use of PR-AUC is standard for PoC ranking, with threshold metrics available conditionally. This addresses the critique's concern about operational alignment."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The PoC scope limits tuning trials (50-100) for both models to ensure fair computational comparison. Logistic Regression is stable and requires less tuning to reach baseline performance; the Transformer requires more to find optimal temporal structure. This is an acceptable design trade-off for a proof-of-concept."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Excluding ambiguous cases to improve label fidelity (Section 1) is standard clinical data curation. It removes noise rather than hard cases specifically, ensuring the model learns predictive signals. This does not materially affect the model comparison outcome."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have been reduced to adjusted severity \u2264 3 through scope, design, or immateriality rebuttals; the critique identifies misunderstandings of the system-level hypothesis rather than fatal methodological flaws."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

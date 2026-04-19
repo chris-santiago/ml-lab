@@ -1,0 +1,142 @@
+{
+  "case_id": "eval_scenario_858",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Weak supervision labels (agent clicks/links) serve as a valid proxy for article relevance.",
+        "failure_mechanism": "The PoC explicitly acknowledges position bias but fails to control for it in the labeling process. In production logs, agents are more likely to click the top-ranked result of the *existing* system (likely BM25) regardless of its absolute relevance, provided it is 'good enough.' If the transformer model learns to mimic the current system's ranking patterns rather than true semantic relevance, MRR will increase on these labels while providing zero actual utility gain. This is a feedback loop: the labels are a function of the baseline's ranking, not ground truth.",
+        "evidence_test": "Compare the MRR of the transformer model on the automatically labeled set versus the manual annotation set (300 queries). If the delta in performance is significantly higher on the automatic labels than on the manual labels, the model is overfitting to system bias rather than semantic relevance.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The contrastive loss training (using in-batch negatives) is sufficient to train a robust retriever.",
+        "failure_mechanism": "In-batch negatives in a dense retriever often lead to the 'easy negative' problem. If the batch is random, the negatives are likely semantically distant from the query. The model can achieve a very low loss by simply pushing away obviously irrelevant articles without ever learning the fine-grained boundaries needed to distinguish between two similar articles. This often leads to a model that performs well on validation sets but fails in production where 'hard negatives' (similar but incorrect articles) are the primary source of error.",
+        "evidence_test": "Introduce a 'Hard Negative' mining step (using BM25 to find top-k non-clicked articles) and compare the performance of the model trained with random in-batch negatives versus one trained with hard negatives.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Comparing a dense retriever to BM25 using identical raw text is a fair baseline comparison.",
+        "failure_mechanism": "BM25 is a keyword-matching algorithm; its performance is heavily dependent on the quality of the index. The PoC specifies 'no stemming' to ensure a 'fair comparison.' However, stemming is a standard, non-semantic optimization for BM25. By disabling it, the PoC may be strawmanning the baseline by handicapping its ability to handle morphological variations (e.g., 'connecting' vs 'connection'), which a transformer handles natively via subwords. This inflates the apparent 'semantic' advantage of the transformer.",
+        "evidence_test": "Run the BM25 baseline with standard Porter stemming or Lemmatization and check if the performance gap with the transformer narrows.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Truncating articles to the first 512 tokens is sufficient for retrieval.",
+        "failure_mechanism": "Support articles often contain critical resolution steps or specific error codes at the bottom of the page (e.g., 'Troubleshooting' sections). If the relevant signal is located beyond the 512-token window, the transformer will fail to encode the relevant vector, while BM25 (which typically indexes the whole document) will still find the keyword. This creates a systematic bias against the transformer for long-form documentation.",
+        "evidence_test": "Analyze the distribution of the 'positive' labels' key-term locations. If a significant percentage of relevant terms appear after token 512, the evaluation is biased against the proposed model.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "Dot-product similarity is the optimal way to measure distance between embeddings.",
+        "failure_mechanism": "Cosine similarity is more standard for BERT-based retrievers to prevent the model from simply increasing the magnitude of embeddings to 'cheat' the loss function.",
+        "evidence_test": "Compare dot-product vs cosine similarity results.",
+        "flaw_category": "defensible_unconventional"
+      }
+    ],
+    "summary": "The PoC is well-structured regarding temporal splitting and baseline tuning, but it suffers from a critical flaw in its labeling strategy: it uses agent behavior that is likely contaminated by the baseline's own ranking (position bias), creating a potential feedback loop that inflates performance metrics.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Let me analyze each finding in detail:\n\n**F1 (FATAL, severity 8):** The critic claims weak supervision labels from agent clicks are invalid due to position bias from the existing production system. However, the methodology explicitly acknowledges this: 'We acknowledge this approach introduces selection bias (agents may not search optimally) and position bias (search-result ranking influences clickthrough).' More importantly, the design includes a direct control: 'To mitigate, we supplement automatic labels with a small hold-out manual annotation set (~300 queries)... used only for sanity-checking that automatic-label improvements correlate with human-judged relevance.' The critic's proposed evidence test is already built into the design. The manual annotation set serves exactly the function the critic requests - comparing automatic-label MRR vs manual-label MRR. This is a known limitation with a direct mitigation, not an unmitigated FATAL flaw.\n\n**F2 (MATERIAL, severity 6):** The critic argues in-batch negatives create an 'easy negative' problem. This is a valid concern in dense retrieval literature, but it's a known training methodology tradeoff, not a fundamental flaw in the experiment design. The methodology specifies using 'in-batch negatives' - this is a standard approach for dense retrievers. Whether to use hard negative mining is a model training choice, not an evaluation validity issue. The experiment can still validly compare transformer vs BM25 even if the transformer's training could potentially be improved. This is a potential optimization, not a flaw that invalidates the comparison.\n\n**F3 (MATERIAL, severity 4):** The critic claims disabling stemming strawmans BM25. However, the methodology explicitly states the intent: 'BM25 is the standard IR baseline in production systems... BM25 hyperparameters are tuned on the validation set... This ensures fair comparison; BM25 is not strawmanned by using default parameters.' The 'fair comparison' here means using identical preprocessing to isolate the semantic vs lexical retrieval difference. This is a deliberate design choice to test whether the transformer provides semantic advantage over lexical matching when both have equal text normalization. The critic's claim that stemming is 'standard' is contestable - many production IR systems do use subword normalization, but the design choice here is explicitly to have identical inputs.\n\n**F4 (MINOR, severity 2):** Truncating to 512 tokens is a standard constraint for transformer models due to memory/computation. The critic's concern about losing tail information is valid but represents a known limitation of the approach, not an evaluation flaw. Both the transformer and BM25 would ideally use full text, but the constraint is applied uniformly. The evaluation is still valid for comparing the two approaches under identical constraints.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The methodology explicitly acknowledges position bias and includes a direct control: a hold-out manual annotation set (~300 queries) 'used only for sanity-checking that automatic-label improvements correlate with human-judged relevance.' This is exactly the evidence test the critic proposes. The design anticipates this concern and addresses it. See Section 1 (weak-supervision approach) and Section 7 (Manual Annotation Check). The critic's claim that the PoC 'fails to control for' position bias is factually incorrect - the control exists. The remaining adjusted severity of 3 reflects the inherent uncertainty in whether 300 queries is sufficient to fully validate the label quality."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The finding is valid in the context of optimizing a production dense retriever, but does not affect the validity of this experiment's comparison. The experiment tests whether transformer-based dense retrieval outperforms BM25 on this task, not whether the transformer's training is optimally configured. Whether to use hard negative mining is a training methodology choice that affects absolute performance but does not invalidate the comparative evaluation. The claim scope (Section 7) explicitly states this establishes 'whether a transformer-based retriever outperforms BM25' - not optimal transformer training. The critic conflates model optimization with evaluation validity."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The design explicitly chooses identical preprocessing to test semantic vs lexical retrieval: 'Both the transformer model and BM25 baseline use identical input signals... lowercased, whitespace cleaned, and URLs/emails redacted.' This is a deliberate design choice to isolate the semantic capability difference from text normalization differences. While stemming is common in BM25, the choice to disable it tests whether the transformer provides advantage over lexical matching on equal text. The methodology explicitly addresses this: 'BM25 is not strawmanned by using default parameters.' This is a valid comparison design, not a flaw. The adjusted severity of 1 reflects that this is a legitimate design choice with clear rationale."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The 512-token truncation is a standard constraint for transformer models due to quadratic attention complexity. Both models are evaluated under identical constraints. The experiment tests relative performance under the same truncation, not absolute performance on full documents. While tail information loss is a limitation, it does not affect the validity of comparing transformer vs BM25 on the same truncated inputs. This is a known limitation of transformer-based IR that does not invalidate the comparative conclusion."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All four findings have been rebutted. F1 is addressed by the explicit manual annotation control built into the design (REBUT-DESIGN, adjusted severity 3). F2 is a scope issue - hard negative mining is a training optimization, not an evaluation validity concern (REBUT-SCOPE, adjusted severity 2). F3 is a deliberate design choice for fair comparison of semantic vs lexical retrieval (REBUT-DESIGN, adjusted severity 1). F4 is a known limitation that doesn't affect comparative validity (REBUT-IMMATERIAL, adjusted severity 1). All adjusted severities are \u2264 3, satisfying the EXONERATE condition. The methodology is sound."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

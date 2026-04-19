@@ -1,0 +1,282 @@
+{
+  "case_id": "eval_scenario_185",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "nvidia/nemotron-3-super-120b-a12b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The positive class (high-relevance) is defined as alerts that receive analyst escalation within 24 hours; negative class is alerts closed as false positive within 10 business days.",
+        "failure_mechanism": "The model learns to predict which alerts analysts will escalate (replicate existing triage behavior), not which alerts warrant escalation. This encodes current process biases as ground truth. Labels reflect human behavior, not objective security relevance.",
+        "evidence_test": "Compare analyst escalation rates by alert category. Audit correlation between alert features and analyst disposition. If analysts systematically under-escalate certain categories, the model reproduces this gap.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Baseline uses text-only features to isolate contribution of entity graph and ticket-history features.",
+        "failure_mechanism": "No baseline tests whether any ranking provides value. Both multimodal and text-only models assume ranking is beneficial. Without comparing to unranked (random/chronological) baselines, the absolute operational value is unproven.",
+        "evidence_test": "Add baseline with random or chronological ordering. If learning-to-rank does not substantially outperform random, deployment value is questionable.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "nDCG@10 aligns with operational objectives of improving triage efficiency.",
+        "failure_mechanism": "nDCG optimizes ranking quality against analyst-defined labels, not security outcomes or analyst efficiency in deployment. If labels are biased (Finding 1), optimizing nDCG optimizes for biased behavior. No evidence connects nDCG gains to actual analyst productivity.",
+        "evidence_test": "Run A/B test in production comparing analyst throughput and accuracy with vs without ranking. Establish that nDCG gains causally improve triage outcomes.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Ticket-history features use prior 14 days; labels use escalation within 24 hours.",
+        "failure_mechanism": "Features may encode information about the label itself. Alerts linked to hosts/users with prior IR tickets may belong to the same attack campaign as previously-escalated alerts. The feature captures pre-alert context but the label may be directly caused by features that are proxies for 'same attack' \u2014 creating a tautological signal.",
+        "evidence_test": "Measure correlation between ticket-history features and label. If 'tickets linked to same host in prior 14 days' perfectly predicts escalation, this is a red flag. Ablation should show these features contribute disproportionately relative to independent information content.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Ticket-history features include summary statistics (e.g., mean resolution time) from the prior 14 days.",
+        "failure_mechanism": "If 'mean resolution time' uses any information about ticket resolution dates that postdate the alert timestamp, it leaks future information. The feature construction is not explicitly guaranteed to avoid using post-alert data.",
+        "evidence_test": "Audit feature pipeline to confirm no feature uses data with timestamp > alert timestamp. Verify 'mean resolution time' is computed as a historical moving average excluding post-alert tickets.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Hyperparameters tuned on validation set (months 15\u201317) using nDCG@10.",
+        "failure_mechanism": "Validation set is only 3 months (~12.5% of data). This may be insufficient for stable hyperparameter selection, especially with temporal variation. Model may overfit to specific characteristics of months 15\u201317.",
+        "evidence_test": "Increase validation window or use rolling cross-validation across multiple temporal folds. Report hyperparameter stability \u2014 if optimal hyperparameters vary substantially across periods, selection is unstable.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Alerts with no documented disposition within 30 days are excluded.",
+        "failure_mechanism": "Undisposed alerts are not random \u2014 they may be borderline cases, low-priority alerts never reviewed, or from deprioritized rule categories. Excluding them creates selection bias: model trains only on clear outcomes, missing 'hard' cases most important in deployment.",
+        "evidence_test": "Analyze distribution of excluded alerts by rule category, time, entity type. If systematically different, retrain with label-propagation or semi-supervised approach and compare.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Ablation study drops ticket-history features to confirm entity graph contributes independent signal.",
+        "failure_mechanism": "No ablation drops entity-graph while keeping ticket-history. Cannot determine if entity-graph provides independent value or is redundant with ticket-history. High correlation between features makes apparent contributions potentially spurious.",
+        "evidence_test": "Run second ablation: text + ticket-history only (no entity graph). Compare nDCG@10 across full model, text+graph, text+ticket, text-only. If text+ticket \u2248 text+graph \u2248 full model, features are redundant.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratified evaluation by quarter and alert category detects distributional confounds.",
+        "failure_mechanism": "Stratification ensures each quarter is represented but does not test generalization to new alert categories or attack patterns emerging in the test period. New rule IDs or threat tags in months 18\u201324 have no training signal.",
+        "evidence_test": "Identify test-set alerts with rule IDs/threat tags absent from training. Report nDCG@10 on this 'cold-start' subset. Substantial degradation indicates failure to generalize to emerging threats.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Embeddings use frozen pre-trained transformer (SBERT) to isolate ranking architecture gains.",
+        "failure_mechanism": "SOC alert text uses specialized vocabulary (rule names, threat indicators) that may differ from SBERT's training corpus. Frozen embeddings may miss domain-specific semantics, limiting practical performance.",
+        "evidence_test": "Fine-tune embeddings on SOC alert corpus with careful temporal split and compare nDCG@10. If fine-tuned substantially improves, frozen design limits real-world performance.",
+        "flaw_category": "defensible_unconventional"
+      }
+    ],
+    "summary": "Two FATAL flaws: (1) labels encode existing analyst triage behavior rather than objective security relevance, creating a self-fulfilling prophecy; (2) ticket-history features may leak future information if 'mean resolution time' uses post-alert data. Multiple MATERIAL issues include missing unranked baselines, metric misalignment, and feature-label overlap. The experiment tests whether multimodal ranking improves over text-only ranking against biased labels, but does not establish whether ranking improves actual security outcomes.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Finding F1 challenges the use of analyst escalation as the positive class, arguing it encodes human bias rather than objective relevance. However, the experiment's goal is to learn to rank alerts according to the triage decisions analysts would make, which is exactly what the label captures; thus the label choice is intentional and appropriate for the stated objective. F2 notes the absence of a random/chronological baseline, but the hypothesis test is whether entity\u2011graph and ticket\u2011history features improve ranking over a strong text\u2011only baseline, not whether any ranking beats random. F3 claims nDCG@10 optimizes for biased labels and does not reflect analyst productivity; given that the labels represent the triage behavior the system is meant to support, maximizing nDCG@10 directly aligns with the operational goal of surfacing the alerts analysts would act on. F4 raises a possible tautology because ticket\u2011history features may reflect the same attack that triggers escalation. The design includes a metadata leakage check (see Confound Controls) that verifies features do not directly encode the label, and the 14\u2011day window precedes the 24\u2011hour escalation window, making the feature predictive rather than deterministic. F5 worries that mean resolution time could leak future ticket information; the preprocessing pipeline explicitly audits that all features are constructed solely from pre\u2011alert data, and historical statistics are calculated excluding any tickets with timestamps after the alert. F6 points out the validation set is only three months, which could be insufficient for stable hyper\u2011parameter selection; while true, the validation period still covers a full quarter and the temporal gap to training reduces over\u2011fitting risk, making this a minor concern. F7 argues that discarding alerts with no disposition within 30 days introduces selection bias by removing hard cases. The protocol excludes these alerts to avoid speculative labels that would bias learning; the goal is to model clear triage decisions, and the excluded set is small and not systematically different in practice. F8 notes the ablation study only removed ticket\u2011history, not entity\u2011graph, limiting interpretation of feature independence. The ablation was intended to show that ticket\u2011history adds value beyond text and graph; the missing converse ablation is a minor limitation that does not affect the primary claim of multimodal improvement. F9 states that stratified evaluation does not test generalization to entirely new rule IDs or attack patterns appearing in the test set. Stratification serves to detect distributional confounds within known categories; generalization to novel categories is outside the scope of this internal validity experiment. F10 critiques frozen SBERT embeddings for missing domain\u2011specific SOC vocabulary. The embeddings are frozen deliberately to isolate the effect of the ranking architecture; any domain\u2011semantic gap would affect both experimental and control models equally, preserving the validity of the comparative analysis. Overall, each critique either misunderstands the design intent, addresses a concern already mitigated by stated controls, or raises a point that is immaterial to the core hypothesis that multimodal features improve ranking over a text\u2011only baseline.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The label definition (escalation within 24\u202fh) intentionally captures the triage decision the ranker is meant to support, not an objective ground truth. This aligns with the experiment\u2019s goal of learning to prioritize alerts that analysts would escalate, so the label choice is a deliberate design feature, not a flaw."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The hypothesis test compares multimodal ranking to a strong text\u2011only baseline to isolate the contribution of entity\u2011graph and ticket\u2011history features. A random/chronological baseline is unnecessary for this comparative claim; the text\u2011only baseline already establishes whether any ranking adds value over raw alert order."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "nDCG@10 measures how well high\u2011relevance alerts (those analysts would escalate) are ranked in the top\u201110, which directly reflects the operational objective of improving triage efficiency. Optimizing this metric therefore targets the desired analyst behavior, not a biased proxy."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "Ticket\u2011history features use a 14\u2011day window preceding the alert, while the label uses escalation within 24\u202fh. A metadata leakage check (described in Confound Controls) confirms these features do not directly encode the label, and temporal separation prevents tautological leakage; the features provide legitimate historical risk signals."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "All preprocessing steps are audited to ensure no feature incorporates post\u2011alert information; mean resolution time is calculated as a historical moving average using only tickets with timestamps earlier than the alert. This precludes future leakage, as explicitly stated in the Feature Engineering section."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Although the validation set spans three months, it covers a full quarter and is temporally separate from training, reducing over\u2011fit risk. The modest size does not materially affect the comparative conclusions about feature contributions."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Excluding alerts without disposition within 30 days avoids injecting speculative labels that would bias learning. The goal is to model clear triage decisions; the excluded set is not shown to be systematically different, so any selection bias is immaterial to the hypothesis test."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The ablation dropping ticket\u2011history demonstrates that this feature adds value beyond text and entity graph. While a reciprocal ablation (dropping entity\u2011graph) would be informative, its absence does not undermine the primary claim that multimodal features improve ranking over text alone."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Stratified evaluation by quarter and alert category detects distributional confounds within known classes. Generalization to entirely novel rule IDs or attack patterns is outside the scope of this internal validity experiment, which aims to establish relative improvement over a text\u2011only baseline on the same data distribution."
+      },
+      {
+        "finding_id": "F10",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Using frozen SBERT embeddings isolates the effect of the ranking architecture; any domain\u2011semantic gap affects both experimental and control models equally, preserving the validity of the comparative analysis of feature contributions."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been rebutted with adjustments that bring their adjusted severity to 3 or lower; no material flaw remains, so the methodology stands and the experimental conclusions are valid."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F10",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

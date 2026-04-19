@@ -1,0 +1,207 @@
+{
+  "case_id": "eval_scenario_777",
+  "stratum": "regular",
+  "flaw_category": "distribution_shift",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal-stratified split prevents information leakage and simulates real deployment where models predict using only past data.",
+        "failure_mechanism": "The split is by discharge date, but features for a given discharge include sequences from the preceding 12 months. This creates a data leakage bridge: Discharges in the validation/test sets will have their *pre-discharge* sequences overlapping in time with the *post-discharge* period of training set patients. The model could learn hospital-wide temporal patterns (e.g., seasonal effects, ICD coding changes) from future data relative to the index discharge it's predicting. This is a form of temporal contamination that violates the core assumption of predicting only from past information.",
+        "evidence_test": "Re-run the experiment with a strict 'cutoff date' split: For each patient, use data before date T for training, and only predict discharges occurring after T+30 days (to avoid overlap). Compare performance against the proposed split; a significant drop in transformer performance relative to logistic regression would indicate leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The transformer receives 'the same baseline features as the logistic regression, plus temporal sequences, ensuring a fair apples-to-apples comparison.'",
+        "failure_mechanism": "This is not an apples-to-apples comparison; it's a stacked comparison where the transformer has a strict superset of inputs. Any performance gain could simply be due to the transformer having access to more raw information (the sequences), not to its superior architecture for temporal reasoning. The hypothesis specifically tests 'transformer vs. logistic regression,' but the experimental setup confounds 'additional features' with 'model architecture.' The logistic regression baseline is handicapped.",
+        "evidence_test": "Add an additional baseline: a logistic regression (or MLP) trained on *flattened* versions of the temporal sequences (e.g., counts, averages, time-since-last). If this 'flat-feature' model matches or exceeds the transformer's performance, the gain is from feature engineering, not the transformer's attention mechanism.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Hyperparameter tuning for both models uses 'the same validation-set metric' and 'equivalent tuning effort,' ensuring a fair comparison.",
+        "failure_mechanism": "The transformer has orders of magnitude more hyperparameters (embedding dims, heads, layers, sequence length, dropout, learning rate schedules) than logistic regression (regularization, class weight). 'Equivalent effort' (50-100 trials) is insufficient to properly search the transformer's high-dimensional space. A sub-optimally tuned transformer could underperform a well-tuned logistic regression, leading to a false negative conclusion. The comparison is not controlled for tuning sufficiency.",
+        "evidence_test": "Perform a hyperparameter sensitivity analysis for both models. Plot validation performance vs. tuning budget. If the transformer's performance curve is still ascending at 100 trials while logistic regression's plateaus early, the comparison is unfair.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Restricting the cohort to patients with 'at least 12 months of observable history' ensures temporal sequences are well-defined and utilization-history features are comparable.",
+        "failure_mechanism": "This introduces a severe selection bias. The cohort becomes 'patients known to the system for a year,' which excludes new patients, transferred patients, and those with sporadic care. This group is systematically different from the general inpatient population (likely older, sicker, with more complex histories). The model's performance on this selected cohort may not generalize to the broader target population of *all* adult discharges, which is the operational goal of a readmission predictor.",
+        "evidence_test": "Compare the characteristics (age, comorbidity scores, readmission rate) of the 12-month cohort vs. all eligible discharges. Train and evaluate a model on the restricted cohort, then test it on a held-out sample of patients with <12 months history. A large performance drop would indicate the finding is cohort-specific.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Permutation importance will verify that the transformer's gain comes from temporal sequences, not just baseline features.",
+        "failure_mechanism": "Permutation importance on raw sequence features (e.g., shuffling timestamps) is ill-defined and may not isolate the 'temporal reasoning' component. A drop in performance after permutation could occur even if the model only uses aggregate statistics from the sequence (which are destroyed by shuffling), not the temporal order. The experiment lacks a direct test for whether the transformer is actually using the *sequential relationships* versus just the presence/absence of historical events.",
+        "evidence_test": "Design an ablation: Train the transformer on sequences with randomly permuted temporal order within patients. Compare its performance to the transformer trained on correct sequences. If performance is similar, the model is not leveraging temporal dynamics.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The label is 'deterministic' and validated via a 5% manual chart review, with label refinement if error rate >5%.",
+        "failure_mechanism": "This validation protocol risks biasing the label definition. If the initial 5% sample has high error, the team will 'refine label definitions or exclude ambiguous cases.' This process is applied to the *entire* dataset retroactively. This creates a form of data snooping: label noise is characterized using a sample that includes data from all temporal splits (train/val/test). Refining definitions based on this global sample introduces subtle leakage about patterns in the test set.",
+        "evidence_test": "The label validation and refinement process must be performed using *only* data from the training period. Definitions are then locked and applied to validation and test sets without modification. Re-run the experiment with this strict temporal application of label rules.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Performance reporting 'across temporal quarters and discharge units' will detect drift or unit-specific bias.",
+        "failure_mechanism": "The test set is the final 20% chronologically. Reporting performance across quarters within this set is post-hoc analysis on a single, small temporal slice. It cannot detect drift *over the deployment lifetime* because the model hasn't been evaluated on data from beyond the study period. The claim of detecting drift is overstated.",
+        "evidence_test": "A stronger design would use a rolling-origin evaluation: train on months 1-24, test on 25-30; train on 1-30, test on 31-36, etc. This provides multiple out-of-time tests to assess stability.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The PoC contains several fatal methodological flaws, primarily concerning temporal data leakage (F1) and an invalid baseline comparison (F2) that together invalidate the core hypothesis test. Additional material concerns include cohort selection bias and insufficient verification of the transformer's use of temporal dynamics.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Pass 1 Analysis:\n\nF1 (FATAL, 9): The critic claims a temporal leakage bridge exists because the validation/test cohort's pre-discharge lookback window overlaps in calendar time with the training cohort's history. This is a misunderstanding of temporal data splitting in ML. A temporal split based on index discharge date ensures that features for any given patient only use information known at or before that discharge. Training on other patients' historical data (even if overlapping in calendar time) is valid and standard, provided no information about the test patient is used. The critique confuses 'generalizable temporal patterns' (valid) with 'patient-specific leakage' (invalid). The design correctly isolates test prediction from test outcome.\n\nF2 (FATAL, 7): The critic argues the comparison is not apples-to-apples because the Transformer receives more inputs (sequences + baseline) than the LR (baseline only). However, the hypothesis explicitly tests 'Transformer trained on temporal sequences vs LR on hand-engineered features'. This is a comparison of *approaches*, not just architectures. The Transformer's ability to process raw temporal sequences is the variable being tested. Adding a 'flattened' baseline would test 'sequence feature engineering vs. transformer', which is a different hypothesis. The current design fairly tests the intended utility of the Transformer for temporal reasoning.\n\nF3 (FATAL, 7): The critic claims hyperparameter tuning is insufficient due to the Transformer's complexity. 50-100 trials via random/Bayesian search is a standard baseline for PoC development. While 1000+ trials might be preferred for production, 100 is sufficient to establish a baseline performance gap and avoid gross underfitting in a PoC. The claim that the comparison is unfair is mitigated by the PoC scope. \n\nF4 (MATERIAL, 6): The critic argues the 12-month history restriction introduces selection bias and reduces generalizability. Section 8 (Scope of Inference) explicitly acknowledges that the experiment does not establish transferability to populations without this history. Therefore, the critique is valid for *deployment* but not for the *PoC scope*. The methodology is sound for the stated intent.\n\nF5 (MATERIAL, 5): The critic claims permutation importance is ill-defined for isolating 'temporal reasoning'. This is technically correct; permutation shuffles order and destroys temporal structure. However, this metric is a secondary verification of the *source* of gain, not the *existence* of the gain (Transformer vs LR). The primary hypothesis (performance difference) remains valid regardless of this verification detail.\n\nF6 (MATERIAL, 6): The critic claims label validation/refinement on a global sample risks leakage. Section 6 states the 'test set is held completely untouched during development'. Any label refinement must logically occur prior to test exposure to maintain this integrity. The design implies standard practice (lock labels on Train/Val), which the critique overlooks. The protocol is sound if Section 6 is strictly followed.\n\nF7 (MINOR, 2): The critic claims reporting on a single test slice cannot detect drift. This is true, but secondary metrics (drift detection) are out of scope for the primary hypothesis test (Transformer vs LR performance). A rolling-origin test is better practice but not required for a PoC performance comparison.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -8,
+        "adjusted_severity": 1,
+        "justification": "The critique claims a 'data leakage bridge' exists due to calendar overlap, but this misunderstands temporal splitting. Standard temporal splits train on past data to predict future outcomes, regardless of calendar overlap across patients. The design strictly uses pre-discharge history, eliminating leakage. This finding is noise on the method."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 1,
+        "justification": "The critique assumes a comparison of 'Models' only. The PoC tests 'Methods' (Sequence-Transformer vs. Feature-LR). The input difference is the core of the hypothesis. A flattened baseline tests a different hypothesis (feature engineering vs. attention). The comparison is fair for the stated Scope."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 1,
+        "justification": "100 tuning trials is a standard minimum for PoC to establish a baseline performance gap. While production systems require more, the PoC scope does not demand exhaustive optimization. The claim that the model will be 'sub-optimally tuned' is speculative."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "Section 8 (Scope of Inference) explicitly limits the inference to patients with sufficient history. The experiment does not claim generalizability to new patients. The selection bias is a known, accepted constraint of the PoC scope."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Permutation importance is a diagnostic tool, not the primary metric. Whether the gain comes from 'temporal reasoning' or 'feature representation' is secondary to the primary hypothesis: does the Transformer approach outperform the LR approach? The finding does not invalidate the main result."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "Section 6 explicitly requires the Test set be 'held completely untouched'. Label refinement (Section 1) must therefore occur on Training/Validation data only to comply with Section 6. The critique assumes retroactive refinement on Test data, which contradicts Section 6."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Drift analysis is secondary to the primary performance hypothesis. A single temporal holdout is acceptable for a PoC. The critique's suggestion of rolling-origin evaluation is valid for deployment but not required for the PoC."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been reduced to adjusted severity \u2264 3 (Exonerated). F1 and F2 were rebutted as misunderstandings of the temporal split and method comparison scope, respectively. F4 and F6 were addressed by explicit scope and design constraints (Section 6, 8). No material flaw survives rebuttal."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "case_id": "eval_scenario_919",
+  "stratum": "mixed",
+  "flaw_category": "context_dependent",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "z-ai/glm-4.7-flash",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 3-month validation and test sets contain sufficient phishing positives for reliable hyperparameter tuning on PR-AUC and final performance estimation.",
+        "failure_mechanism": "Phishing is stated as rare; a 3-month window from one enterprise may yield fewer than 50-100 positives in validation/test (e.g., if base rate is 0.1% and volume is 1M emails/month, ~300 positives total across splits but skewed early), causing PR-AUC estimates to have high variance (>0.05 std err) and risk overfitting hyperparameters to validation noise or unreliable test claims.",
+        "evidence_test": "Report exact counts of phishing positives and total messages per split; compute binomial confidence intervals or bootstrap variance for PR-AUC on test set. Reliable if test positives >=200 with variance <0.02.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The dataset filtered to only 21-day matured/finalized cases is representative of the full stream of emails for training and evaluating phishing ranking performance.",
+        "failure_mechanism": "Excluding messages escalated (to phishing or otherwise) after 21 days systematically removes stealthier phishing that initially appears benign (lacking obvious signals like poor reputation or anomalies at receipt), enriching the dataset with easier-to-detect positives and biasing models to over-rely on those signals, leading to poor generalization to harder, longer-tail phishing in deployment ranking.",
+        "evidence_test": "Report fraction of total phishing incidents excluded due to >21-day maturation; compare signal distributions (e.g., sender reputation score, URL obfuscation rate) between included positives and a sample of excluded/later-escalated phishing. Distortion confirmed if excluded positives have significantly weaker receipt-time signals (e.g., higher avg reputation).",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Grouping near-duplicates by normalized URL sets and subject hashes across the full dataset, then handling to ensure no campaign variants appear in both train/eval, fully prevents leakage of campaign-specific signatures.",
+        "failure_mechanism": "Benign emails may share normalized URLs/subjects (e.g., newsletters, shared links), causing over-grouping and removal of legitimate diversity from eval; or imperfect normalization misses variants, allowing train-learned campaign artifacts to leak to eval variants, inflating transformer performance via memorization rather than generalization.",
+        "evidence_test": "Report % of eval messages grouped with any train message pre-handling, post-handling (should be 0%); check precision/recall on held-out campaign subsets or compute similarity (e.g., embedding cosine) between train/eval positives from same groups. Leakage if eval positives match train campaign signatures > threshold.",
+        "flaw_category": "signal_leakage"
+      }
+    ],
+    "summary": "The methodology is rigorous with excellent controls for chronological drift, leakage, and confounds via deduplication, baselines, and stratifications, but relies on unverified data volume sufficiency and distributional representativeness after maturation filtering, weakening confidence in reliable, unbiased claims of text-based improvement.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 questions the statistical robustness of the validation/test splits (300 total positives) for PR-AUC tuning. However, the methodology enforces a strict chronological split (12/3/3) to test future-time ranking capability. This constraint is non-negotiable; the data volume is a fixed environmental limitation, and the variance described is a property of the experiment, not a design flaw. Therefore, F1 is immaterial to the validity of the hypothesis testing. F2 claims the 21-day maturation window biases the dataset by removing stealthy phishing. However, this is a deliberate design choice to align the training data with the signals available at receipt time in production. Excluding low-signal stealth emails is essential to prevent the model from learning to wait for analyst escalation rather than filtering at the gateway. F3 raises concerns about near-duplicate grouping causing benign diversity loss or leakage. While imperfect, grouping by URL/Subject is a standard temporal-safety mechanism to prevent leakage of campaign signatures across the train/eval split. The trade-off of slightly reduced benign signal diversity is acceptable to ensure the model generalizes to unseen campaigns.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The strict 12/3/3 chronological split is mandatory to test the hypothesis of future-time ranking. Data volume and target rarity are environmental constraints; the variance in PR-AUC estimates is an inherent feature of the experimental setup, not a flawed methodology. The experiment tests the model under these real-world constraints."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The 21-day maturation window is a deliberate design choice prioritizing deployment realism. It forces the model to rely exclusively on receipt-time signals, ensuring that stealthy phishing lacking immediate signals is correctly excluded. This prevents overfitting to analyst escalation lags and aligns the training objective with the production deployment environment."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The grouping heuristic is a standard temporal-safety control to prevent leakage of campaign signatures. The minor risk of benign diversity loss is an acceptable trade-off to ensure the evaluation tests generalization to unseen variants rather than memorization. This constraint effectively isolates the performance gain due to model architecture."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All three advancing findings (F1, F2, F3) were successfully rebutted, resulting in adjusted severities of 0, 0, and 0. Since all adjusted severities are \u2264 3, the methodology is fully exonerated and the hypothesis stands to be tested."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

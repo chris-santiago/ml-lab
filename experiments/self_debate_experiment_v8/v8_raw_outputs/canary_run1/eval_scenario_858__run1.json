@@ -1,0 +1,282 @@
+{
+  "case_id": "eval_scenario_858",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "deepseek/deepseek-v3.2",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Agent behavior (clicks, sends, citations) provides accurate relevance labels for query-article pairs",
+        "failure_mechanism": "Weak supervision from agent behavior is fundamentally confounded. Agents may not find the optimal article (selection bias), tend to click top-ranked results regardless of relevance (position bias), and may miss genuinely relevant articles they never searched for. The model learns to predict agent behavior patterns rather than true semantic relevance.",
+        "evidence_test": "Evaluate both models on a fully manual labeled test set (not the 300-sample subset which is too small). If transformer shows large gains on automatic labels but minimal/no gains on manually-labeled relevance, the model is exploiting label noise rather than learning semantics.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 300-query manual annotation holdout is sufficient to validate that automatic-label improvements reflect true relevance",
+        "failure_mechanism": "A 300-query sample provides insufficient statistical power to detect realistic effect sizes. If the transformer improves MRR by 0.05 on automatic labels (a plausible realistic gain), a 300-query manual set would need ~80% base rate to detect this with 80% power \u2014 far too small. The 'sanity check' cannot actually validate the main claim.",
+        "evidence_test": "Calculate required sample size for detecting the claimed effect size (e.g., 0.03-0.05 MRR improvement) at 80% power with \u03b1=0.05. For MRR with typical variance, this would require n > 1000 queries. The current 300-query set is underpowered by a factor of 3-4x.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "In-batch negatives (other articles in the same training batch) are appropriate negatives for contrastive learning",
+        "failure_mechanism": "In-batch negatives are random samples from the corpus, but weak supervision labels may mark genuinely relevant articles as negative simply because the agent never clicked them. The contrastive loss forces the model to push away potentially relevant articles that happen to be in the same batch, teaching the model incorrect relevance patterns. This is particularly damaging when label noise is high.",
+        "evidence_test": "Run a control experiment using only hard negatives (articles known to be highly relevant from manual labels) versus random in-batch negatives. If the model performs significantly worse with in-batch negatives, they are contaminating the training signal.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "MRR@top-10 on weak supervision labels measures semantic retrieval quality",
+        "failure_mechanism": "MRR rewards finding ANY article the agent interacted with. If the model learns agent-like behavior patterns (e.g., preferring frequently-clicked articles, matching query length patterns), it will achieve high MRR without understanding semantics. MRR cannot distinguish between 'found what agent found' and 'found what's actually relevant'. The metric is misaligned with the hypothesis goal.",
+        "evidence_test": "Compute MRR on manually-labeled test set separately. Compare rank correlation (Spearman) between automatic-label MRR and manual-label MRR across query strata. Low correlation indicates metric misalignment.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Random shuffling of queries within temporal splits maintains temporal integrity while enabling efficient mini-batching",
+        "failure_mechanism": "Random shuffling mixes queries from different time periods within the same training epoch. This prevents the model from learning temporal dynamics (product changes, agent behavior evolution) that exist in the data. The model may learn spurious correlations that disappear in deployment as the product evolves.",
+        "evidence_test": "Train with temporally-ordered batches (queries grouped by week/month) and compare test MRR. If performance drops significantly, the model is currently exploiting temporal shortcuts. Report temporal statistics of training batches.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratified analysis post-hoc can detect confounds introduced by non-stratified train/val/test splits",
+        "failure_mchanism": "Post-hoc stratification after temporal splitting cannot recover information lost to confounding. If, for example, long queries dominate early training months but short queries dominate test, the model may learn length-specific features that fail on the test distribution. Stratification should be enforced at split time, not just for analysis.",
+        "evidence_test": "Compare feature distributions (query length, product area, article age) across train/val/test splits. Report KL divergence or similar. If significant drift exists, the experiment cannot distinguish model generalization from distribution-matching.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Article freshness feature (days since last update) does not leak future information",
+        "failure_mechanism": "Computing article freshness requires knowing both article update time and query submission time. With temporal splitting, articles may be updated after the query timestamp but before the test period. If article update timestamps are not strictly enforced, the model could indirectly learn which articles will be updated (future information leakage).",
+        "evidence_test": "Verify that all article metadata (update timestamps) are filtered to be <= query timestamp. Audit the data pipeline to confirm no 'future' article information leaks into the feature computation for any query.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer model learns semantic matching while BM25 learns lexical matching, allowing fair comparison of semantic vs. lexical approaches",
+        "failure_mechanism": "Both models are trained and evaluated on identical weak supervision labels derived from agent behavior. Any 'semantic' advantage the transformer has may simply be learning better patterns of agent behavior (e.g., which articles agents prefer, time-of-day patterns) rather than true semantic understanding. The comparison is not semantic vs. lexical \u2014 it's two models trained on the same noisy labels.",
+        "evidence_test": "Test on a synthetic dataset with known semantic relationships (e.g., paraphrases) where BM25 must fail by design. If transformer also fails, the labels are the problem, not the model architecture.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Excluding non-primary languages isolates semantic effects from language-specific variation",
+        "failure_mechanism": "While reasonable for this experiment, it limits the claim scope. The hypothesis cannot generalize beyond the included languages without additional evidence. This is appropriately acknowledged in the claim scope section.",
+        "evidence_test": "Run subset analysis on available non-English query logs (if any exist in the data) to establish boundaries.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Early stopping on validation set prevents overfitting",
+        "failure_mechanism": "Early stopping on validation set tuned via hyperparameter search may still overfit to the validation set's specific temporal window (months 13-15). The model selection criterion (validation MRR) may not generalize to the test period (months 16-18) if temporal drift exists.",
+        "evidence_test": "Report validation MRR variance across seeds and compare to test MRR. Large gaps indicate potential overfitting to validation temporal window.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The experiment's core flaw is using agent behavior as the sole relevance signal for both training and evaluation. This creates fundamental circularity: the model optimizes to predict agent behavior rather than true semantic relevance. The 300-query manual validation set is too small to detect realistic effect sizes. Combined with MRR metric limitations and in-batch negative label noise, the experiment cannot distinguish semantic understanding from pattern matching in weak supervision data. Multiple fatal and material issues undermine the central claim.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "I will analyze each finding systematically.\n\nF1 (FATAL): The critic claims agent behavior labels are fundamentally confounded, making the model learn agent behavior patterns rather than true semantic relevance. The methodology explicitly acknowledges this limitation in Section 1 and Section 7 ('Confound Controls and Scope'). It states that the experiment's scope is specifically to test 'agent-logged relevance labels' and includes a manual annotation check to detect systematic label noise. The design anticipates this concern and explicitly does not claim to measure 'true semantic relevance' in an absolute sense. The claim scope clearly states this is a necessary but not sufficient step toward deployment. This is not a fatal flaw but a deliberate design choice with appropriate caveats.\n\nF2 (FATAL): The critic claims the 300-query manual annotation holdout is statistically underpowered to validate automatic-label improvements. The methodology describes this as a 'sanity-checking' set used to see if 'automatic-label improvements correlate with human-judged relevance.' This is a qualitative consistency check, not a powered statistical test. The purpose is to detect gross misalignment, not to precisely estimate effect sizes. The methodology does not claim this small set provides definitive statistical validation; it's a supplementary diagnostic. This concern is valid but not fatal to the primary experiment goal.\n\nF3 (FATAL): The critic claims in-batch negatives may include relevant articles, harming training. This is a known trade-off in contrastive learning with weak labels. The methodology does not specify the negative sampling strategy in detail (only mentions 'in-batch negatives' as one option). Even if used, this is a standard practice in dense retrieval literature when explicit hard negatives are unavailable. The risk exists, but the experiment includes validation on a held-out temporal test set; if the model learns detrimental patterns, performance will drop. This is an implementation detail, not a fatal design flaw.\n\nF4 (FATAL): The critic claims MRR@top-10 on weak labels cannot measure semantic retrieval quality. The methodology's primary metric is explicitly aligned with the operational objective of finding articles agents used. The hypothesis is about outperforming BM25 on this agent-behavior-derived metric. The 'semantic' vs. 'lexical' distinction is a motivation, but the measured outcome is retrieval performance on agent logs. The metric is appropriate for the stated goal. The design includes stratification to check if gains are spurious.\n\nF5 (MATERIAL): The critic claims random shuffling within splits prevents learning temporal dynamics. The temporal split is between train/val/test, not within them. Shuffling within a 12-month training period does not break temporal integrity because the model still sees the full temporal range of training data. It prevents the model from learning chronological order, which is irrelevant for semantic matching. The critic's proposed test (temporally-ordered batches) would introduce sequence dependence that is not required for the retrieval task.\n\nF6 (MATERIAL): The critic claims post-hoc stratification cannot recover lost information from distribution shift. The methodology explicitly reports 'corpus statistics across train/val/test splits to document any distribution drift' (Section 7). Stratified analysis is used to interpret results, not to 'recover' information. If significant drift exists, the results are interpreted in that context. The temporal split intentionally allows natural drift to test generalization to future conditions. This is a feature, not a bug.\n\nF7 (MATERIAL): The critic claims the article freshness feature could leak future information. The methodology states 'articles marked deprecated before query submission are removed' and the evaluation 'reflects real deployment constraints.' It implies article metadata is filtered to the query timestamp. A strict audit is prudent, but the design intent explicitly avoids future leakage. This is an implementation verification point, not a material design flaw.\n\nF8 (MATERIAL): The critic claims the comparison isn't semantic vs. lexical because both use the same noisy labels. The hypothesis is that a transformer-based model outperforms BM25 on the given task and data. The 'semantic' advantage is an architectural hypothesis. Both models are evaluated on the same ground truth (agent behavior), which is exactly what makes the comparison fair. The experiment tests whether the transformer architecture yields better retrieval of articles agents used. This is a valid comparison for the stated objective.\n\nF9 (MINOR): The critic notes language exclusion limits claim scope. The methodology explicitly acknowledges this in the 'Claim Scope' section. This is already addressed.\n\nF10 (MINOR): The critic claims early stopping may overfit to the validation temporal window. This is a standard risk in any temporal validation. The methodology uses a three-month validation window to reduce volatility. The gap between validation and test performance will be reported, allowing assessment of generalization. This is a minor implementation risk, not a design flaw.\n\nOverall, the critique raises valid considerations, but the methodology has anticipated and addressed the core concerns through explicit scope definition, confound controls, and appropriate metrics for the stated hypothesis.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -6,
+        "adjusted_severity": 3,
+        "justification": "The methodology explicitly acknowledges agent behavior labels are imperfect and defines the experiment's scope as testing performance on these specific labels (see Sections 1 and 7: 'Claim Scope'). The design includes a manual annotation check to detect systematic noise. The hypothesis is about outperforming BM25 on agent-logged relevance, not establishing absolute semantic truth."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -7,
+        "adjusted_severity": 1,
+        "justification": "The 300-query manual set is described as a 'sanity-checking' correlation check, not a powered statistical test to validate the main claim. Its purpose is to detect gross misalignment, which it can do even with small n. The primary experiment conclusion rests on the automatic-label test set, not this small manual set."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "In-batch negatives are a standard, pragmatic choice for contrastive learning when hard negatives are unavailable. The risk of pushing away relevant articles exists, but the final model is validated on a held-out temporal test set; poor generalization due to this issue would be caught by low test MRR. This is an accepted trade-off in the retrieval literature for this problem setting."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "MRR@top-10 is explicitly chosen because it aligns with the operational objective: quickly finding articles agents used (Section 5). The hypothesis is about improving retrieval performance on this agent-behavior-derived metric. The metric is perfectly aligned with the stated goal. Stratified analysis helps determine if gains are spurious."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "Shuffling queries within the 12-month training period does not violate temporal integrity. The temporal split is between datasets, not within them. Learning chronological order of queries is irrelevant for the semantic retrieval task; the model needs to learn query-article relationships, not time-series patterns. Shuffling enables efficient mini-batching without harming the learning objective."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The temporal split intentionally allows natural distribution drift to test generalization to future conditions (Section 2). Post-hoc stratification is used to interpret results in light of any drift, not to 'recover' lost information. Reporting corpus statistics across splits (as stated in Section 7) explicitly documents drift, allowing proper interpretation."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The design intent explicitly filters article metadata to the query timestamp (Section 1: 'articles marked deprecated before query submission are removed'). The freshness feature is computed using the article's last update date, which is known at query time. Strict implementation auditing is prudent, but the design controls for this leakage."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The comparison is fair and within the stated scope: both models are trained/evaluated on identical agent-behavior labels. The hypothesis is that the transformer architecture yields better retrieval performance on this task. The 'semantic vs. lexical' framing motivates the architectural choice, but the experiment validly tests whether that choice improves outcomes on the target metric."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The methodology explicitly acknowledges this limitation in the 'Claim Scope' section. The experiment is scoped to primary languages, and generalizability beyond that requires further testing. This is not a flaw but a deliberate scope boundary."
+      },
+      {
+        "finding_id": "F10",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Early stopping on a temporal validation window is standard practice and the best available approach absent online updating. The risk of overfitting to that specific window exists but is mitigated by using a 3-month window and comparing validation/test performance. This is a minor implementation risk inherent to temporal evaluation."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All FATAL and MATERIAL findings have been successfully rebutted with sufficient severity adjustments, bringing every finding's adjusted severity to 3 or below. The methodology's design choices are deliberate, its scope is appropriately bounded, and the critique largely identifies acknowledged limitations rather than fatal flaws."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F10",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

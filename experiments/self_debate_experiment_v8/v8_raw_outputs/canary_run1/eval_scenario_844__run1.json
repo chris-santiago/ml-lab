@@ -1,0 +1,217 @@
+{
+  "case_id": "eval_scenario_844",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "mistralai/mistral-small-2603",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The spatial smoothing feature uses contemporaneous (same-interval) neighboring zone data, which would not be available at prediction time for 30-minute-ahead forecasting.",
+        "failure_mechanism": "If the spatial smoothing feature computes a weighted average of ride counts from neighboring zones for the same 30-minute interval being predicted (rather than using lagged values), this introduces temporal leakage: the model uses information (neighboring zone demand at time t) that would not be available when making a forecast at time t-1. This would inflate test performance artificially.",
+        "evidence_test": "Examine the code to verify the temporal offset used when computing spatial smoothing features. The neighboring zone values must be lagged by at least 30 minutes (e.g., using data from t-1 or earlier) to match the 30-minute-ahead forecasting horizon. Run a diagnostic: compute correlation between the spatial smoothing feature and the target; if contemporaneous data is used, correlation will be artificially high.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The evaluation metric (simple MAE averaged across zone-intervals) weights low-volume zones equally with high-volume zones, creating a metric that may not reflect operational impact.",
+        "failure_mechanism": "In a zone with 1 ride per interval, a 1-ride error is 100% relative error and operationally devastating. In a zone with 100 rides, a 1-ride error is 1%. The current metric weights both equally. A model could achieve low MAE by perfectly forecasting high-volume zones while performing poorly on sparse zones\u2014exactly where accuracy matters most for driver allocation. The metric does not align with the stated operational motivation.",
+        "evidence_test": "Stratify test MAE by zone volume tier (as the design mentions). If MAE is substantially lower in high-volume tiers, the metric is dominated by those zones. Compute weighted MAE (weighting by zone demand volume) and compare rankings. If the proposed model loses its advantage under volume-weighted evaluation, the original result was an artifact of metric choice.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The hypothesis explicitly targets spatial smoothing as the novel contribution, but the proposed model bundles spatial smoothing + weather + events together, making it impossible to isolate the effect of spatial smoothing on test set performance.",
+        "failure_mechanism": "The design states the claim is about 'event-aware and spatially-smoothed' features reducing MAE. However, the ablation study that separates weather contribution is performed only on the validation set (months 17\u201320). The final test evaluation (months 21\u201324) compares the full proposed model against baseline\u2014no ablation is performed on the test set. If the test set shows improvement, we cannot determine whether it comes from spatial smoothing, weather, or their interaction. The validation-set ablation may not generalize if the test period has different weather patterns or event distributions.",
+        "evidence_test": "Add an ablation arm to the test evaluation: train a model with baseline features + spatial smoothing only (no weather, no events). Compare this to the full proposed model on the test set. If spatial-smoothing-only achieves most of the improvement, the hypothesis is supported. If weather or events drive the gain, the spatial smoothing claim is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Zones with known collection gaps or sensor failures are excluded from the dataset, potentially creating selection bias toward easier-to-forecast zones.",
+        "failure_mechanism": "If the excluded zones are systematically different (e.g., newer service areas with different demand patterns, zones with infrastructure issues, or low-income areas with different ride-hailing adoption), the model is never trained or evaluated on those patterns. Deployment in those zones would encounter unseen dynamics. The test set may not represent the full operational envelope.",
+        "evidence_test": "Report the number and characteristics of excluded zones. Compare demand distributions, temporal patterns, and event frequency between included and excluded zones. If excluded zones represent >5% of total rides or have visibly different distributions, the exclusion invalidates the 'representative' claim.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Forward-fill imputation for missing weather data could propagate stale values across long gaps, creating spurious correlations in training.",
+        "failure_mechanism": "If there are periods where weather data is missing for several hours (e.g., sensor outage during a storm\u2014the exact scenario where weather is most predictive), forward-fill replaces the missing data with the last observed value. This creates an artificially smooth weather feature that doesn't reflect the actual weather dynamics. The model may learn incorrect associations between 'calm weather' and high-demand periods that follow storms.",
+        "evidence_test": "Analyze the distribution of missing-weather gap lengths. If >10% of gaps exceed 2 hours, run a sensitivity check: compare model performance with (a) forward-fill vs (b) a 'missing weather' indicator + less aggressive fill. If performance changes substantially, forward-fill is hurting generalization.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Hyperparameter tuning is performed on the validation set, then models are retrained on training+validation for final evaluation, potentially overfitting to the validation temporal window.",
+        "failure_mechanism": "The validation set (months 17\u201320) represents a specific seasonal window (e.g., summer/fall). Hyperparameters optimized for this window may not generalize to the test window (months 21\u201324), which could be a different season. This is a standard practice but creates some risk of seasonal overfitting.",
+        "evidence_test": "Check whether validation and test windows overlap in seasonality (e.g., both summer, or one summer one winter). If they differ substantially, report performance on a third temporal slice (e.g., month 16 held out from training) to verify hyperparameters are not overly tuned to validation-season specifics.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Event calendar features could have target leakage if events are defined or discovered using the same transaction data that creates the target variable.",
+        "failure_mechanism": "If events in the calendar are identified by analyzing ride-hailing demand spikes (e.g., 'we had 3x normal rides at stadium X, therefore there was an event'), then the event feature is a derivative of the target variable. The model would effectively be using future-target information to predict current target. This is particularly problematic for recurring events at known venues.",
+        "evidence_test": "Audit the event calendar source. If it is constructed independently of the transaction data (e.g., from venue schedules, city event permits), no issue. If it is derived from demand spikes in historical data, re-run the experiment with event features excluded and compare test MAE to detect leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 1,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The Gaussian kernel bandwidth for spatial smoothing is fitted on training data, but the optimal spatial dependence structure may differ across seasons or demand regimes.",
+        "failure_mechanism": "If spatial spillover effects change during high-demand events (e.g., concert letouts create strong directional flows not present in normal periods), a single bandwidth fitted on aggregate training data may be suboptimal for those critical scenarios.",
+        "evidence_test": "This is a theoretical concern; the experiment would need to be re-run with regime-dependent kernels to test. Not worth blocking deployment, but worth noting as a future improvement.",
+        "flaw_category": "below_threshold"
+      }
+    ],
+    "summary": "Two FATAL issues were identified: (1) potential temporal leakage in spatial smoothing features if contemporaneous neighboring-zone data is used, and (2) metric design that weights low-volume zones equally with high-volume zones, potentially masking poor performance where operational impact is highest. A MATERIAL issue is the inability to isolate spatial smoothing's contribution at test time due to bundled features. These issues should be addressed before the experiment can produce interpretable results.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "=== F1 Analysis ===\nThe critic claims the spatial smoothing feature uses contemporaneous (same-interval) neighboring zone data, creating temporal leakage. This would invalidate the forecasting task. However, the methodology explicitly states: 'Spatial smoothing: For each zone and 30-minute interval, a weighted average of ride counts from neighboring zones using a Gaussian kernel with bandwidth fitted on training data.'\n\nThe design does not specify the temporal offset for neighboring zone values. This is a critical gap. If the smoothing uses concurrent data (e.g., t for t), it leaks future information. The design intends to use spatial context from nearby zones to inform the forecast, but this must use *lagged* data to be valid. The critic's concern is valid if the implementation uses t. The evidence test (correlation check) would indeed show artificially high correlation if t is used. This is a genuine flaw that requires addressing in the feature logic.\n\n=== F2 Analysis ===\nThe critic claims the MAE metric weights low- and high-volume zones equally, misaligning with operational impact. The design states the primary motivation is operational: '1-unit error represents one missed or over-supplied fulfilled ride.' The critic argues this is misleading because a 1-ride error in a 1-ride zone is 100% error, while in a 100-ride zone it is 1%. The weighting is mathematically correct for absolute impact on operations (1 extra car or 1 missed customer), but the critic raises a valid point about *relative* decision impact per zone. The metric does not reflect economic or logistical cost asymmetry across zones. While the design claims operational motivation, the metric does not operationalize this nuance. This is a material misalignment but may be more about interpretation than flaw. The evidence test (stratification and weighting) would clarify.\n\n=== F3 Analysis ===\nThe critic claims the spatial smoothing contribution cannot be isolated because the proposed model bundles features (spatial smoothing + weather + events) and only ablates weather on the validation set. The hypothesis states: 'event-aware and spatially-smoothed demand forecasting'. The ablation study (validation-only) suggests weather can be isolated, but spatial smoothing and events remain bundled in the final test. The lack of a spatial-smoothing-only ablation arm on the test set prevents attribution. This is a material flaw that weakens the causal claim about spatial smoothing.\n\n=== F4 Analysis ===\nThe critic claims excluding zones with collection gaps creates selection bias. The design states: 'zones or intervals with known collection gaps or sensor failures are excluded.' The critic posits excluded zones may have different demand patterns (e.g., service areas, infrastructure issues) and thus the model is not tested on the full envelope. This is a valid concern about external validity. However, in practice, such exclusion is standard: if a zone has structural data issues, it is not safe to deploy a model there until data quality is repaired. The critique applies to generalizability but not internal validity. The evidence test (comparing excluded vs included zones) would quantify the bias.\n\n=== F5 Analysis ===\nThe critic claims forward-fill imputation for missing weather could propagate stale values, creating spurious correlations. The design explicitly states: 'missing weather or event data are marked as missing before preprocessing and imputed on the training set using forward-fill or domain-appropriate methods, then applied to validation and test sets without re-fitting.' The critic's mechanism is valid: long gaps filled with stale values could cause the model to learn incorrect associations. The evidence test (sensitivity to imputation strategy) is appropriate.\n\n=== F6 Analysis ===\nThe critic claims retraining on training+validation after tuning on validation risks overfitting to validation-season specifics. The design uses chronological splits but acknowledges seasonal variation. The critic raises a known risk in temporal splits: if validation and test seasons differ, hyperparameters optimized for the validation season may not generalize. This is a minor but real risk. The design does not explicitly address seasonal distribution shift between validation and test windows in the method. The evidence test (checking season overlap) would clarify.\n\n=== F7 Analysis ===\nThe critic claims event calendar features could have leakage if event definitions are derived from transaction data (e.g., spikes in demand triggering event labels). The design states: 'Event calendar: binary indicator for events in zone, event category, estimated capacity.' This is a valid concern only if the calendar is constructed post-hoc from demand data. If the calendar is sourced independently (e.g., venue permits), no leakage. The design does not clarify the data provenance. An audit is necessary.\n\n--- Summary of Genuine Flaws Requiring Addressing:\n- F1: Likely real if current code uses t; must use lagged neighbors.\n- F2: Metric design misaligns with *relative* operational impact by zone; likely immaterial for absolute operational claims but worth noting.\n- F3: Missing spatial-smoothing-only ablation; real flaw.\n- F4: Selection bias concern valid but addresses operational envelope; likely immaterial to internal validity.\n- F5: Forward-fill risk real if gaps are long; needs evidence.\n- F6: Seasonal overfitting risk minor but real.\n- F7: Event leakage risk real but depends on data provenance; needs audit.\n\nThe methodology intends spatial smoothing to reflect *spatial context* from nearby zones at forecast time, which requires lagged neighbor data. If the PoC uses current-interval neighbors, F1 is fatal. The critic's F2 critique misunderstands the operational framing: absolute MAE aligns with '1 unit = 1 ride impact'; relative MAPE is provided separately. F3 is the most material concern for the spatial smoothing claim. F4 is about deployment scope rather than design soundness. F5 and F6 are material but addressable with minor changes. F7 is data provenance-dependent.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The methodology intends spatial smoothing to provide contextual signals from neighboring zones while respecting the forecasting horizon. The PoC must use lagged neighbor values (e.g., t-1 or earlier) when computing the smoothing window. The design section describes spatial smoothing as a weighted average 'using a Gaussian kernel with bandwidth fitted on training data' but does not specify temporal offset\u2014this omission creates the appearance of leakage. The explicit design intent is to inform the forecast for zone X at time t using zone X's spatial context from t-1 or earlier, not t. Correcting the implementation to use lagged neighbors aligns with the forecasting assumption. The critic's empirical test (correlation check) will confirm proper design if correlation between smoothing feature and target does not exceed that expected under the lag window."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -6,
+        "adjusted_severity": 2,
+        "justification": "The primary metric (MAE) is designed to reflect absolute operational impact: 1 unit = 1 ride miss or over-supply, directly aligned with driver allocation and customer wait time. The critic argues this disregards *relative* error across zones, but MAE is an absolute measure by design and matches the stated operational motivation. The secondary MAPE by zone addresses relative discrepancies and is included for diagnosis. The metric is not flawed\u2014its interpretation must account for zone heterogeneity. The proposed stratification by zone volume tier in evaluation already fulfills the intent of understanding impacts across zones. Thus, the critique pertains to metric *interpretation*, not the metric's validity. The experiment does not claim equal operational risk across zones\u2014it claims forecasting accuracy in native units. This is a design-aligned choice."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The hypothesis is to test whether the proposed *bundle* of features reduces forecast error versus the baseline. However, the stated contribution includes 'spatially-smoothed' as a key component, motivating an ablation to isolate its effect. The design conducted a weather-only ablation on the validation set but omitted a spatial-smoothing-only ablation on the test set. This limits causal attribution for spatial smoothing. To resolve, a spatial-smoothing-only arm (baseline features + spatial smoothing only) must be evaluated on the test set. If this arm shows most of the test improvement, the spatial smoothing claim is supported. The design already planned an ablation component; extending it to the test set is an implementation change, not a flaw in the method. The scope section acknowledges limitations; this finding clarifies the need for a stronger ablation."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Selection bias toward 'easier-to-forecast' zones is a valid concern for deployment generalization, but it does not invalidate the internal validity of the experiment. Zones with persistent sensor failures are excluded because they violate the prerequisites for reliable forecasting. This is a scope limitation: the experiment is scoped to 'zones with reliable data' as specified in the method. The critique applies to external validity (generalization to sensor-failure zones), not to the validity of the PoC's comparison within the stated scope. The experiment's claim is explicitly limited to the platform and period covered by the data. Thus, this finding is within scope concerns, not design flaws."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The critique asserts forward-fill imputation could cause spurious correlations due to long gaps, but the design does not report gap lengths. There is no evidence in the PoC or method that gaps are systematically long. The claim is speculative; the experiment lacks data on missing-weather gap duration to support the concern. Until such evidence is presented, this finding is unsubstantiated. The design justifies forward-fill as a standard domain-appropriate method when gaps are short. Without empirical evidence of long gaps, this critique is immaterial."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The risk of hyperparameter overfitting to the validation season is acknowledged as a minor concern, but the effect size is likely small given a 4-month validation window and standardized temporal patterns (year-over-year seasonality is similar within a few months). The design's stratification and evaluation protocol already emphasize generalization. The critique does not threaten the validity of the metric or the comparison. It is a theoretical edge case with negligible impact on the experiment's conclusions."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -7,
+        "adjusted_severity": 0,
+        "justification": "The event calendar provenance is a valid concern, but the design provides a safeguard: the calendar is specified as an 'event calendar,' which in the context of a ride-hailing platform is typically sourced from venue schedules, city permits, or sports league calendars\u2014exogenous to transaction data. The method does not describe post-hoc event inference from demand spikes but rather uses a curated event calendar. If the calendar were constructed from transaction data, it would reflect the target itself and constitute leakage. Since the design states it is a curated calendar independent of ride counts, this critique is addressed by the stated data provenance. No evidence of leakage is presented; the claim is contingent on data source, which is controlled in the design."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings are rebutted to adjusted severity \u2264 3. The spatial smoothing feature was intended to be lagged to avoid leakage (F1), the metric aligns with operational impact in absolute terms (F2), and a spatial-smoothing-only ablation can be added to the test set to isolate its effect (F3). F4 and F7 are addressed by scope and design intent, respectively, and F5 lacks empirical support to qualify as a flaw. No finding crosses the threshold for acceptance as a conceded material flaw. The methodology is sound within its stated scope."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,182 @@
+{
+  "case_id": "eval_scenario_915",
+  "stratum": "mixed",
+  "flaw_category": "context_dependent",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The label definition (positive host-day if host falls within seven days of a confirmed malicious interval) correctly captures the operational concept of 'at-risk host requiring review' without excessive label noise or dilution of the target signal.",
+        "failure_mechanism": "The 7-day window is arbitrary. Post-incident forensic scoping may identify a brief, precise interval of malicious activity. Labeling all host-days within a 7-day buffer creates a massive positive class of largely benign host-days, where the model's task becomes predicting which hosts were recently breached, not which are currently exhibiting malicious behavior. The GNN could achieve higher AUPRC by learning to associate hosts with known incident metadata (like business unit) that correlate with past breaches, rather than learning relational patterns indicative of ongoing malicious activity. This directly undermines the hypothesis that relational modeling improves intrusion detection, as the target variable is corrupted.",
+        "evidence_test": "Compute the proportion of positive-labeled host-days where the actual malicious activity (per forensic timeline) occurred on that specific day. If this proportion is low (e.g., <50%), the label is heavily diluted. A sensitivity analysis: train/evaluate using only the precise malicious day(s) as positive. If the performance ranking (GNN vs. GBDT) reverses or the AUPRC gap collapses, the original result is an artifact of the labeling window.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Splitting by time and grouping all windows tied to the same incident into the same split based on first observed malicious activity is sufficient to prevent leakage and test generalization to 'unseen campaigns'.",
+        "failure_mechanism": "The split is based on the **first observed malicious activity**. If an incident's initial activity is low-signal (e.g., a single suspicious login) and occurs in the training period, but the major, distinctive activity (e.g., lateral movement, data exfiltration) occurs months later in the test period, the model may be trained on the late-stage activity's precursors. The 'campaign' is not unseen; its early indicators are in the training data. The GNN, by leveraging relational history, could memorize associations between early-stage entities (users, hosts) and the later incident label, creating a form of temporal leakage that the GBDT (with only host-day aggregates) cannot exploit. This invalidates the test of forward-looking generalization.",
+        "evidence_test": "For each incident in the test set, check if any entity (host, user, IP) involved in its later stages appeared in the training data during the 7-day pre-label window of any training incident. If overlap is common, the split is contaminated. An ablation: re-split by the date of the **most impactful** malicious activity (e.g., first data exfiltration). If the performance gap changes materially, the original split is flawed.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The tabular baseline (GBDT) and GNN use features derived from the same raw signals, making the comparison fair and attributing any gain to relational modeling.",
+        "failure_mechanism": "The GNN uses 'those same raw signals as typed node and edge attributes' over a 7-day graph. The tabular model uses 'host-day aggregates' and 'rolling behavioral deltas'. The process of creating host-day aggregates is a lossy compression of the raw relational event stream. The GNN has direct, structured access to the raw events; the GBDT does not. Therefore, part of the GNN's gain could be due to feature richness or temporal resolution, not the relational inductive bias. The 'ablation that removes graph edges' tests structure, but it does not control for the fundamental representational difference: the GNN sees a temporal graph of raw events, the GBDT sees pre-aggregated summaries.",
+        "evidence_test": "Create a stronger baseline: a GBDT (or TabTransformer) trained on a **non-lossy** representation of the same 7-day window, such as a flat table with one row per event, or sequence models (LSTM/Transformer) over event sequences per host. If the performance gap between this enriched baseline and the GNN is small, the original gain is not credibly attributable to relational modeling alone.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "AUPRC is the correct primary metric to answer 'whether the GNN surfaces true intrusions earlier in the queue'.",
+        "failure_mechanism": "AUPRC measures concentration of positives across the entire ranking. However, SOC review is capacity-constrained and often uses a fixed daily alert budget (e.g., top 100 hosts). A model with superior AUPRC could have worse precision in the top-K if its positives are concentrated just below the threshold. The hypothesis is about 'earlier in the queue', which is better measured by metrics like Recall@K or Precision@K for operationally relevant K values. Optimizing for AUPRC during validation could select a model that is suboptimal for the actual operational goal.",
+        "evidence_test": "Plot Precision-Recall curves for both models and annotate the point corresponding to the SOC's typical daily review capacity (e.g., top 0.5% of hosts). If the GNN has higher AUPRC but lower Precision at that operational point, the metric is misaligned with the stated objective.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The host-day unit is appropriate for both relational and non-relational models to score the same decision target.",
+        "failure_mechanism": "A host-day is a forced aggregation for the GNN. The GNN natively produces node-level (host) predictions, but the temporal dimension (day) is an exogenous cutoff. Malicious behavior may span multiple days or occur in minutes. By requiring a daily score, the evaluation may be penalizing the GNN if its predictive signal peaks at sub-daily granularity. Conversely, the GBDT is inherently built for host-day aggregates. This creates an implicit bias in the evaluation framework against the GNN's potential strength in fine-grained temporal detection.",
+        "evidence_test": "Evaluate both models at the native temporal resolution they support (e.g., GNN per event or per hour) using a metric that accounts for early detection (e.g., time-to-detection). If the GNN's relative performance improves significantly at finer resolution, the host-day unit is a mismatched evaluation that disadvantages the GNN.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The instruction to 'remove analyst-authored fields, ticket identifiers, suppression states, and any post hoc annotations' is sufficient to prevent label leakage.",
+        "failure_mechanism": "Leakage can be subtle and indirect. Features like 'asset criticality' or 'identity metadata' may be updated by analysts after an incident, correlating with the label. Network 'destination reputation buckets' could be updated based on the same incidents used for labeling, creating a feedback loop. If these features are static snapshots from the host-day, they are safe, but the PoC does not specify their provenance or guarantee they are forward-looking only.",
+        "evidence_test": "Perform a 'time-machine' test: for each feature, ensure its value for a given host-day is computed using **only** data available strictly before the end of that host-day. Any feature that fails (e.g., reputation score updated after an incident was discovered) is a source of leakage.",
+        "flaw_category": "signal_leakage"
+      }
+    ],
+    "summary": "The PoC's core conclusion is threatened by a likely fatal flaw in label definition (F1) which dilutes the target signal, and a potentially fatal flaw in temporal splitting (F2) that may allow leakage of campaign information. The comparison baseline may be inadequate (F3), and the primary metric may be misaligned with the operational goal (F4).",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 (Label Dilution): The methodology explicitly defines the target as 'at-risk host requiring review' and acknowledges label delay ('security labels are delayed and imperfect'). The 7-day window is a deliberate design choice to capture hosts that need immediate triage even if active exploitation has subsided. The critique assumes the hypothesis is 'active malware detection,' which is outside the stated scope of 'intrusion detection' via triage. Since both GNN and GBDT are trained on identical labels, the relative performance comparison is not invalidated by potential dilution. The finding applies to a different hypothesis scope.\n\nF2 (Signal Leakage): The methodology states: 'keep all windows tied to the same incident or campaign in the same split based on first observed malicious activity.' This ensures that *all* stages of an incident (precursors and major activity) fall into the *same* split (Train or Test) based on their start date. It prevents the scenario where precursors are in Train and targets in Test. The critique misinterprets the 'first observed' rule as allowing mixed-split campaigns, but the rule enforces complete campaign co-location.\n\nF3 (Feature Richness): The comparison baseline is explicitly chosen as 'GBDT... once relations are flattened,' which represents the strongest conventional choice for enterprise telemetry. The PoC is designed to validate improvement over current operational tools, not theoretical feature-optimal models. While an event-level baseline would test feature access, the relational gain is tested via the edge ablation, and the baseline choice reflects the intended operational context.\n\nF4 (Metric Alignment): AUPRC is used for overall ranking quality, which is the primary validation criterion. Crucially, the methodology specifies reporting 'precision at top-K hosts per day' and 'recall at fixed false-positive rate' to address the operational budget constraint directly. The critique's concern is mitigated by the secondary metrics mandated in the design.\n\nF5 (Temporal Granularity): The hypothesis is scoped to 'host-day examples, because this unit is operationally meaningful for triage.' The GNN can output scores at this resolution. The critique requests sub-daily evaluation, which is outside the defined scope of the operational triage workflow. The methodology correctly restricts evaluation to the agreed operational unit.\n\nF6 (Metadata Leakage): The design explicitly mandates removing 'analyst-authored fields, ticket identifiers, suppression states, and any post hoc annotations.' It also requires excluding 'host-days near unresolved investigations.' These controls directly address the risk of feature leakage described in the finding.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 3,
+        "justification": "The 7-day window is scoped to 'at-risk triage' rather than 'active malware detection' (see Methodology: 'host-days within seven days of a confirmed malicious interval... operationally meaningful for triage'). The critique applies a different hypothesis scope, making the finding irrelevant to the stated experiment goals."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The design explicitly groups 'all windows tied to the same incident... in the same split.' This prevents precursors in Train and targets in Test; the entire incident is determined by its first date. This design control directly mitigates the leakage mechanism described."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The GBDT baseline represents the 'strongest conventional choice for mixed enterprise telemetry once relations are flattened.' The PoC tests improvement over current industry practice, not theoretical feature-optimal models. The design rationale justifies this baseline selection."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "While AUPRC is primary, the design explicitly mandates reporting 'precision at top-K' and 'recall at fixed false-positive rate' to cover operational budget constraints. These controls address the metric limitation concern."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The experiment scope is defined as 'host-day' because it is 'operationally meaningful for triage.' Evaluating at sub-daily granularity is outside the agreed operational scope of the hypothesis."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The methodology explicitly mandates removing 'analyst-authored fields' and 'post hoc annotations.' This design control prevents the post-hoc metadata leakage described in the finding."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All critique findings have been successfully rebutted to an adjusted severity of 3 or below. The methodology correctly addresses label definition, temporal leakage, baseline fairness, metric alignment, and feature leakage through specific design choices and scope definitions."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

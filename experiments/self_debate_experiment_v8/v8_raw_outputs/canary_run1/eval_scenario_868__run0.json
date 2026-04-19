@@ -1,0 +1,182 @@
+{
+  "case_id": "eval_scenario_868",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "anthropic/claude-3-haiku",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The transformer model improves spear-phishing detection by learning generalizable linguistic cues rather than campaign-specific patterns or memorization.",
+        "failure_mechanism": "The experiment does not adequately isolate the transformer's ability to generalize beyond campaign-specific patterns. Despite temporal splitting and campaign stratification, the transformer could still exploit: (1) time-bound linguistic phrases or templates common to specific campaigns within the training window, (2) sender anonymization or metadata leakage not fully controlled (e.g., attachment metadata or domain reputation embeddings indirectly revealing patterns), or (3) near-duplicates within campaigns that persist across the temporal split despite deduplication efforts. The confounding control (sender domain masked from transformer) is insufficient if the transformer infers sender patterns from body text (e.g., closings like 'Regards, Bob from Finance'). Without a campaign-agnostic test set or post-hoc analysis showing failure patterns are not campaign-specific, the improvement could be an artifact of temporal or campaign clustering.",
+        "evidence_test": "Construct a campaign-agnostic test set where emails from novel campaigns (not present in training/validation data) are evaluated. If the transformer's performance degrades significantly on this set, the mechanism is non-generalizable campaign memorization. Alternatively, train/evaluate on shuffled data within the same time window and observe if performance inflates\u2014this would indicate exploitation of campaign-internal patterns rather than generalizable features.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 18-month temporal window and campaign stratification ensure no test-time leakage or overfitting.",
+        "failure_mechanism": "The experimental design assumes that deduplication and campaign stratification eliminate all forms of leakage. However, leakage could occur via: (1) shared stylistic patterns or templates across campaigns not captured by metadata headers (e.g., phishing kits reused across campaigns), (2) temporal correlations in attachment types or file hashes that the transformer infers from body text (e.g., a specific malware download link format), or (3) sender IP blocks or ASNs used by multiple coordinated campaigns. The transformer might learn these proxies, which are not causally tied to phishing intent but correlate with the label. Additionally, threat-intelligence reputation scores are frozen at the training period's end, but the transformer could indirectly exploit temporal trends in attachment metadata (e.g., file hashes increasing in frequency) without explicit label leakage.",
+        "evidence_test": "Test the transformer on a synthetic dataset where all content features (body text, subject, attachments) are replaced with random noise, but metadata features (sender IP, ASN, reputation) are preserved. If performance remains above baseline, the model is exploiting metadata correlations. Alternatively, shuffle campaigns across splits and measure performance degradation\u2014if minimal, the model is not dependent on campaign-specific patterns.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "PR-AUC is an appropriate metric for evaluating spear-phishing detection, reflecting the operational goal of high precision at useful recall levels.",
+        "failure_mechanism": "PR-AUC is indeed more informative than ROC-AUC for imbalanced data. However, the operational objective likely prioritizes minimizing human analyst workload: high precision at the expense of recall is often less desirable than achieving a fixed recall threshold (e.g., 90% of phishing caught) with acceptable precision. The secondary metric (recall at 1% FPR) partially addresses this, but the emphasis on PR-AUC could obscure a critical point: the actual deployment decision threshold may be set to meet a risk-assessed FPR rather than a predefined precision. Moreover, PR-AUC does not directly account for the cost imbalance between false positives (benign emails flagged) and false negatives (phishing missed)\u2014a factor highly dependent on the organization's security posture and analyst capacity.",
+        "evidence_test": "Conduct a cost-sensitive analysis using the organization's actual false-positive and false-negative handling costs. Compare the transformer's end-to-end operational cost (analyst hours spent investigating false positives vs. breach costs from false negatives) to the baseline. If the translate to the same PR-AUC level but vastly different costs, the metric is misaligned with the stated objective.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (logistic regression on sender reputation and header features) represents the current state-of-the-art or status quo in enterprise email gateways.",
+        "failure_mechanism": "The baseline is unlikely to reflect the actual deployed configuration in most enterprises. Modern gateways often use ensemble models combining reputation scores with lightweight ML (e.g., gradient-boosted trees on header features or simple keyword rules). A more realistic baseline would include: (1) a gradient-boosted model on sender reputation + header features, (2) a commercial phishing detection API (e.g., from a major vendor), or (3) a rule-based system mimicking real-world deployments. The PoC's baseline is a logistic regression, which is likely weaker than real-world systems, potentially inflating the perceived value of the transformer.",
+        "evidence_test": "Replace the logistic regression baseline with a gradient-boosted model (e.g., XGBoost) trained on the same features. If the transformer's relative improvement shrinks significantly, the baseline was not representative of industry practice.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Attachment metadata features add orthogonal value to the transformer model, complementing text analysis.",
+        "failure_mechanism": "The implementation does not verify that attachment metadata provides additive signal beyond what is already embedded in the text (e.g., a malware hash in the body text). The transformer could indirectly infer attachment properties from the text (e.g., 'download the invoice at malicious.com/invoice.exe'), making the metadata embedding redundant or even a source of leakage. Additionally, the one-hot encoding of file extensions may spuriously correlate with phishing labels due to selection bias (e.g., '.exe' files are more common in phishing), not causal relevance.",
+        "evidence_test": "Train the transformer with attachment metadata embeddings removed and compare PR-AUC to the full model. If performance is unchanged, the metadata is redundant. Alternatively, train a model on attachment metadata alone\u2014if it performs well, the transformer may be exploiting metadata patterns via text.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Calibration (ECE) is a valid secondary metric for operational deployment, ensuring predicted confidence scores are trustworthy.",
+        "failure_mechanism": "Calibration is only meaningful if the predicted scores are used to inform risk-based decisions (e.g., triaging high-confidence alerts). If the downstream process uses a fixed threshold (e.g., flag anything with score >0.9), calibration accuracy is irrelevant. Moreover, ECE is sensitive to binning choices and may not reflect actual operational calibration. The PoC does not articulate how calibrated scores would alter downstream processes or analyst behavior.",
+        "evidence_test": "Survey analysts on how they use model confidence scores. If scores are ignored or thresholds are manually set, calibration is a theoretical construct with no operational impact.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC has three primary weaknesses: 1) it does not sufficiently isolate the transformer's ability to generalize beyond campaign-specific patterns, risking overfitting to temporal or campaign-internal patterns (FATAL); 2) it assumes PR-AUC aligns with operational objectives, but cost sensitivity and deployment thresholds may diverge (MATERIAL); and 3) the baseline may not reflect industry practice, overstating the transformer's relative value (MATERIAL).",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic has raised several valid concerns about the experimental design, evaluation, and baseline choices. However, upon closer inspection, many of these issues do not appear to undermine the core claims or validity of the results.\n\nFor the FATAL findings (F1 and F2), the critic's concerns about potential campaign-specific memorization and metadata leakage are reasonable. The experiment's temporal split and campaign stratification controls may not fully eliminate these threats. While the proposed tests (campaign-agnostic test set, metadata-only model) could provide additional validation, the current design does have safeguards in place that mitigate these risks to a significant degree. Ultimately, some residual uncertainty remains.\n\nThe MATERIAL findings (F3, F4, F5) raise important points about metric selection, baseline representativeness, and the value of attachment metadata, respectively. These are valid critiques that could influence the interpretation and generalization of the results. However, they do not appear to be fatal flaws that would invalidate the core conclusions.\n\nThe MINOR finding (F6) on calibration is a fair observation, but its relevance depends on how the predicted scores would be used in the operational deployment, which is not fully specified in the methodology.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The experiment's temporal split and campaign stratification controls are designed specifically to mitigate the risk of the transformer exploiting campaign-specific patterns. While the critic's proposed validation tests could provide additional evidence, the current design already includes several safeguards, including deduplication, masking of sender domain reputation, and post-hoc error analysis. The residual uncertainty around generalization cannot be fully eliminated, but the experiment has taken reasonable steps to address this concern within the stated scope."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The critic's concerns about potential leakage via shared stylistic patterns, temporal metadata trends, and coordinated campaigns are valid. However, the experiment has taken steps to mitigate these risks, including deduplication, freezing of threat-intelligence data, and campaign stratification. While the proposed metadata-only test could provide additional validation, the current design already includes multiple controls to limit leakage. Some residual uncertainty remains, but the overall approach appears sound."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The critic's point about PR-AUC not directly capturing the organization's operational objective (minimizing analyst workload) is valid. However, the experiment does not claim that PR-AUC is the only relevant metric; it is explicitly presented as the primary metric, with recall at 1% FPR and precision at 90% recall as secondary metrics. The stated scope is to demonstrate the transformer's superior performance compared to the baseline, not to fully optimize the system for deployment. The cost-sensitive analysis proposed by the critic is reasonable but outside the current experiment's focus."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": -1,
+        "justification": "The critic's claim that the logistic regression baseline does not accurately represent industry practice is reasonable. However, the experiment does not make any strong claims about the baseline being state-of-the-art or the best representation of enterprise deployments. It simply states that the baseline represents 'the status quo (sender reputation + header analysis) used in most enterprise email gateways.' The proposed gradient-boosted model baseline is a valid suggestion, but the absence of this stronger baseline does not necessarily invalidate the conclusions drawn from the current experiment."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The critic's concern about the potential redundancy or leakage arising from the attachment metadata features is reasonable. The experiment could have included additional validation to confirm the additive value of these features. However, the methodology does state that the features were kept 'orthogonal to isolate the contribution of text modeling.' This design choice, while not fully validated, appears to be a reasonable approach to understanding the value of the transformer's text modeling capabilities."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": -2,
+        "justification": "The critic's observation about the relevance of calibration (ECE) depending on how the predicted scores are used in the operational deployment is valid. The experiment does not provide details on the intended use of calibrated scores, so the significance of this metric is unclear. However, the inclusion of calibration as a secondary metric does not appear to be a critical flaw, as it is not the primary focus of the experiment."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "While the experiment's methodology has several reasonable controls and design choices, the critic has raised some valid concerns about potential confounds and limitations in the evaluation that warrant further empirical validation. Specifically, the residual uncertainty around the transformer's ability to generalize beyond campaign-specific patterns (F1, F2) and the relevance of the selected metrics (F3) merit additional investigation. The other findings, while valid, do not appear to be fatal flaws. Overall, an empirical test to address the remaining uncertainties is the appropriate next step."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": -1,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=-1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": -2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=-2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

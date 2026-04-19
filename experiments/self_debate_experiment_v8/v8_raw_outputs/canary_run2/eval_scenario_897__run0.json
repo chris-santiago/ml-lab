@@ -1,0 +1,192 @@
+{
+  "case_id": "eval_scenario_897",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Upsampling confirmed incidents to 5% in the training set maintains the ranking model's generalization to the imbalanced, temporally future test distribution.",
+        "failure_mechanism": "Upsampling positive examples via duplication alters the underlying data distribution presented to the model. The model's loss function will be dominated by duplicated samples, potentially teaching it to exploit spurious, non-causal patterns associated with the specific training window positives rather than learning generalizable ranking signals for rare future incidents. This is a form of target leakage from the training sample construction. The validation/test sets remain imbalanced, creating a distribution shift between training (artificially 5% positive) and evaluation (~true incidence rate). A model may overfit to the duplicated positives, achieving high training/validation recall but failing on the true test distribution.",
+        "evidence_test": "Compare performance of the ranking model when trained on (a) upsampled data vs. (b) the original imbalanced data using appropriate techniques for class imbalance (e.g., class-weighted loss, more sophisticated sampling). A significant performance drop on the held-out test set for (a) compared to (b) would confirm the flaw. Alternatively, measure the model's performance on a test set with artificially upsampled positives (matching the 5% rate) vs. the true imbalanced test; if performance is comparable only on the upsampled test, generalization is broken.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Hyperparameter tuning on validation set Recall@10 will select a configuration that optimizes for the operational goal (finding incidents in top 10) without overfitting to the specific temporal period of the validation set.",
+        "failure_mechanism": "Using Recall@10\u2014a sparse, threshold-dependent metric\u2014as the optimization target for grid search is highly noisy and non-convex. Small changes in model scores can cause large, discontinuous jumps in Recall@10. This leads to high variance in the validation score for different hyperparameter configurations. The 'best' configuration is likely selected based on noise, not true signal. This process overfits to the particular incident distribution in months 13-15. The final locked test evaluation on months 16-18 then becomes an unreliable estimate of true performance, as the model was tuned to the quirks of the preceding validation period.",
+        "evidence_test": "Perform a sensitivity analysis: run the hyperparameter tuning process multiple times with different random seeds (for stochastic elements) or with small perturbations to the validation set (e.g., bootstrapping). If the selected 'best' configuration and its associated test performance vary widely, the tuning process is unstable and the claimed improvement over baseline is not reliable.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (train: 1-12, val: 13-15, test: 16-18) provides sufficient evidence that the model generalizes to future data and its superiority over the baseline is not due to memorizing time-specific patterns.",
+        "failure_mechanism": "A 12-month training window may contain seasonal patterns, threat actor campaigns, or changes in logging/rule deployment that are non-stationary. The validation and test sets (3 months each) are short periods that may not be representative of future variability. A model could appear to outperform a baseline by fitting to medium-term temporal trends that persist from training into the short validation window and partially into the test window, but which will break in true future deployment. The comparison to the logistic regression baseline mitigates this somewhat, but if the ranking model has more capacity to fit these non-stationary patterns, its apparent superiority may be ephemeral.",
+        "evidence_test": "Conduct a more rigorous temporal cross-validation: e.g., use a sliding window approach (train on months 1-12, test on month 13; train on 2-13, test on 14, etc.). Aggregate performance across multiple out-of-time test folds. If the ranking model's advantage over the baseline diminishes or disappears in this more robust evaluation, the original claim of generalization is weakened.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The incident grouping (evaluating at the incident level) and the feature 'count of prior incidents involving the same asset in past 90 days' do not create a leakage path that allows the model to cheat by memorizing asset-specific incident history.",
+        "failure_mechanism": "The feature 'count of prior incidents involving the same asset in past 90 days' is calculated per alert. For an alert in month 16 (test), this count could include incidents from months 13-15 (validation set) and possibly even months 10-12 (late training). This provides a direct signal: assets that were recently involved in confirmed incidents are more likely to have a new incident. Since incidents are grouped, if any alert from a future incident ranks highly, the incident is 'found.' This feature could allow a simple model to achieve high Recall@10 by ranking alerts on high-risk assets, without learning more nuanced alert telemetry. This is a form of temporal leakage\u2014information from the validation/test period (via aggregated historical counts) is encoded in the features of test points.",
+        "evidence_test": "Ablate the time-windowed historical incident count features (and similar features like 'count of previous alerts from same rule in past 30 days') and retrain both the ranking model and the baseline. If the performance gap between them shrinks dramatically or reverses, the original result was confounded by these potentially leaky features. A stricter design would calculate these rolling counts using data only from *strictly before* the alert's timestamp, and only from within the training partition for training alerts.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Recall@10 (per time window) is a sufficient primary metric to evaluate the operational goal of 'inclusion in the analyst's top-10 review window.'",
+        "failure_mechanism": "Recall@10 measures coverage but ignores rank order within the top 10. A model that consistently places true incidents at rank 10 is operationally worse than one that places them at rank 1 (the analyst finds them faster, potentially within a smaller reviewed set). Similarly, Precision@10 is listed as secondary. In a low-prevalence setting, even with Recall@10 of 90%, Precision@10 could be very low (e.g., 1 true incident in 10 alerts), meaning analysts waste most of their time. Optimizing solely for Recall@10 could lead to a model that surfaces many low-likelihood alerts alongside the true positives, degrading analyst efficiency and trust. The metric is not aligned with the full deployment objective of efficient triage.",
+        "evidence_test": "Report the joint distribution of (Recall@k, Precision@k) for k=5,10,20. Calculate a utility metric that combines recall and precision with analyst time costs (e.g., a weighted sum). If the ranking model achieves higher Recall@10 but significantly lower Precision@10 than the baseline, its operational benefit is ambiguous and requires a more nuanced trade-off analysis.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The handling of new categories in validation/test via a pre-established 'unknown' token is sufficient to prevent preprocessing leakage and ensures a realistic evaluation.",
+        "failure_mechanism": "While it prevents technical leakage, the 'unknown' token creates a distribution shift. If new rule names, asset IDs, or user entities appear frequently in validation/test (likely in a 3-6 month future window), the model will see a high proportion of 'unknown' tokens for categorical features. The model's behavior on these tokens is poorly calibrated because it was trained on a mix of known categories and a likely smaller proportion of 'unknowns'. This could degrade performance on new entities in the test set, making the evaluation pessimistically biased. The severity depends on the rate of category drift in the SOC environment.",
+        "evidence_test": "Quantify the proportion of 'unknown' tokens for key categorical features (like rule name, asset ID) in the validation and test sets. Correlate model performance (e.g., per-alert AUC) on samples with known vs. unknown categories. A significant drop in performance on 'unknown' samples indicates the evaluation may underestimate production performance if a retraining pipeline with updated encoders is used.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The logistic regression baseline is a sufficiently strong baseline to demonstrate the value of a learning-to-rank inductive bias.",
+        "failure_mechanism": "While logistic regression is a reasonable simple baseline, a more sophisticated gradient-boosted decision tree (GBDT) classifier (like XGBoost or LightGBM) is a more common and powerful benchmark for tabular data. It's possible that the benefits attributed to the 'ranking' approach could be achieved simply by using a more capable classifier with calibrated probability outputs.",
+        "evidence_test": "Add a GBDT classifier (tuned with equivalent effort) as an additional baseline. If the GBDT classifier matches or exceeds the performance of the learning-to-rank model, the specific ranking formulation may not be necessary.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "The PoC contains several material methodological flaws, the most severe being the upsampling of training positives which creates a train/test distribution shift and risks target leakage, and the use of a noisy, threshold-based metric (Recall@10) for hyperparameter tuning, leading to overfitting on the validation period. The temporal feature engineering also presents a leakage risk.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 (Upsampling): The critic correctly identifies that training with 5% upsampled positives creates distribution shift vs. imbalanced test. However, this is a deliberate, documented design choice. The methodology explicitly states this is done to 'ensure adequate positive signal for model training and prevent metric degeneration from extreme imbalance.' Critically, BOTH the ranking model AND the baseline classifier use the same upsampled training data - they compete on equal footing. The experiment tests whether ranking-specific inductive biases help relative to classification, not absolute generalization. The critic's proposed remedy (class-weighted loss) is a valid alternative that could be explored in future work, but the current design is sound for its stated purpose.\n\nF2 (Hyperparameter tuning): The critic claims Recall@10 is too noisy for optimization. While technically true that threshold metrics have high variance, this concern applies equally to both models. The design explicitly states both models undergo 'equivalent hyperparameter search effort' on validation set Recall@10. The baseline comparison controls for any instability - if both models are equally affected by tuning noise, the relative performance comparison remains valid. This is standard ML practice (tune on validation, evaluate on test).\n\nF3 (Temporal generalization): The critic argues the 12-month training window may contain non-stationary patterns that don't generalize to future months. This is a valid concern about temporal distribution shift. However, the design already includes a control: 'stratified test-set analysis breaks down Recall@10 by asset tier and rule family to verify generalization.' The critic's proposed sliding window approach is more robust but represents a different experimental design, not a flaw in the current one. Both models face the same temporal shift, so relative comparison is informative.\n\nF4 (Historical incident feature leakage): The critic claims the 'count of prior incidents involving the same asset in past 90 days' feature leaks validation/test information. However, this feature is calculated per alert using ONLY incidents that occurred BEFORE that alert's timestamp. For an alert in month 16, the 90-day lookback includes only months 10-15 (late training + validation), not month 16+ incidents. The design explicitly states: 'No alert or incident crosses a temporal boundary under any circumstance.' This is not leakage - it's historical aggregation that both models receive identically.\n\nF5 (Recall@10 limitations): The critic argues Recall@10 ignores rank order and ignores precision. However, the design explicitly includes Precision@10, MRR, and other metrics as secondary measures. The methodology states: 'Precision@10: fraction of top-10 alerts that are true incidents, ensuring the ranking does not waste analyst time.' The primary metric is Recall@10 because it directly measures the operational goal (inclusion in top-10 review window). The design is not claiming Recall@10 is the only metric - it's the primary one for a specific operational goal, with secondary metrics monitoring precision. This is REBUT-DESIGN.\n\nF6 (Unknown token distribution shift): The critic correctly identifies that unknown tokens create distribution shift for new categories. This is a known limitation of categorical encoding. The severity depends on category drift rate, which is an empirical question. For a PoC comparing ranking vs. classification, this is a secondary concern that affects both models equally.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "Upsampling is a deliberate, documented design choice to ensure adequate training signal. The critical safeguard is that BOTH the ranking model and baseline classifier use identical upsampled training data - the experiment tests relative performance (ranking vs. classification inductive biases), not absolute generalization. The critic's proposed class-weighted alternative is a valid future exploration but not a required correction for this PoC. The experiment will reveal whether the ranking approach provides advantage despite the distribution shift."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 4,
+        "justification": "While Recall@10 has high variance as an optimization target, this applies EQUALLY to both the ranking model and the baseline logistic regression. The design explicitly states both undergo 'equivalent hyperparameter search effort' using the same validation metric. The baseline comparison controls for any instability in the tuning process - if both models are equally affected, the relative comparison remains valid. This is standard ML methodology (tune on validation, lock test, compare fairly)."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 4,
+        "justification": "Temporal non-stationarity is a valid concern, but the design already includes a control: 'stratified test-set analysis breaks down Recall@10 by asset tier and rule family to verify generalization.' The critic's sliding window proposal is a more robust evaluation design, but the current single temporal split is not a fatal flaw - it provides initial evidence. Crucially, both models face identical temporal distribution shift, so relative comparison is informative. The experiment is a PoC, not a deployment guarantee."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The feature 'count of prior incidents involving the same asset in past 90 days' is calculated using ONLY incidents that occurred BEFORE each alert's timestamp. For an alert in month 16, the lookback includes months 10-15 (late training + validation), not month 16+ incidents. The design explicitly states: 'No alert or incident crosses a temporal boundary under any circumstance.' This is historical aggregation, not leakage - both models receive identical feature values. The experiment tests whether the ranking model extracts more signal from these features than the baseline, not whether the features themselves are valid."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The design explicitly includes Precision@10, MRR, Recall@5/20, and AUC-ROC as secondary metrics. The methodology states: 'Precision@10: fraction of top-10 alerts that are true incidents, ensuring the ranking does not waste analyst time.' Recall@10 is the PRIMARY metric because it directly measures the operational goal (inclusion in analyst's top-10 review window). The design is not ignoring precision - it's hierarchy is deliberate. A model with high Recall@10 but low Precision@10 would be identified in secondary metrics. The critic's concern would only be valid if Precision@10 were omitted entirely."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "Unknown token distribution shift is a recognized limitation of categorical encoding, but it affects both the ranking model and baseline equally. The severity depends on category drift rate in the specific SOC environment, which is an empirical question. For a PoC comparing ranking vs. classification approaches, this is a secondary concern that does not affect the validity of the relative comparison. The experiment tests which model generalizes better given identical preprocessing, not whether preprocessing is optimal for production deployment."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All six advancing findings have been rebutted with severity adjustments that bring adjusted severities to \u22645. The highest adjusted severity is F1 at 5 (MATERIAL), well below the threshold for design failure. Every finding represents either a deliberate design choice documented in the methodology, or a concern that applies equally to both models (ranking and baseline), preserving the validity of their relative comparison. The experiment is sound for its stated purpose: benchmarking ranking vs. classification approaches on historical SOC data with appropriate controls."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, orig_sev=6 < 7, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

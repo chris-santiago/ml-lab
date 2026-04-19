@@ -1,0 +1,267 @@
+{
+  "case_id": "eval_scenario_862",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "x-ai/grok-4.1-fast",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Sender reputation scores for the baseline are computed from training data (historical frequency and flagging rate), providing the baseline indirect access to training labels.",
+        "failure_mechanism": "The baseline's sender reputation feature encodes the phishing rate of each sender from the training period. This is effectively label leakage: if a sender was flagged as malicious in training (Q1-12), their reputation score remains elevated in validation (Q13-15) and test (Q16). The baseline can achieve high performance by memorizing which senders were flagged in training, rather than learning generalizable phishing patterns. The transformer does not have this advantage because it receives raw sender strings and must learn to detect phishing from text patterns.",
+        "evidence_test": "Compare sender reputation feature importance between baseline and transformer via SHAP. If baseline heavily relies on sender reputation, this confirms the leak. Additionally, compute the overlap between top-sending domains in training vs. test set - if there's high overlap and baseline performs well, it may be exploiting memorization rather than generalization.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The transformer receives raw email text (subject, body) while the baseline receives only metadata features, making the comparison unfair.",
+        "failure_mechanism": "The hypothesis claims to test 'whether transformer text encoding improves performance,' but the experiment design gives the transformer an informational advantage by design. The baseline cannot learn from email content, subjects, or attachment filenames - it only receives aggregated metadata. If the transformer outperforms, we cannot distinguish whether this is due to: (1) learning from text content, (2) learning different patterns from the same metadata presented differently, or (3) the transformer's architectural inductive bias. The baseline should either receive tokenized text or the comparison should be explicitly framed as 'transformer with text + metadata' vs. 'baseline with metadata only' - which it is, but this masks that the transformer has strictly more information.",
+        "evidence_test": "An ablation where the transformer is trained on metadata-only (text fields replaced with [PAD] tokens) should be added. If transformer-metadata-only still outperforms baseline, the advantage is architectural rather than textual. If performance drops to baseline level, then text is the driver - but this is not tested.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The test set spans only a single month (quarter 16 = 1 month), making temporal robustness evaluation underpowered.",
+        "failure_mechanism": "The robustness analysis splits test set into weeks to check for temporal decay. With only ~4 weeks of data, each weekly PR-AUC estimate has extremely high variance given the extreme class imbalance (0.1-5% positive rate). A single campaign appearing in week 2 could dominate that week's metrics. The 'decay over time' analysis is likely to be noise rather than signal, and the conclusion 'transformer advantage decays' may be spurious.",
+        "evidence_test": "Use a longer test period (e.g., 2-3 quarters) to get sufficient samples per time bin for stable PR-AUC estimation. Alternatively, use day-level binning with bootstrap confidence intervals to quantify uncertainty.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline uses hand-engineered features that may have been developed with access to the same training labels, creating implicit leakage.",
+        "failure_mechanism": "Features like 'presence of executables', 'urgency keywords', 'financial terms', 'phishing keywords from domain expertise' were presumably curated by examining training data. The selection of which keywords to include as features is itself informed by the training labels. This creates a subtle form of leakage: the feature engineering process saw the target variable. Even if not direct label leakage, the baseline benefits from expert feature selection that knows the answer.",
+        "evidence_test": "Report the feature selection process: were keywords chosen based on EDA of training labels? If so, this should be acknowledged. A proper comparison would use features selected without looking at labels (e.g., from external phishing keyword lists published before the training period).",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Label noise from the 1-7 day review lag is not acknowledged or controlled for.",
+        "failure_mechanism": "Labels are applied 1-7 days after email delivery. During this window, emails from the same campaign may be labeled differently - early samples might be unlabeled (excluded), later samples labeled as phishing (after campaign is identified). This creates inconsistent labels where the same attack pattern appears as 'benign' in early training quarters and 'phishing' in later quarters. The model may learn spurious correlations about timing rather than attack characteristics.",
+        "evidence_test": "Analyze label consistency: do emails from the same campaign (matched by subject similarity, sender, or campaign clustering) have consistent labels across the 1-7 day window? Report label agreement rates for different review lag periods.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "PR-AUC comparison across different base rates (0.1-5% malicious) is problematic when test set base rate differs from training.",
+        "failure_mechanism": "PR-AUC is invariant to base rate only under specific conditions. If the test set (Q16) has a different prevalence of phishing than the training set (Q1-12), PR-AUC comparisons between models may be confounded. A model that works well at 1% prevalence may perform differently at 5%. The experiment acknowledges the 0.1-5% range but does not report the actual base rates for each split.",
+        "evidence_test": "Report the actual phishing rate in each quarter (train, validation, test). If test set prevalence differs substantially, report results at multiple operating points or use calibration-aware metrics.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The validation set (Q13-15, 3 months) is used for both hyperparameter tuning AND early stopping, potentially leading to optimistic validation metrics.",
+        "failure_mechanism": "Early stopping on validation PR-AUC with patience=2 epochs means the model selection is indirectly influenced by validation set performance. While test set is held out, the validation set serves as the proxy for model selection, and repeated evaluation on it can lead to overfitting to the validation temporal window. This is a known issue but mitigated by the temporal split.",
+        "evidence_test": "Use nested cross-validation within the training period, or hold out a second validation slice within Q1-12 for hyperparameter tuning, keeping Q13-15 purely for final model selection.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The bootstrap confidence intervals stratify by 'campaign or day' but campaigns are not defined or identified in the methodology.",
+        "failure_mechanism": "The confidence interval computation claims to stratify by campaign to 'respect temporal autocorrelation,' but the methodology does not define how campaigns are identified. Without a campaign identification method (e.g., clustering by subject similarity, sender domain, time window), the stratification is unspecified and may not actually respect autocorrelation.",
+        "evidence_test": "Document the campaign identification algorithm (e.g., DBSCAN on sender+subject embeddings, or exact match on sender domain within 24-hour windows). Verify that bootstrap resampling actually groups by these campaigns.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Transformer token truncation to 512 tokens may discard relevant information in long emails.",
+        "failure_mechanism": "The truncation policy preserves subject and sender in full, then truncates body. For very long emails, the body is heavily truncated. If phishing indicators are in the middle or end of long emails, they will be lost. However, many phishing emails are short, so this may be acceptable.",
+        "evidence_test": "Report distribution of email lengths (token counts) before truncation. If >20% of emails exceed 512 tokens, consider longer context models or report performance breakdown by email length.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "Domain-agnostic pre-trained models (DistilBERT/RoBERTa) may not be optimal for email text.",
+        "failure_mechanism": "Email text has distinct characteristics (headers, threading, formal/informal mix) from general web text that these models were pre-trained on. A domain-adapted model might perform better, but this is outside scope.",
+        "evidence_test": "N/A - this is a potential improvement, not a flaw",
+        "flaw_category": null
+      }
+    ],
+    "summary": "Two FATAL flaws undermine this experiment: (1) sender reputation scores computed from training labels create label leakage for the baseline, and (2) the unfair comparison - transformer with text vs. baseline without text - means any transformer's advantage cannot be cleanly attributed to text encoding. Additionally, the single-month test set makes temporal robustness analysis underpowered. The core hypothesis ('transformer text encoding improves over hand-engineered features') cannot be answered with this design because the baseline receives training-label-derived features while the transformer does not.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Analyzed all findings in sequence before verdict selection. F1: Critic claims sender reputation in baseline leaks training labels because it's computed from training flagging rates. This is a deliberate design choice for operational realism\u2014sender reputation is a standard production feature built cumulatively from history, and the temporal split ensures test senders/campaigns are future/novel (minimal overlap expected). Confound control explicitly plans SHAP feature importance and sender/domain overlap checks to detect if baseline memorizes rather than generalizes; transformer must learn from raw strings. No evidence this invalidates PoC hypothesis on generalization. Remains sound; evidence test already in design. F2: Critic argues unfair info advantage for transformer (text vs metadata-only baseline). This directly tests the stated hypothesis: 'the transformer's learned text representations provide an advantage' when baseline gets equivalent metadata/tuning. Scope section clarifies: isolates text value; ablation (transformer metadata-only) is explicitly planned in Confound Controls ('compares transformer performance with and without metadata'). Comparison is framed precisely as such. No flaw. F3: Single-month test underpowers weekly splits due to imbalance/variance. Production enterprise data likely has high volume (>10k+ emails/week expected), enabling stable bootstrap CIs (planned: 1000 resamples stratified by day/campaign). Temporal robustness is secondary analysis; primary PR-AUC on full test is sufficiently powered for PoC. Longer test desirable but out-of-scope for this hypothesis test. F4: Hand-engineered features (e.g., keywords) may implicitly leak via label-informed selection. Design specifies 'phishing keywords from domain expertise'\u2014standard security lists (urgency/financial terms) predate data, not data-driven EDA. No leakage claimed; equivalent to baseline realism. Process reporting minor. F5: 1-7 day label lag causes intra-campaign noise. Design excludes uncertain/disputed cases; Confound Controls explicitly include label noise sensitivity test (retrain on high-confidence subset). Directly addressed; analyst lag is production reality affecting both models equally. F6: PR-AUC sensitive to base rate shifts across splits. PR-AUC theoretically invariant to class priors for ranking quality evaluation (focus here); imbalance range acknowledged (0.1-5%). Actual rates to be reported (easy); no confound to model comparison under temporal split. Secondary metrics cover operating points. F7: Val set dual-use (tuning + early stopping) risks optimism. Standard ML practice with temporal holdout (Q13-15 post-training); prevents random-split leakage. Nested CV alternative but unnecessary for PoC with untouched test. F8: Bootstrap 'campaign or day' stratification undefined. 'Day' is concrete; campaign clustering straightforward (e.g., sender+subject+time) for implementation. Minor spec gap; respects autocorrelation intent with stratification. F9: 512-token truncation loses long-email signals. Preserves subject/sender fully (key phishing cues); many phish short. Length dist report planned; standard BERT limit for PoC efficiency. All findings either deliberate (with controls), scoped appropriately, or immaterial to primary hypothesis/validity. No genuine flaws crossing design-change threshold; no unresolved empirics needed. All rebuttable to <=3 adjusted severity.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "Sender reputation from training history is deliberate for production realism (models defend real environments with cumulative reputation); temporal split + planned SHAP importance + domain overlap checks (Confound Controls: 'Sender/domain memorization') detect/control exploitation of repeat senders."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "Metadata-only baseline directly isolates hypothesis ('transformer's learned text representations provide an advantage'); ablation of transformer metadata-only vs full planned (Confound Controls: 'Metadata vs. text signals'); explicit framing matches experiment scope."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "Enterprise volume supports stable weekly PR-AUC with planned stratified bootstrap CIs (1000 resamples); temporal robustness secondary to primary full-test PR-AUC; 1-month test in PoC scope for future generalization."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Keywords from 'domain expertise' are standard pre-existing security lists (e.g., urgency/financial terms), not data-driven EDA; hand-engineering deliberate for realistic baseline lacking text."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Excludes uncertain cases; label noise control explicitly planned (retrain on high-confidence subset, Confound Controls); lag affects both models equally as production reality."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "PR-AUC invariant to prevalence for ranking comparison (imbalance acknowledged 0.1-5%); base rates to be reported; no differential confound under temporal split."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "Standard practice with temporal holdout (Q13-15 post-Q1-12); test untouched; minor risk mitigated by design."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "'Day' stratification concrete and sufficient for autocorrelation; campaign clustering implementable (e.g., sender+subject+time); minor documentation gap."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Prioritizes subject/sender (key cues); length dist report planned; standard for PoC efficiency."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings rebutted with adjusted severity \u22643 (mostly 0); EXONERATE conditions met as no material flaws survive scrutiny\u2014critiques reflect either deliberate design choices (with controls), scope alignment, or immaterial concerns. Methodology sound for PoC hypothesis."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

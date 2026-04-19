@@ -1,0 +1,107 @@
+{
+  "case_id": "hyp_016_case_1",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "anthropic/claude-3-haiku",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The model is evaluated at a '6-hour prediction horizon' and successfully assesses early warning capability.",
+        "failure_mechanism": "The implementation aggregates performance by taking the *maximum* predicted risk observed over the entire interval [6, 48 hours] post-admission. This effectively allows the model to use a 1-to-3-day prediction horizon (e.g., predicting at hour 47 for an event >48h) to contribute to the score. This inflates the apparent early warning performance, as late-stage signals (when the patient is already deteriorating) dominate the metric, making the '6-hour horizon' claim factually incorrect.",
+        "evidence_test": "Plot the distribution of prediction timestamps (timestep index) for all positive cases that achieve high confidence. If the majority of successful predictions occur after hour 24, the '6-hour horizon' claim is invalidated.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The comparison isolates the benefit of temporal structure by comparing the LSTM to a logistic regression baseline.",
+        "failure_mechanism": "The sequence model utilizes a 168-hour (7-day) sequence context, whereas the logistic regression baseline uses a 24-hour sliding window of aggregated features. The claimed performance gain cannot be attributed solely to 'temporal structure' because the LSTM also has access to significantly more historical data (144 extra hours of vitals/meds). This confounds the ablation of temporal awareness from context window size.",
+        "evidence_test": "Retrain the baseline logistic regression on the full 168-hour flattened feature set (without temporal dependencies) and compare performance against the LSTM. If performance gap closes, the baseline was insufficient.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The experiment includes '6-month gaps' between splits to capture seasonal variation and concept drift.",
+        "failure_mechanism": "The stated split strategy claims '6-month gaps' exist between Train/Val and Val/Test. However, the provided date ranges (Train: Jan 2021-Jun 2022, Val: Jul 2022-Dec 2022, Test: Jan 2023-Dec 2023) show only 1-month gaps. This indicates a significant misconfiguration or documentation error regarding the temporal isolation strategy. The claim that seasonal variation is explicitly mitigated by gaps is false, potentially exposing the model to immediate seasonal drift leakage.",
+        "evidence_test": "Verify the actual start/end dates of the split sets in the codebase. If the dates match the text description of '6-month gaps', the configuration is incorrect.",
+        "flaw_category": "silent_misconfig"
+      }
+    ],
+    "summary": "The PoC contains a FATAL flaw in the evaluation metric aggregation which misrepresents the temporal horizon of the prediction system, rendering the 'early warning' claim invalid. Additionally, the baseline comparison is confounded by unequal context window sizes, and the split strategy documentation contains factual errors regarding temporal gaps that undermine confidence in the drift mitigation design.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic has raised several concerns about the experimental design and evaluation methodology. Let me walk through each finding in detail:\n\nF1 (FATAL): The critic is correct that the model's 6-hour prediction horizon claim is misleading, as the evaluation actually aggregates performance across a much longer 1-3 day window. By taking the maximum predicted risk, the model can achieve high scores by catching deterioration signals later in the admission, rather than demonstrating true early warning capability. This is a significant flaw that invalidates the 6-hour horizon claim.\n\nF2 (MATERIAL): The critic makes a fair point that the baseline logistic regression model has access to a much shorter 24-hour feature window compared to the 168-hour LSTM context. This confounds the isolated assessment of temporal structure, as the LSTM could be benefiting from the larger overall context window, not just its sequence modeling capability. Retraining the baseline on the full 168-hour flattened features would be a reasonable way to tease apart these effects.\n\nF3 (MATERIAL): The critic is correct that the stated '6-month gaps' between splits do not actually exist in the provided date ranges. The 1-month gaps are likely insufficient to fully capture seasonal and distributional drift, which could lead to optimistic performance on the validation and test sets. This is a significant design flaw that undermines the temporal isolation claims.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic's claim about the misleading 6-hour horizon evaluation is valid. Taking the maximum risk over a 1-3 day window invalidates the early warning capability assertion. This is a genuine flaw in the experimental design."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic's point about the confounding effect of the different feature window sizes is valid within the broader context of isolating the contribution of temporal structure. However, the experiment's stated goal is to evaluate the LSTM's performance, not to provide a definitive attribution of its gains. Retraining the baseline on the full 168-hour features would be a reasonable extension, but does not invalidate the core finding that the LSTM outperforms the baseline."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic is correct that the actual 1-month gaps between splits, rather than the claimed 6-month gaps, represent a significant design flaw. This undermines the experiment's ability to capture distributional drift and seasonal variation, potentially leading to overly optimistic performance on the validation and test sets."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "While the critic's F2 finding was partially rebutted, the F1 and F3 findings represent genuine and material flaws in the experimental design and evaluation methodology. The false 6-hour horizon claim and insufficient temporal isolation between splits cannot be overcome with minor adjustments. Therefore, the overall critique prevails, and the methodology requires substantive revision before the results can be considered reliable."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=8 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=6, CONCEDE \u2192 critique_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "2 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

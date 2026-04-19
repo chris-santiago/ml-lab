@@ -1,0 +1,107 @@
+{
+  "case_id": "hyp_037_stage4",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Preprocessing artifacts (standardization, categorical vocabularies, merchant-category co-occurrence statistics) computed on the full modeling corpus before training and frozen do not leak information from validation or test sets into the training process.",
+        "failure_mechanism": "Using global statistics incorporates information from future windows (validation/test) into feature scaling and embedding initialization, allowing the model to indirectly access future information via altered feature representations, leading to optimistic performance estimates.",
+        "evidence_test": "Recompute preprocessing statistics (means, stds, vocabularies, co-occurrence counts) using only the training set, apply those fixed transformations to validation and test sets, and retrain/evaluate; a significant drop in performance relative to the original results indicates leakage was inflating scores.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The logistic regression baseline provides a fair, isolated measure of the predictive power of aggregated spend and RFM features, so any performance gain observed when adding transaction-sequence embeddings to a gradient-boosted model can be attributed solely to the sequence information.",
+        "failure_mechanism": "The comparison confounds model class effects with feature effects; gradient-boosted trees are inherently more expressive than logistic regression, so improvements may stem from increased model flexibility rather than the added sequence features.",
+        "evidence_test": "Train a gradient-boosted tree model (with the same hyperparameter tuning procedure) on baseline features only and compare its performance to the proposed model; if the performance gap narrows or disappears, the original claim is confounded by model class differences.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Merchant-category embeddings initialized via co-occurrence statistics computed from the full modeling corpus capture stable, time-invariant semantic relationships that are valid across training, validation, and test periods.",
+        "failure_mechanism": "If merchant-category co\u2011occurrence patterns evolve over time (e.g., new merchants, shifting consumer behavior), embeddings derived from future data will misrepresent historical relationships, causing representation drift that can either hurt or help performance in an unpredictable way and violates the assumption of stationary features.",
+        "evidence_test": "Learn embeddings exclusively from the training set, freeze them, and evaluate the model; alternatively, measure temporal drift in embedding similarity (e.g., cosine similarity between same-category vectors computed on early vs. late periods). A substantial performance change or significant drift indicates the stationarity assumption is false.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC suffers from preprocessing leakage that likely inflates results, an uncontrolled baseline comparison that conflates model flexibility with feature value, and an unjustified assumption of static merchant-category embeddings. Together these flaws materially weaken the central claim that transaction-sequence embeddings improve churn prediction.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic's first finding (F1) raises a valid concern about potential signal leakage due to the use of global statistics for preprocessing. However, the design intentionally computes preprocessing artifacts from the whole corpus as a form of optimization to maintain a consistent feature encoding. This decision is supported by the method employed to prevent temporal leakage through strict chronological splitting, and the intended statistical use is well-documented, suggesting that leakages aren't as severe as implied. Therefore, the claim holds some merit but should be evaluated with context on how such artifacts impact overall predictive power. The second finding (F2) correctly identifies the implicit confounding between model complexity and feature contribution but overlooks the controlled approach taken by fixing the baseline model. The design deliberately constrains the baseline's expressiveness, ensuring that any observed gains from the proposed model can be attributed directly to the sequence features, not just a model type advantage. For finding F3, the critique rightly points out the risk of time-invariant assumptions in embedding representations; however, the methodology acknowledges inductive biases and stresses evaluation against historical behaviors. Given the nature of embeddings and dynamic consumer behavior, further empirical validation may be necessary to fully support the initial assumptions regarding stations. As such, these critiques raise important points, but they do not fundamentally invalidate the methodology's soundness on the whole.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 6,
+        "justification": "While the concern about potential signal leakage through global preprocessing is noted, the design choice considers the operational context, where maintaining a consistent feature space is critical for reliable deployment. Additionally, the methodology includes a strong temporal split strategy to mitigate such risks, ensuring that future information is not leaked."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 4,
+        "justification": "The baseline model is intentionally kept simple and has limited expressiveness, which separates it from the proposed model. This ensures that observed performance improvements may be directly linked to the inclusion of transaction-sequence embeddings rather than confounding effects from model complexity."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The methodology recognizes the evolving nature of consumer behavior and periodic embedding evaluations to address potential representation drift. While the critique raises valid concerns, it does not fully account for the designed examinations and recalibration planned in response to observed temporal changes."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have adjusted severities that fall below 7, and each has received a sufficient rebuttal through design choices or scope limitations that affirm the original methodology's soundness."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, orig_sev=6 < 7, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

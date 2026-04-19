@@ -110,7 +110,7 @@ class Config:
     temperature: float
     timeout: float
     retries: int
-    max_tokens: int = 4096
+    max_tokens: int = 8192
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +172,18 @@ def strip_think_tags(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
+def _sanitize_json_string(text: str) -> str:
+    """Fix common LLM JSON serialization issues: control chars inside strings,
+    invalid backslash escapes. Applied after fence extraction."""
+    # Replace literal control chars (tab, newline, CR) inside string values
+    # by scanning char-by-char is slow; use regex to catch unescaped newlines
+    # inside what looks like a JSON string span.
+    text = re.sub(r'(?<!\\)\n', r'\\n', text)
+    text = re.sub(r'(?<!\\)\r', r'\\r', text)
+    text = re.sub(r'(?<!\\)\t', r'\\t', text)
+    return text
+
+
 def extract_json(text: str) -> dict:
     """Extract and parse JSON from LLM response, handling code fences and think tags."""
     text = strip_think_tags(text)
@@ -183,12 +195,28 @@ def extract_json(text: str) -> dict:
     start = text.find("{")
     end = text.rfind("}")
     if start >= 0 and end > start:
+        candidate = text[start:end + 1]
         try:
-            return json.loads(text[start:end + 1])
+            return json.loads(candidate)
         except json.JSONDecodeError:
-            pass
+            # Second attempt: sanitize control chars that models emit inside strings
+            try:
+                return json.loads(_sanitize_json_string(candidate))
+            except json.JSONDecodeError:
+                pass
 
     return json.loads(text)
+
+
+_NO_FINDINGS_PATTERNS = (
+    "no findings above nit",
+    "no material findings",
+    "no advancing findings",
+    "no fatal, material",
+    "methodology is sound",
+    "no flaws identified",
+    "no significant findings",
+)
 
 
 def parse_response(raw_text: str) -> dict:
@@ -198,6 +226,15 @@ def parse_response(raw_text: str) -> dict:
     try:
         return extract_json(raw_text)
     except (json.JSONDecodeError, ValueError) as e:
+        # Fallback: plain-text "no findings" response — synthesize valid critic JSON
+        lower = raw_text.lower()
+        if any(pat in lower for pat in _NO_FINDINGS_PATTERNS):
+            return {
+                "findings": [],
+                "no_material_findings": True,
+                "summary": raw_text.strip()[:300],
+                "_parse_fallback": True,
+            }
         raise ValueError(f"JSON parse failed: {e}\nRaw (first 500 chars): {raw_text[:500]}")
 
 
@@ -237,6 +274,10 @@ def validate_defender_output(data: dict) -> dict:
         for field in ("finding_id", "rebuttal_type", "adjusted_severity"):
             if field not in r:
                 raise ValueError(f"Rebuttal missing required field '{field}': {r}")
+        # Enforce floor=0 — defenders sometimes output negative adjusted_severity
+        if isinstance(r.get("adjusted_severity"), (int, float)):
+            r["adjusted_severity"] = max(0, r["adjusted_severity"])
+
     # Constitutional constraint: defense_wins impossible if CONCEDE + adjusted_severity >= 7
     if v == "defense_wins":
         fatal_concedes = [
@@ -309,6 +350,18 @@ async def call_api(
 # User message builders
 # ---------------------------------------------------------------------------
 
+def build_critic_user_msg(task_prompt: str) -> str:
+    """Wrap task_prompt with framing that makes clear no separate code file exists."""
+    return (
+        "## Proof-of-Concept Under Review\n\n"
+        "The following is the complete proof-of-concept for this ML investigation. "
+        "It includes the hypothesis, experiment design, and methodology. "
+        "There is no separate implementation code file — the experiment design document "
+        "below IS the full PoC. Review it for methodology flaws.\n\n"
+        f"{task_prompt}"
+    )
+
+
 def build_defender_user_msg(task_prompt: str, critic_output: dict) -> str:
     """Build the defender's user message: task + critic structured findings."""
     advancing = [f for f in critic_output.get("findings", []) if not f.get("suppressed", False)]
@@ -325,16 +378,19 @@ def derive_verdict(defender_output: dict) -> dict:
     """Derive case verdict deterministically from defender structured output.
 
     Implements the point verdict table from prompts/ADJUDICATOR.md.
-    No LLM call — verdict is a pure function of (adjusted_severity, rebuttal_type).
+    No LLM call — verdict is a pure function of (original_severity, adjusted_severity,
+    rebuttal_type).
 
     Point verdict rules (applied in order, constitutional overrides last):
-      adj_sev <= 3          → defense_wins  (any rebuttal_type)
-      adj_sev 4-6, CONCEDE  → critique_wins
-      adj_sev 4-6, REBUT-*  → defense_wins
-      adj_sev 4-6, DEFER    → empirical_test_agreed
-      adj_sev >= 7, CONCEDE → critique_wins
-      adj_sev >= 7, REBUT-* → defense_wins
-      adj_sev >= 7, DEFER   → empirical_test_agreed
+      adj_sev <= 3                              → defense_wins  (any rebuttal_type)
+      adj_sev 4-6, CONCEDE                      → critique_wins
+      adj_sev 4-6, REBUT-*, orig_sev < 7        → defense_wins
+      adj_sev 4-6, REBUT-*, orig_sev >= 7       → empirical_test_agreed
+        (FATAL finding partially rebutted — must fully clear to ≤3 for exoneration)
+      adj_sev 4-6, DEFER                        → empirical_test_agreed
+      adj_sev >= 7, CONCEDE                     → critique_wins
+      adj_sev >= 7, REBUT-*                     → empirical_test_agreed
+      adj_sev >= 7, DEFER                       → empirical_test_agreed
 
     Constitutional overrides:
       CONCEDE + adj_sev >= 7  → force critique_wins
@@ -351,6 +407,7 @@ def derive_verdict(defender_output: dict) -> dict:
 
     for rb in rebuttals:
         adj_sev = rb.get("adjusted_severity", 0)
+        orig_sev = rb.get("original_severity", adj_sev)
         rtype = rb.get("rebuttal_type", "CONCEDE")
         fid = rb.get("finding_id", "?")
 
@@ -365,8 +422,18 @@ def derive_verdict(defender_output: dict) -> dict:
             pv = "empirical_test_agreed"
             rule = f"adj_sev={adj_sev}, DEFER → empirical_test_agreed"
         elif rtype.startswith("REBUT") or rtype == "EXONERATE":
-            pv = "defense_wins"
-            rule = f"adj_sev={adj_sev}, {rtype} → defense_wins"
+            if adj_sev >= 7:
+                # High residual severity — even a rebuttal doesn't fully clear it
+                pv = "empirical_test_agreed"
+                rule = f"adj_sev={adj_sev} ≥ 7, {rtype} → empirical_test_agreed (high residual)"
+            elif orig_sev >= 7:
+                # FATAL finding partially rebutted to 4-6 — must reach ≤3 to exonerate
+                pv = "empirical_test_agreed"
+                rule = (f"adj_sev={adj_sev} (4-6), orig_sev={orig_sev} ≥ 7, {rtype} → "
+                        f"empirical_test_agreed (FATAL not fully cleared)")
+            else:
+                pv = "defense_wins"
+                rule = f"adj_sev={adj_sev}, orig_sev={orig_sev} < 7, {rtype} → defense_wins"
         else:
             pv = "critique_wins"
             rule = f"adj_sev={adj_sev}, unknown rebuttal_type={rtype} → critique_wins (conservative)"
@@ -439,7 +506,7 @@ async def run_one(
     # Stage 1 — Critic
     critic_raw = await call_api(
         sem, client, model_assignment["critic"],
-        prompts["critic"], task_prompt, config
+        prompts["critic"], build_critic_user_msg(task_prompt), config
     )
     critic_output = validate_critic_output(critic_raw)
 
@@ -596,9 +663,10 @@ async def run_benchmark(
                     write_output(output_dir, result)
                 stats["completed"] += 1
             except Exception as exc:
+                from rich.markup import escape as rich_escape
                 console.print(
                     f"  [red]FAIL: {case['case_id']} run{run_id}: "
-                    f"{type(exc).__name__}: {exc}[/red]"
+                    f"{type(exc).__name__}: {rich_escape(str(exc))}[/red]"
                 )
                 stats["failed"] += 1
             finally:

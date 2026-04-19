@@ -1,0 +1,207 @@
+{
+  "case_id": "eval_scenario_897",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Upsampling confirmed incidents in the training set (to ~5% of alerts) does not introduce any form of leakage or distortion that would invalidate the comparison between the ranking model and the baseline.",
+        "failure_mechanism": "Upsampling assigns disproportionate weight to duplicated incidents, violating the independent and identically distributed (IID) assumption in training. This creates a strong artificial signal where the same incident is overrepresented, which both the ranking model and baseline may exploit. The duplication also inflates the effective size of the minority class without adding new information, leading to optimistic performance estimates on validation/test, where no such duplication occurs. Crucially, this flaw invalidates the comparison between models, as the ranking model may learn to exploit the duplicated pattern, while the logistic regression baseline\u2014trained on the same duplicated data\u2014is penalized for not using this artificial signal optimally. The lack of ablation (e.g., training without upsampling) means we cannot isolate the effect of upsampling from the model comparison.",
+        "evidence_test": "Run a controlled experiment where: (1) the baseline and ranking model are both trained with and without upsampling on the training set; (2) evaluate both configurations on the original (unupsampled) validation and test sets. If the ranking model's advantage disappears or reverses without upsampling, the claim is invalidated. Additionally, inspect learned feature importance to detect reliance on duplicated incident IDs or patterns.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Alert incidents are partitioned strictly by temporal splits (1\u201312, 13\u201315, 16\u201318), with no alert from the same incident appearing across partitions, so no leakage exists.",
+        "failure_mechanism": "The claim assumes transitive closure: if no *alert* crosses partitions, no *information* can leak. However, real-world SOC incidents often span long time windows (e.g., lateral movement over days or weeks), and incident tickets may be generated retroactively\u2014not at the first alert. If an incident is detected and logged in month 12 but its first alert occurred in month 11, the model may indirectly learn from information present in the incident ticket that contains alerts from earlier in the training window. Furthermore, analyst notes or threat intel added during or after month 12 could retroactively label earlier alerts, introducing target leakage\u2014the label is not strictly determined at alert time. While grouping by incident ID prevents duplication, it does not prevent the reverse flow of labels from later time steps affecting earlier ones via retrospective labeling.",
+        "evidence_test": "Audit the labeling process to determine whether incident tickets are created and labeled at the time of the first alert or after investigation. If tickets are created or finalized after the training window, remove any alerts from the training set that are later incorporated into tickets finalized in the training window. Repeat the experiment with the corrected labeling. Alternatively, use only alerts that occurred before the first analyst interaction as labels, ensuring strict temporal causality.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Recall@10 per time window (day or shift) is a valid and aligned metric for measuring analyst utility and operational value.",
+        "failure_mechanism": "Recall@10 assumes a fixed operator capacity (e.g., 10 alerts per shift) and a uniformly distributed workload. However, SOC analysts do not review alerts in fixed daily batches\u2014high-alert-volume days may overwhelm capacity, while low-volume days may leave gaps. A model that ranks a true incident at rank 11 on a high-volume day where 5 true incidents exist is penalized harshly, despite the analyst possibly noticing it later or via other means. The metric also ignores the cost of false positives: a model that ranks 10 false alerts highly on a quiet day may rank fewer true alerts overall, but Recall@10 doesn't penalize low-precision top-10 slices. Moreover, 'shift' definitions may vary by SOC; conflating shifts with calendar days can introduce artificial boundaries. The metric is misaligned with the stated operational goal of reducing exposure to high-severity incidents.",
+        "evidence_test": "Introduce a workload-adjusted metric such as 'Weighted Recall@10', where the weight per day is log(alert_count + 1) or inversely proportional to analyst capacity. Measure the correlation between this metric and an external proxy for operational success (e.g., mean time to detect for tier-1 analysts). If the ranking model improves this proxy more than Recall@10, the claim is invalidated.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The ranking model and baseline are fairly compared under equivalent hyperparameter tuning effort and feature availability.",
+        "failure_mechanism": "The PoC does not specify whether the baseline (logistic regression) ranks alerts by probability (greedy) or whether it uses a non-greedy listwise or calibrated ranking approach. Logistic regression optimizes for classification accuracy, not ranking quality; ranking performance may degrade if the probabilities are not well-calibrated for ordering. Without explicit calibration or ranking-specific losses for the baseline (e.g., pairwise hinge loss), the comparison is not fair\u2014the baseline is not optimized for its stated ranking task. Additionally, the ranking model may benefit from neural architectures with higher capacity, while the baseline may be under-regularized or poorly tuned for ranking.",
+        "evidence_test": "Train the baseline using ranking-specific objectives (e.g., RankNet loss on pairs extracted from the same time window) and evaluate with the same metrics. Alternatively, apply Platt scaling to the baseline's probabilities and re-ranks alerts to maximize MRR or Recall@10. If the baseline's ranking performance improves significantly under ranking-calibrated training, the claim of the ranking model's superiority is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The model generalizes beyond training data due to temporal splitting, ensuring realistic deployment performance.",
+        "failure_mechanism": "Temporal splitting assumes stationarity: the statistical properties of alerts and incidents do not change over time. However, SOC environments are dynamic\u2014new attack techniques, updated rules, seasonal behaviors, and changes in asset inventory can shift the distribution of alerts and incidents. The test set covers only months 16\u201318, a narrow slice of time; if the model is deployed months later, it may face distribution shift not captured in the evaluation. Furthermore, the PoC does not include stress tests for adversarial label noise or synthetic attacks (e.g., red team generated alerts), which are common in SOCs.",
+        "evidence_test": "Evaluate the model on a synthetic stress test set containing adversarially generated alerts or injected noise, or on a shifted dataset simulating 6\u201312 months beyond the training window. Alternatively, deploy the model in a shadow environment and track live performance degradation over time. If Recall@10 drops significantly under mild distribution shift, the claim is invalidated.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The stratified recall@10 analysis by asset criticality and rule family ensures robustness across subgroups.",
+        "failure_mechanism": "While stratification reveals per-subgroup performance, it does not guarantee fairness or robustness to policy changes. For example, if a critical rule family is overrepresented in the test set but rare in deployment, Recall@10 on that subgroup may be artificially high. Conversely, if the model exploits a loophole in rule-family ranking (e.g., memorizing high-risk families), performance could collapse when new families emerge. Stratification also does not account for label noise within subgroups\u2014e.g., a noisy label in a critical asset tier may dominate the metric. The analysis lacks statistical safeguards (e.g., confidence intervals or subgroup-specific baselines), making it easy to overinterpret small gains.",
+        "evidence_test": "Compute subgroup-specific Recall@10 with Jeffrey\u2019s interval or percentile bootstrap to estimate uncertainty. Report subgroup performance alongside the size and label quality of each subgroup. If the ranking model\u2019s advantage is not robust under small resampling, the claim is weakened.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Hyperparameter tuning via grid search over the validation set is sufficient to ensure model selection validity.",
+        "failure_mechanism": "Grid search without nested cross-validation or repeated random splits can lead to overfitting to the validation set, especially with small validation windows (3 months). The lack of early stopping or pruning may result in selecting a model that peaks on validation Recall@10 due to noise rather than generalizable performance. While this flaw does not invalidate the experiment outright, it risks overestimating final test performance.",
+        "evidence_test": "Perform nested grid search with 3 inner folds on the validation set (e.g., split validation into training/validation sub-partitions) and report the range of Recall@10 across inner folds. If the variance is high or the selected model underperforms in sub-folds, the claim is weakened.",
+        "flaw_category": "eval_inflation"
+      }
+    ],
+    "summary": "The PoC makes a central claim that a learning-to-rank approach improves incident recall in SOC triage, but critical flaws\u2014particularly upsampling-induced leakage (F1) and retrospective labeling/temporal leakage (F2)\u2014severely undermine the validity of the comparison and the dataset\u2019s integrity. The operational metric (Recall@10, F3) is also misaligned with real-world utility. These flaws are fatal and invalidate the core conclusion regardless of other assumptions.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critique raises several concerns regarding the experiment design, including potential leakage from upsampling, retrospective labeling, metric misalignment, unfair comparison between models, lack of robustness to distribution shifts, and overfitting in hyperparameter tuning. Each concern is addressed with a rebuttal.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 6,
+        "justification": "Upsampling is a common technique to handle class imbalance. While it may introduce some distortion, both models are affected equally. An ablation study could verify if the ranking model's advantage persists without upsampling."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The concern about retrospective labeling is valid. Auditing the labeling process is necessary to confirm whether incident tickets are created and labeled at the time of the first alert or after investigation."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 5,
+        "justification": "Recall@10 is a standard metric for evaluating ranking models. While it has limitations, it directly measures the model's ability to prioritize true incidents within a typical analyst review window. Adjusting for workload variability could provide additional insights."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic's suggestion to train the baseline with ranking-specific objectives is valid. The current comparison may not be entirely fair as the baseline is not optimized for ranking tasks."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "Temporal splitting simulates real deployment conditions but does not capture future distribution shifts. Evaluating the model on future data or using stress tests could help validate its robustness."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "Stratification is a step towards ensuring robustness across subgroups. Computing subgroup-specific metrics with confidence intervals would strengthen the analysis."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The concern about overfitting due to grid search is valid but minor. Nested cross-validation could provide additional assurance, but the current tuning method is common practice."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Several findings were rebutted or deferred, indicating that while the experiment design is largely sound, there are areas that require further validation or empirical testing, such as retrospective labeling and model robustness to distribution shifts."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 8,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=8, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=6, CONCEDE \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,408 @@
+{
+  "case_id": "eval_scenario_858",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived",
+    "critics": [
+      "minimax/minimax-m2.5",
+      "anthropic/claude-3-haiku",
+      "mistralai/mistral-small-2603"
+    ]
+  },
+  "critic_outputs": [
+    {
+      "findings": [],
+      "no_material_findings": true,
+      "_failed": true
+    },
+    {
+      "findings": [],
+      "no_material_findings": true,
+      "summary": "Here are my findings on the proof-of-concept for the transformer-based semantic search experiment:\n\nFindings:\n\n1. **Claim:** The temporal split ensures that test articles are contemporaneous with test queries, avoiding leakage.\n   **Failure Mechanism:** The temporal split only prevents leakage of ar",
+      "_parse_fallback": true
+    },
+    {
+      "findings": [
+        {
+          "finding_id": "F1",
+          "severity": 9,
+          "severity_label": "FATAL",
+          "suppressed": false,
+          "claim": "Relevance labels derived from agent behavior (clicks, sends, citations) are a valid proxy for true query\u2013article relevance.",
+          "failure_mechanism": "Agent behavior is influenced by position bias (ranking of search results), selection bias (agents may not search optimally), and familiarity bias (agents prefer articles they know). These biases can cause the weak supervision signal to misrepresent true relevance, leading to overestimation of model performance. The small manual annotation set is only used for sanity-checking, not as a primary correction mechanism.",
+          "evidence_test": "Compare automatic-label MRR improvements against the manual annotation set on the test set. If automatic-label improvements do not correlate with manual-label improvements, the weak supervision signal is invalid. Additionally, perform a counterfactual analysis: re-rank BM25 results using agent click patterns to quantify how much of the observed performance is due to agent behavior rather than semantic understanding.",
+          "flaw_category": "signal_leakage"
+        },
+        {
+          "finding_id": "F2",
+          "severity": 8,
+          "severity_label": "FATAL",
+          "suppressed": false,
+          "claim": "The chronological split ensures no temporal leakage and that the test set reflects real deployment conditions.",
+          "failure_mechanism": "The split is chronological, but the experiment does not verify that the test set's article corpus is identical to what would be available in production at query time. If articles are added or removed between the training and test periods in a way that correlates with query semantics, the evaluation may still leak future information or misrepresent deployment conditions. Additionally, the experiment does not account for the possibility that agent behavior (and thus weak supervision labels) changes over time in a way that is not captured by the temporal split.",
+          "evidence_test": "Audit the article corpus for each test query to ensure it matches the production corpus at the time of the query. Verify that the distribution of article freshness and product area is consistent with production. Perform a sensitivity analysis by re-running the experiment with a stricter temporal exclusion window (e.g., excluding articles published within 30 days of the query) to check for leakage.",
+          "flaw_category": "implicit_dist_assump"
+        },
+        {
+          "finding_id": "F3",
+          "severity": 7,
+          "severity_label": "FATAL",
+          "suppressed": false,
+          "claim": "MRR @ top-10 is an appropriate metric for operational objectives (reducing handle time and deflecting tickets).",
+          "failure_mechanism": "MRR assumes that the first relevant article is sufficient to resolve the query, but in practice, agents may need to consult multiple articles or verify information across sources. Additionally, MRR does not account for the cost of false positives (noisy articles in the top-10), which could increase handle time if agents must sift through irrelevant results. The secondary metrics (Precision @ top-5, Recall) partially address this, but the primary metric is still misaligned with the operational objective.",
+          "evidence_test": "Conduct a user study or analyze agent workflow logs to determine the typical number of articles consulted per query and the impact of false positives on resolution time. Compare MRR against a composite metric that weights precision and recall at top-5 more heavily. If MRR improvements do not correlate with reduced handle time in production, the metric is invalid.",
+          "flaw_category": "metric_limitations"
+        },
+        {
+          "finding_id": "F4",
+          "severity": 6,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "Stratified analysis by query length, spelling errors, product area, etc., is sufficient to control for confounds.",
+          "failure_mechanism": "Stratified analysis can only detect confounds that are explicitly measured and stratified. Unmeasured confounds (e.g., query intent, ambiguity, or domain-specific jargon) may still bias the results. Additionally, stratification reduces statistical power, making it harder to detect true effects in smaller bins.",
+          "evidence_test": "Perform a causal inference analysis (e.g., propensity score matching or doubly robust estimation) to adjust for measured confounders. If the transformer's advantage persists after adjustment, the stratified analysis is more credible. Alternatively, collect a larger manual annotation set to validate improvements across strata.",
+          "flaw_category": "missing_baselines"
+        },
+        {
+          "finding_id": "F5",
+          "severity": 5,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "The transformer model's performance gains (if any) are due to semantic understanding rather than exploitation of query structure or metadata.",
+          "failure_mechanism": "The experiment includes metadata (product area, query channel, article freshness) as optional features, but it does not isolate the contribution of semantic understanding. The transformer could be exploiting metadata patterns (e.g., product area tags) rather than learning true semantic relevance. The stratified analysis by product area partially addresses this, but it is not a definitive test.",
+          "evidence_test": "Ablation study: train the transformer without metadata features and compare performance to the full model. If the performance drop is minimal, the model is likely exploiting metadata rather than semantics. Additionally, evaluate the model on out-of-distribution product areas (not present in training) to test generalization.",
+          "flaw_category": "unverified_prereqs"
+        },
+        {
+          "finding_id": "F6",
+          "severity": 4,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "BM25 hyperparameter tuning on the validation set is a fair baseline comparison.",
+          "failure_mechanism": "While BM25 hyperparameters are tuned on the validation set, the transformer's hyperparameters are also tuned on the same set. This creates a risk of overfitting to the validation set, especially if the transformer's advantage is small. The experiment does not account for the variance introduced by hyperparameter tuning (e.g., multiple random seeds or cross-validation).",
+          "evidence_test": "Perform nested cross-validation or a hold-out validation set for hyperparameter tuning to estimate the variance of the performance estimates. If the transformer's advantage is within the margin of error, the comparison is not statistically significant.",
+          "flaw_category": "eval_inflation"
+        },
+        {
+          "finding_id": "F7",
+          "severity": 3,
+          "severity_label": "MINOR",
+          "suppressed": false,
+          "claim": "The experiment design generalizes to production deployment conditions.",
+          "failure_mechanism": "The experiment excludes non-primary languages and does not evaluate on out-of-distribution product areas or query types. While the claim scope acknowledges these limitations, the experiment does not provide any evidence that the model would fail under these conditions. However, the lack of evaluation on these edge cases is a minor concern for deployment.",
+          "evidence_test": "Evaluate the model on a small set of non-primary language queries or out-of-distribution product areas to check for catastrophic failure. If performance degrades significantly, the claim scope should be narrowed.",
+          "flaw_category": "distribution_shift"
+        }
+      ],
+      "summary": "The PoC has three FATAL flaws: (1) weak supervision labels are biased by agent behavior and may not reflect true relevance; (2) the chronological split does not fully prevent temporal leakage or account for evolving agent behavior; and (3) MRR is misaligned with operational objectives. These flaws invalidate the central claims of the experiment. MATERIAL flaws include insufficient control for confounds and lack of ablation studies to isolate semantic understanding. The design is otherwise sound but requires major revisions to address the FATAL issues.",
+      "no_material_findings": false
+    }
+  ],
+  "pooled_findings": [
+    {
+      "finding_id": "EF1",
+      "severity": 9,
+      "severity_label": "FATAL",
+      "suppressed": false,
+      "claim": "Relevance labels derived from agent behavior (clicks, sends, citations) are a valid proxy for true query\u2013article relevance.",
+      "failure_mechanism": "Agent behavior is influenced by position bias (ranking of search results), selection bias (agents may not search optimally), and familiarity bias (agents prefer articles they know). These biases can cause the weak supervision signal to misrepresent true relevance, leading to overestimation of model performance. The small manual annotation set is only used for sanity-checking, not as a primary correction mechanism.",
+      "evidence_test": "Compare automatic-label MRR improvements against the manual annotation set on the test set. If automatic-label improvements do not correlate with manual-label improvements, the weak supervision signal is invalid. Additionally, perform a counterfactual analysis: re-rank BM25 results using agent click patterns to quantify how much of the observed performance is due to agent behavior rather than semantic understanding.",
+      "flaw_category": "signal_leakage",
+      "_source_critic": 2,
+      "_original_finding_id": "F1"
+    },
+    {
+      "finding_id": "EF2",
+      "severity": 8,
+      "severity_label": "FATAL",
+      "suppressed": false,
+      "claim": "The chronological split ensures no temporal leakage and that the test set reflects real deployment conditions.",
+      "failure_mechanism": "The split is chronological, but the experiment does not verify that the test set's article corpus is identical to what would be available in production at query time. If articles are added or removed between the training and test periods in a way that correlates with query semantics, the evaluation may still leak future information or misrepresent deployment conditions. Additionally, the experiment does not account for the possibility that agent behavior (and thus weak supervision labels) changes over time in a way that is not captured by the temporal split.",
+      "evidence_test": "Audit the article corpus for each test query to ensure it matches the production corpus at the time of the query. Verify that the distribution of article freshness and product area is consistent with production. Perform a sensitivity analysis by re-running the experiment with a stricter temporal exclusion window (e.g., excluding articles published within 30 days of the query) to check for leakage.",
+      "flaw_category": "implicit_dist_assump",
+      "_source_critic": 2,
+      "_original_finding_id": "F2"
+    },
+    {
+      "finding_id": "EF3",
+      "severity": 7,
+      "severity_label": "FATAL",
+      "suppressed": false,
+      "claim": "MRR @ top-10 is an appropriate metric for operational objectives (reducing handle time and deflecting tickets).",
+      "failure_mechanism": "MRR assumes that the first relevant article is sufficient to resolve the query, but in practice, agents may need to consult multiple articles or verify information across sources. Additionally, MRR does not account for the cost of false positives (noisy articles in the top-10), which could increase handle time if agents must sift through irrelevant results. The secondary metrics (Precision @ top-5, Recall) partially address this, but the primary metric is still misaligned with the operational objective.",
+      "evidence_test": "Conduct a user study or analyze agent workflow logs to determine the typical number of articles consulted per query and the impact of false positives on resolution time. Compare MRR against a composite metric that weights precision and recall at top-5 more heavily. If MRR improvements do not correlate with reduced handle time in production, the metric is invalid.",
+      "flaw_category": "metric_limitations",
+      "_source_critic": 2,
+      "_original_finding_id": "F3"
+    },
+    {
+      "finding_id": "EF4",
+      "severity": 6,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "Stratified analysis by query length, spelling errors, product area, etc., is sufficient to control for confounds.",
+      "failure_mechanism": "Stratified analysis can only detect confounds that are explicitly measured and stratified. Unmeasured confounds (e.g., query intent, ambiguity, or domain-specific jargon) may still bias the results. Additionally, stratification reduces statistical power, making it harder to detect true effects in smaller bins.",
+      "evidence_test": "Perform a causal inference analysis (e.g., propensity score matching or doubly robust estimation) to adjust for measured confounders. If the transformer's advantage persists after adjustment, the stratified analysis is more credible. Alternatively, collect a larger manual annotation set to validate improvements across strata.",
+      "flaw_category": "missing_baselines",
+      "_source_critic": 2,
+      "_original_finding_id": "F4"
+    },
+    {
+      "finding_id": "EF5",
+      "severity": 5,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "The transformer model's performance gains (if any) are due to semantic understanding rather than exploitation of query structure or metadata.",
+      "failure_mechanism": "The experiment includes metadata (product area, query channel, article freshness) as optional features, but it does not isolate the contribution of semantic understanding. The transformer could be exploiting metadata patterns (e.g., product area tags) rather than learning true semantic relevance. The stratified analysis by product area partially addresses this, but it is not a definitive test.",
+      "evidence_test": "Ablation study: train the transformer without metadata features and compare performance to the full model. If the performance drop is minimal, the model is likely exploiting metadata rather than semantics. Additionally, evaluate the model on out-of-distribution product areas (not present in training) to test generalization.",
+      "flaw_category": "unverified_prereqs",
+      "_source_critic": 2,
+      "_original_finding_id": "F5"
+    },
+    {
+      "finding_id": "EF6",
+      "severity": 4,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "BM25 hyperparameter tuning on the validation set is a fair baseline comparison.",
+      "failure_mechanism": "While BM25 hyperparameters are tuned on the validation set, the transformer's hyperparameters are also tuned on the same set. This creates a risk of overfitting to the validation set, especially if the transformer's advantage is small. The experiment does not account for the variance introduced by hyperparameter tuning (e.g., multiple random seeds or cross-validation).",
+      "evidence_test": "Perform nested cross-validation or a hold-out validation set for hyperparameter tuning to estimate the variance of the performance estimates. If the transformer's advantage is within the margin of error, the comparison is not statistically significant.",
+      "flaw_category": "eval_inflation",
+      "_source_critic": 2,
+      "_original_finding_id": "F6"
+    },
+    {
+      "finding_id": "EF7",
+      "severity": 3,
+      "severity_label": "MINOR",
+      "suppressed": false,
+      "claim": "The experiment design generalizes to production deployment conditions.",
+      "failure_mechanism": "The experiment excludes non-primary languages and does not evaluate on out-of-distribution product areas or query types. While the claim scope acknowledges these limitations, the experiment does not provide any evidence that the model would fail under these conditions. However, the lack of evaluation on these edge cases is a minor concern for deployment.",
+      "evidence_test": "Evaluate the model on a small set of non-primary language queries or out-of-distribution product areas to check for catastrophic failure. If performance degrades significantly, the claim scope should be narrowed.",
+      "flaw_category": "distribution_shift",
+      "_source_critic": 2,
+      "_original_finding_id": "F7"
+    }
+  ],
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "EF1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Relevance labels derived from agent behavior (clicks, sends, citations) are a valid proxy for true query\u2013article relevance.",
+        "failure_mechanism": "Agent behavior is influenced by position bias (ranking of search results), selection bias (agents may not search optimally), and familiarity bias (agents prefer articles they know). These biases can cause the weak supervision signal to misrepresent true relevance, leading to overestimation of model performance. The small manual annotation set is only used for sanity-checking, not as a primary correction mechanism.",
+        "evidence_test": "Compare automatic-label MRR improvements against the manual annotation set on the test set. If automatic-label improvements do not correlate with manual-label improvements, the weak supervision signal is invalid. Additionally, perform a counterfactual analysis: re-rank BM25 results using agent click patterns to quantify how much of the observed performance is due to agent behavior rather than semantic understanding.",
+        "flaw_category": "signal_leakage",
+        "_source_critic": 2,
+        "_original_finding_id": "F1"
+      },
+      {
+        "finding_id": "EF2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The chronological split ensures no temporal leakage and that the test set reflects real deployment conditions.",
+        "failure_mechanism": "The split is chronological, but the experiment does not verify that the test set's article corpus is identical to what would be available in production at query time. If articles are added or removed between the training and test periods in a way that correlates with query semantics, the evaluation may still leak future information or misrepresent deployment conditions. Additionally, the experiment does not account for the possibility that agent behavior (and thus weak supervision labels) changes over time in a way that is not captured by the temporal split.",
+        "evidence_test": "Audit the article corpus for each test query to ensure it matches the production corpus at the time of the query. Verify that the distribution of article freshness and product area is consistent with production. Perform a sensitivity analysis by re-running the experiment with a stricter temporal exclusion window (e.g., excluding articles published within 30 days of the query) to check for leakage.",
+        "flaw_category": "implicit_dist_assump",
+        "_source_critic": 2,
+        "_original_finding_id": "F2"
+      },
+      {
+        "finding_id": "EF3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "MRR @ top-10 is an appropriate metric for operational objectives (reducing handle time and deflecting tickets).",
+        "failure_mechanism": "MRR assumes that the first relevant article is sufficient to resolve the query, but in practice, agents may need to consult multiple articles or verify information across sources. Additionally, MRR does not account for the cost of false positives (noisy articles in the top-10), which could increase handle time if agents must sift through irrelevant results. The secondary metrics (Precision @ top-5, Recall) partially address this, but the primary metric is still misaligned with the operational objective.",
+        "evidence_test": "Conduct a user study or analyze agent workflow logs to determine the typical number of articles consulted per query and the impact of false positives on resolution time. Compare MRR against a composite metric that weights precision and recall at top-5 more heavily. If MRR improvements do not correlate with reduced handle time in production, the metric is invalid.",
+        "flaw_category": "metric_limitations",
+        "_source_critic": 2,
+        "_original_finding_id": "F3"
+      },
+      {
+        "finding_id": "EF4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratified analysis by query length, spelling errors, product area, etc., is sufficient to control for confounds.",
+        "failure_mechanism": "Stratified analysis can only detect confounds that are explicitly measured and stratified. Unmeasured confounds (e.g., query intent, ambiguity, or domain-specific jargon) may still bias the results. Additionally, stratification reduces statistical power, making it harder to detect true effects in smaller bins.",
+        "evidence_test": "Perform a causal inference analysis (e.g., propensity score matching or doubly robust estimation) to adjust for measured confounders. If the transformer's advantage persists after adjustment, the stratified analysis is more credible. Alternatively, collect a larger manual annotation set to validate improvements across strata.",
+        "flaw_category": "missing_baselines",
+        "_source_critic": 2,
+        "_original_finding_id": "F4"
+      },
+      {
+        "finding_id": "EF5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer model's performance gains (if any) are due to semantic understanding rather than exploitation of query structure or metadata.",
+        "failure_mechanism": "The experiment includes metadata (product area, query channel, article freshness) as optional features, but it does not isolate the contribution of semantic understanding. The transformer could be exploiting metadata patterns (e.g., product area tags) rather than learning true semantic relevance. The stratified analysis by product area partially addresses this, but it is not a definitive test.",
+        "evidence_test": "Ablation study: train the transformer without metadata features and compare performance to the full model. If the performance drop is minimal, the model is likely exploiting metadata rather than semantics. Additionally, evaluate the model on out-of-distribution product areas (not present in training) to test generalization.",
+        "flaw_category": "unverified_prereqs",
+        "_source_critic": 2,
+        "_original_finding_id": "F5"
+      },
+      {
+        "finding_id": "EF6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "BM25 hyperparameter tuning on the validation set is a fair baseline comparison.",
+        "failure_mechanism": "While BM25 hyperparameters are tuned on the validation set, the transformer's hyperparameters are also tuned on the same set. This creates a risk of overfitting to the validation set, especially if the transformer's advantage is small. The experiment does not account for the variance introduced by hyperparameter tuning (e.g., multiple random seeds or cross-validation).",
+        "evidence_test": "Perform nested cross-validation or a hold-out validation set for hyperparameter tuning to estimate the variance of the performance estimates. If the transformer's advantage is within the margin of error, the comparison is not statistically significant.",
+        "flaw_category": "eval_inflation",
+        "_source_critic": 2,
+        "_original_finding_id": "F6"
+      },
+      {
+        "finding_id": "EF7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The experiment design generalizes to production deployment conditions.",
+        "failure_mechanism": "The experiment excludes non-primary languages and does not evaluate on out-of-distribution product areas or query types. While the claim scope acknowledges these limitations, the experiment does not provide any evidence that the model would fail under these conditions. However, the lack of evaluation on these edge cases is a minor concern for deployment.",
+        "evidence_test": "Evaluate the model on a small set of non-primary language queries or out-of-distribution product areas to check for catastrophic failure. If performance degrades significantly, the claim scope should be narrowed.",
+        "flaw_category": "distribution_shift",
+        "_source_critic": 2,
+        "_original_finding_id": "F7"
+      }
+    ],
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critique presents several findings regarding the methodology of the experiment comparing a transformer-based semantic search model with BM25. The first three findings (EF1, EF2, EF3) are labeled as FATAL and raise significant concerns about the validity of relevance labels, the potential for temporal leakage, and the appropriateness of the MRR metric. However, the methodology has controls in place to address these issues, such as the use of a manual annotation check for relevance labels and a chronological split to prevent leakage. The remaining findings (EF4, EF5, EF6) are MATERIAL and highlight issues with confound controls, the potential overfitting of hyperparameters, and the need for further validation of performance gains. While these findings are valid, they do not fundamentally undermine the experiment's design. The MINOR finding (EF7) suggests that the generalization to production conditions is not fully tested, which is acknowledged in the claim scope but does not significantly impact the overall conclusions of the study. Therefore, while there are valid concerns raised, the methodology remains sound and the findings do not warrant a change in the overall recommendation.",
+    "rebuttals": [
+      {
+        "finding_id": "EF1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "cited_text": "A small hold-out set of test queries (~300) is manually labeled for true relevance by domain experts.",
+        "justification": "The methodology includes a manual annotation check to validate the relevance labels derived from agent behavior, which mitigates concerns about biases affecting the weak supervision signal. This control provides a basis for assessing the validity of the automatic labels."
+      },
+      {
+        "finding_id": "EF2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "cited_text": "The chronological split ensures test queries are evaluated on articles and product state contemporaneous with them, avoiding leakage.",
+        "justification": "The design explicitly addresses temporal leakage through a chronological split, ensuring that test queries are evaluated on articles available at the time of the query. This control is intended to prevent future information leakage and misrepresentation of deployment conditions."
+      },
+      {
+        "finding_id": "EF3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 4,
+        "cited_text": "MRR is chosen over MAP or NDCG because one or two articles are typically sufficient to resolve a query.",
+        "justification": "The selection of MRR as the primary metric is justified based on operational needs, where quick access to relevant articles is critical. While MRR has limitations, it aligns with the primary goal of reducing handle time and deflecting tickets, and secondary metrics are included to provide additional context."
+      },
+      {
+        "finding_id": "EF4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "cited_text": "Stratified performance: MRR and Recall broken down by query length (<20, 20\u201350, >50 tokens), presence of spelling errors, product area, article age, article click frequency in training, and content length.",
+        "justification": "The methodology includes stratified analysis to control for confounds, addressing the concern that unmeasured confounds may bias results. While unmeasured confounds exist, the stratification provides a framework for assessing the model's performance across different query characteristics."
+      },
+      {
+        "finding_id": "EF5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "cited_text": "The transformer model and BM25 baseline use identical input signals.",
+        "justification": "The experiment design ensures that both models are evaluated under the same conditions, and the inclusion of metadata as optional features allows for an assessment of their impact. An ablation study could further clarify the contributions of semantic understanding versus metadata exploitation."
+      },
+      {
+        "finding_id": "EF6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "cited_text": "Hyperparameter tuning is performed on the validation set (months 13\u201315) using MRR @ top-10 as the selection criterion.",
+        "justification": "The methodology acknowledges the potential for overfitting in hyperparameter tuning and employs a validation set for this purpose. While the concern is valid, the design includes controls to mitigate the risk of overfitting affecting the comparison between models."
+      },
+      {
+        "finding_id": "EF7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "cited_text": "",
+        "justification": "The concern regarding generalization to production conditions is acknowledged in the claim scope. While it is a valid point, it does not significantly impact the overall conclusions of the study, as the primary focus is on the comparative performance of the models."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been addressed with sufficient rebuttals that demonstrate the methodology is sound, with adjusted severities below 3 for all findings. The rebuttals clarify that the design includes appropriate controls and justifications for the choices made."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "EF1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "EF2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "EF3",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "EF4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF7",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "3 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "ensemble": true
+}

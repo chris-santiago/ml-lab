@@ -1,0 +1,107 @@
+{
+  "case_id": "eval_scenario_819",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "nvidia/nemotron-3-super-120b-a12b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The multimodal model's performance gain is attributable to the clinical content of the triage notes.",
+        "failure_mechanism": "The PoC includes 'note length in tokens' as a feature in the multimodal model but NOT in the baseline model (which only uses structured features). In many clinical settings, nursing documentation volume is strongly correlated with patient acuity or the 'gut feeling' of the triage nurse that a patient is sick, regardless of the specific words used. If the multimodal model outperforms the baseline, it may be detecting 'verbosity as a proxy for sickness' rather than semantic clinical signals.",
+        "evidence_test": "Run a third model: Baseline + Note Length (without embeddings). If this model performs similarly to the multimodal model, the embeddings are redundant and the gain is driven by documentation volume.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The use of frozen biomedical embeddings (BioBERT/Clinical-BERT) is sufficient to capture the signal in triage notes.",
+        "failure_mechanism": "Triage notes are notoriously telegraphic, filled with non-standard abbreviations, typos, and domain-specific shorthand (e.g., 'sob' for shortness of breath, 'c/o' for complains of) that are often poorly represented in general biomedical corpora. If the frozen embeddings fail to map these to the correct semantic space, the 'multimodal' signal will be noise. Because the model is a GBDT, it may simply ignore the noisy embeddings or overfit to rare tokens that happen to correlate with admission in the training set, leading to poor generalization on the test set.",
+        "evidence_test": "Analyze feature importance/SHAP values for the embedding dimensions. If the model relies on a few high-variance dimensions or if performance drops significantly when 'common triage shorthand' is perturbed, the frozen embedding assumption is failing.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The chronological split prevents leakage and respects operational non-stationarity.",
+        "failure_mechanism": "While temporal splitting is correct, the PoC does not address 'patient leakage' (the same patient appearing multiple times across train/val/test). If a patient has multiple ED visits over 36 months, the model may memorize patient-specific identifiers or chronic condition patterns from the training set to predict admission in the test set, rather than learning triage-time signals.",
+        "evidence_test": "Perform a 'Patient-Level Split' where all visits for a unique patient ID are assigned to a single split. Compare the AUROC of the current 'Visit-Level' split vs. the 'Patient-Level' split.",
+        "flaw_category": "signal_leakage"
+      }
+    ],
+    "summary": "The PoC has a critical flaw in its baseline comparison: it adds note length to the multimodal model but not the baseline, potentially confounding semantic signal with documentation volume. Additionally, it assumes frozen embeddings can handle telegraphic triage text without verification and fails to account for patient-level leakage across the temporal split.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic raises three concerns. F1 argues that any performance gain from the multimodal model could be due to note length (verbosity) rather than semantic embeddings, because note length is included only in the multimodal model. However, the confound controls section explicitly states that note length is included as an explicit feature in both models to account for verbosity, indicating the critic's premise about feature inclusion is incorrect. F2 contends that frozen biomedical embeddings may fail to capture telegraphic triage shorthand, introducing noise that could degrade performance or cause overfitting. The methodology acknowledges the embeddings are frozen and pre\u2011trained, and the planned analysis includes feature importance/SHAP checks to verify whether the model relies on meaningful dimensions; if embeddings are noisy, the experiment will simply show no gain, which is a valid outcome. F3 warns about patient\u2011level leakage because the same patient may appear across temporal splits, potentially allowing the model to memorize patient\u2011specific patterns. The feature set deliberately excludes patient identifiers and relies only on aggregate historical features (prior visit count, prior admission history, comorbidities) that are permissible predictors; moreover, the temporal split already respects the operational scenario where repeat visitors are known, so the concern does not invalidate the hypothesis test.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic assumes note length is omitted from the baseline model, but the confound controls section states: 'Note length is included as an explicit feature in both models, allowing the model to account for verbosity.' This directly contradicts the claim and shows the critic's factual premise about feature inclusion is wrong."
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The hypothesis test is whether multimodal features improve discrimination; if the frozen embeddings are noisy and provide no signal, the multimodal model will not outperform the baseline, which is a legitimate experimental outcome. The critique concerns an unverified prerequisite (embedding quality) that does not invalidate the experimental design to test the hypothesis."
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The feature set excludes patient identifiers and uses only aggregate historical features (prior visit count, prior admission history, comorbidities) that are legitimate predictors. Temporal splitting already matches the deployment scenario where repeat visitors are known, so patient\u2011level leakage does not constitute a flaw in testing triage\u2011time admission risk."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All rebuttals reduce the adjusted severity of each finding to 3 or below, meaning no material or fatal concern survives scrutiny; thus the methodology is sound and the defense prevails."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

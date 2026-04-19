@@ -1,0 +1,132 @@
+{
+  "case_id": "hyp_155",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "mistralai/mistral-small-2603",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Labeling a message as benign if it is older than 30 days without a subsequent report reliably indicates non\u2011malicious intent.",
+        "failure_mechanism": "Spear\u2011phishing campaigns that are low\u2011volume or highly targeted may go unreported for longer than 30 days. Labeling such messages as benign introduces false\u2011negative labels (malicious instances treated as benign) into both training and test sets. This label noise can attenuate the learned signal and bias evaluation metrics in an unpredictable way, potentially over\u2011 or under\u2011estimating the true value of graph\u2011augmented features.",
+        "evidence_test": "Compare model performance (precision@recall80) when using the original label set versus a label set that retains messages with delayed reports (>30 days) and treats them as malicious if any later analyst report exists. A substantial drop in performance when the delayed\u2011label messages are included would confirm that the original labeling procedure biases the results.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding messages whose label arrives more than 30 days after the message date removes only uncertain or low\u2011quality labels without affecting the difficulty of the detection task.",
+        "failure_mechanism": "Many sophisticated spear\u2011phishing attempts are identified only after extended investigation (e.g., via threat\u2011intel sharing or delayed user reporting). By discarding these later\u2011labeled messages, the dataset is stripped of harder\u2011to\u2011detect examples, making the remaining benign and malicious classes easier to separate. Consequently, measured performance (especially precision at high recall) is inflated relative to what would be observed in a real\u2011time detector that must act on all incoming mail.",
+        "evidence": "Hold out a subset of messages that would have been excluded by the 30\u2011day rule, label them using the same analyst process (allowing arbitrary latency), and evaluate the trained models on this hold\u2011out. If precision@recall80 degrades significantly relative to the original test set, the exclusion is responsible for performance inflation.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Graph\u2011derived features (in/out\u2011degree, clustering coefficient, PageRank, reciprocity) computed from a communication graph frozen at the end of the training window remain predictive of spear\u2011phishing in later periods.",
+        "failure_mechanism": "Organizational communication patterns evolve (role changes, new teams, shifting project collaborations). Graph statistics such as PageRank or reciprocity can drift substantially over a few months. Using stale graph features may introduce misleading signals, reducing or even reversing the hypothesized advantage of the graph\u2011augmented model over the text\u2011only baseline.",
+        "evidence_test": "Retrain the graph feature extractor periodically (e.g., monthly) using all data up to the prediction time and evaluate the model with these refreshed features against the frozen\u2011graph variant on the same test set. A statistically significant drop in precision@recall80 for the frozen\u2011graph version would indicate that the stationarity assumption is violated and that the original results rely on an unverified prerequisite.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratifying the temporal split by sender domain (internal vs. external) ensures that the train, validation, and test sets reflect the realistic operational sender distribution without making the evaluation easier.",
+        "failure_mechanism": "By forcing equal proportions of internal and external sender domains in each temporal slice, the split suppresses natural temporal drift in domain\u2011specific behavior (e.g., attackers increasingly targeting internal accounts). This makes the test set more similar to the training set than a pure chronological split would be, thereby inflating performance estimates and overstating the benefit of graph features.",
+        "evidence_test": "Perform an ablation where the data are split chronologically without any domain stratification (i.e., simple time\u2011based slices). Compare precision@recall80 of the graph\u2011augmented model between the stratified and non\u2011stratified splits. A noticeable decrease in the non\u2011stratified setting would demonstrate that the original stratification artificially eased the task.",
+        "flaw_category": "eval_inflation"
+      }
+    ],
+    "summary": "The PoC relies on several unverified assumptions about label quality, label latency, graph feature stationarity, and split stratification. Each assumption, if violated, can inflate the apparent performance gain of the graph\u2011augmented model, weakening the claim that graph features provide a genuine improvement over text\u2011only baselines for spear\u2011phishing detection.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1: The critic claims that labeling messages as benign if they are older than 30 days without subsequent reports may introduce false negatives, as sophisticated spear-phishing campaigns may go unreported longer. However, the design explicitly excludes messages with pending or inconclusive labels and labels are only assigned by confirmed analyst triage or corroborated user reports. The 30-day exclusion is a conservative measure to ensure label reliability in a real-time detection context, not an assumption that delayed reports imply maliciousness. The critic's proposed test (comparing performance with delayed-label messages) is orthogonal to the label quality goal of the PoC; the hypothesis does not depend on the inclusion of delayed-label messages. The exclusion is a design choice to avoid training on uncertain labels, aligning with the PoC's focus on temporal consistency. This is not a flaw but a deliberate limitation to ensure label integrity.\n\nF2: The critic argues excluding messages labeled >30 days after arrival removes harder-to-detect examples, inflating performance. However, the exclusion is motivated by the need to avoid training/evaluating on labels that would not have been available in a real-time detector. This is a core feature of the PoC's realism, not a flaw. The critic's proposed hold-out test would violate the PoC's temporal causality constraint, as those messages lack labels at prediction time. The evaluation is designed to reflect a realistic deployment scenario where only timely labels are available. Thus, this exclusion is a valid and intentional design choice.\n\nF3: The critic claims graph statistics (e.g., PageRank) may drift over time, and frozen features at training time may reduce predictive power. However, the PoC's hypothesis is specifically about the *utility of graph features computed from historical context at message-time*, not their robustness to recurring retraining. The frozen graph simulates a realistic deployment where only prior communication history is available. The critic's test (periodic retraining) tests a different hypothesis (online graph updates) than the PoC's static historical context. The PoC's design explicitly assumes stationarity of graph statistics over the 3-month temporal gap (validation/test), which is reasonable for a proof-of-concept constrained by data availability. This is a scope limitation, not a flaw.\n\nF4: The critic argues that stratifying by sender domain (internal vs. external) in temporal slices suppresses natural drift, inflating performance. However, the stratification ensures that both in-distribution behavioral differences (e.g., internal vs. external sender patterns) are represented proportionally in all splits. Without stratification, the validation/test sets might be skewed (e.g., overrepresented external senders if internal senders are dominant in later periods). The critic's proposed ablation would test a different distribution, but the stratification aligns with the goal of evaluating realism while avoiding sampling artifacts. The critique conflates preservation of domain mixture with task simplification; the task remains hard within each stratum.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -7,
+        "adjusted_severity": 0,
+        "justification": "The label exclusion rule is a deliberate design choice to ensure temporal consistency and avoid training on labels unavailable at prediction time. The critic incorrectly assumes delayed reports imply false negatives; the PoC only excludes messages with unresolved labels, not those with delayed but eventually confirmed maliciousness. The proposed empirical test violates the PoC's causal constraint (predicting without future labels) and is irrelevant to the hypothesis."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The exclusion of >30-day labels is a core aspect of the PoC's temporal causality constraint. The critic's test (hold-out of delayed-label messages) evaluates a different hypothesis (robustness to delayed labels) than the PoC's focus on real-time detection. This is valid in broader research contexts but outside the PoC's scope."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The frozen graph features explicitly simulate a deployment scenario where only historical context (up to training time) is available. The critique tests a different setting (periodic retraining). The PoC assumes temporal stationarity for graph statistics over 3 months, which is reasonable for a 15\u201318 month evaluation window and is stated in the Scope section of the methodology."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Stratification by sender domain ensures proportional representation of internal/external senders across temporal splits, avoiding sampling skew that could confound results. The critic's ablation would test a different distribution, but the stratified split aligns with the goal of realistic evaluation while preserving operational relevance."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings are rebutted with sufficient severity adjustments (adjusted severity = 0 for all). The methodology's temporal causality, label integrity, and design choices are deliberate and consistent with the PoC's hypothesis. No material flaws remain."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

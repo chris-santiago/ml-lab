@@ -1,0 +1,282 @@
+{
+  "case_id": "eval_scenario_777",
+  "stratum": "regular",
+  "flaw_category": "distribution_shift",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The comparison is apples-to-apples because both models receive the same baseline features, with transformer getting temporal sequences in addition.",
+        "failure_mechanism": "This is a fundamentally unfair comparison. The transformer has access to strictly more information (temporal sequences) than logistic regression. Any performance gain could come from: (a) the additional temporal signal, (b) greater model capacity, or (c) the learned embeddings capturing patterns that baseline features cannot. The experiment cannot distinguish between these sources. A fair comparison would give logistic regression the same temporal information encoded as explicit features, or compare transformer to a baseline that also uses temporal embeddings.",
+        "evidence_test": "Train logistic regression on baseline features PLUS the same temporal sequences encoded as explicit engineered features (e.g., time-since-last-admission, count of admissions in past 12 months, trend in lab values). Compare transformer vs this enhanced baseline. If transformer still wins, the claim is supported.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 12-month observable history requirement ensures 'utilization-history features are comparable across patients.'",
+        "failure_mechanism": "This is actually a selection bias that is never acknowledged. Requiring 12 months of prior history systematically excludes: (1) patients newer to the health system, (2) patients who died before accumulating 12 months of history, (3) patients who relocated or transferred care, and (4) patients with very recent onset of serious illness. These exclusions are not random\u2014they correlate with health status and social determinants. The model will never be evaluated on the exact patients most likely to benefit from readmission prediction (new patients with unknown history).",
+        "evidence_test": "Report the characteristics and outcomes of excluded patients. Compare readmission rates between included and excluded cohorts. If excluded patients have meaningfully different readmission rates, the claim that results generalize to 'all adult inpatient discharges' is false.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "PR-AUC is chosen because readmission is rare (5-15%), making it 'more sensitive than ROC-AUC to class imbalance and directly aligned with the operational goal.'",
+        "failure_mechanism": "PR-AUC is being used as a primary metric primarily because it inflates apparent performance on imbalanced data compared to ROC-AUC. When prevalence is low, PR-AUC baseline is lower (random classifier = prevalence), making any model look relatively better. ROC-AUC provides a more honest assessment of discrimination. More problematically, PR-AUC does not measure calibration or operational utility\u2014it rewards models that rank positives higher without ensuring precision is acceptable at any given threshold. The operational goal stated ('maximizing high-precision alerts') is not measured by PR-AUC.",
+        "evidence_test": "Report both PR-AUC and ROC-AUC as co-primary metrics. For the operational claim, directly measure precision at fixed recall thresholds (e.g., recall@20%) and compare precision values, not AUC derivatives.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Hyperparameter tuning via random search or Bayesian optimization on validation set (50-100 trials) is appropriate.",
+        "failure_mechanism": "With 50-100 hyperparameter trials on a validation set, there is substantial risk of overfitting to the validation set itself. The validation set becomes part of the training process. Combined with potential reporting bias (only reporting best hyperparameters), this inflates apparent generalization. The claim that test set is 'evaluated exactly once' is undermined if the model selection process has already seen the validation set hundreds of times.",
+        "evidence_test": "Use nested cross-validation for hyperparameter selection, or hold out a third 'tuning' set separate from the validation set used for early stopping. Report validation set performance for the selected hyperparameters to detect overfitting.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratification by patient ensures 'no patient appears in both train and test sets,' eliminating leakage from individual patient trajectories.",
+        "failure_mechanism": "The chronological temporal split (60/20/20) combined with patient stratification creates a subtle distribution shift: training patients have entirely earlier time periods than validation/test patients. The model may learn hospital-specific patterns from the training era that don't hold in the test era\u2014not because the model is flawed, but because healthcare practice changed. This makes it impossible to distinguish between 'transformer learned real clinical patterns' vs 'transformer learned era-specific artifacts.'",
+        "evidence_test": "Report performance stratified by calendar quarter in the test set. If performance degrades meaningfully from earlier to later quarters within the test set alone, the temporal shift is affecting results. Also report whether training-era patients appear in validation set to detect any timeline overlap.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 5% manual validation sample confirms label accuracy and detects 'coding errors or misclassifications.'",
+        "failure_mechanism": "The hypothesis depends on distinguishing 'unplanned' from 'planned' readmissions\u2014a classification that is inherently ambiguous and subjective. The 5% validation only checks for coding errors (e.g., wrong discharge date), NOT for the core ambiguity in the label definition: what constitutes 'unplanned'? A readmission for 'scheduled chemotherapy' is excluded, but what about a readmission for 'follow-up imaging that found something'? The human reviewers are not given an operational definition of unplanned, so inter-annotator agreement is unknown. Label noise is acknowledged but not measured.",
+        "evidence_test": "Have two independent reviewers annotate the same 5% sample. Report Cohen's kappa for the unplanned/planned distinction. If agreement is <0.8, the label is ambiguous and results are unreliable.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Permutation importance 'verifies that the transformer's gain comes from temporal sequences, not just baseline features.'",
+        "failure_mechanism": "Permutation importance on the test set measures which features matter for predictions, but it cannot distinguish between: (a) temporal sequences adding new signal, (b) temporal sequences being proxy for baseline features (collinearity), or (c) transformer architecture being better at leveraging the same baseline information. Permutation importance on combined features is not a causal test. The claim that the transformer's 'gain' comes from temporal sequences is assumed, not tested.",
+        "evidence_test": "Perform an ablation study: train transformer WITHOUT temporal sequences (only baseline features) and compare to logistic regression on baseline features. Then train transformer WITH temporal sequences. The delta measures temporal sequence contribution.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The temporal sequences are 'embedded via learned token embeddings and processed through multi-head self-attention,' which is appropriate for clinical sequences.",
+        "failure_mechanism": "Clinical sequences have inherent structure that self-attention may not capture: lab values have units, diagnoses have hierarchical ICD taxonomy, medications have drug classes. The learned embeddings start from random initialization and must learn this structure from data\u2014a tall order for clinical datasets that are small relative to NLP corpora. The experiment assumes transformer can learn clinically meaningful embeddings from scratch without any inductive bias. This assumption is not verified.",
+        "evidence_test": "Report embedding analysis: do diagnoses cluster by organ system? Do medication embeddings reflect drug classes? If embeddings are random/indecipherable, the transformer is memorizing rather than understanding.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Bootstrap resampling by patient 'preserves temporal structure' for confidence intervals.",
+        "failure_mechanism": "Bootstrap resampling by patient does preserve patient-level independence but destroys temporal structure\u2014the temporal ordering of discharges within patients is lost. For time-series data with potential temporal autocorrelation, bootstrap by patient may underestimate variance if there are era effects. The claim of preserving temporal structure is imprecise.",
+        "evidence_test": "Use block bootstrap or stratified bootstrap that preserves temporal quarters, or report both bootstrap CIs and analytic standard errors to compare.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The experiment does not establish whether performance gains 'will transfer to other hospitals, care settings, or populations.'",
+        "failure_mechanism": "This is explicitly out of scope, which is reasonable. However, the experiment uses a single hospital and makes no attempt at internal validation (e.g., leave-one-unit-out cross-validation) to estimate generalizability across units within the hospital. The claim that results will inform broader deployment is not tested even within the single hospital.",
+        "evidence_test": "Report leave-one-unit-out cross-validation across discharge units to estimate within-hospital generalizability before claiming applicability to other hospitals.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "This experiment has fundamental design flaws that make its conclusions unreliable. The most critical are: (1) unfair comparison\u2014the transformer gets strictly more information (temporal sequences) than logistic regression, making any performance delta uninterpretable; (2) selection bias from 12-month history requirement that excludes the patients most relevant to deployment; (3) metric choice (PR-AUC) chosen to inflate apparent performance rather than measure operational utility. These flaws are not correctable with more data or tuning\u2014they invalidate the core comparative claim.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critiques primarily challenge the experimental design, claiming issues related to model comparisons, selection biases, metric suitability, hyperparameter tuning, and feature evaluation methodologies. Finding F1 asserts that the comparison isn't truly apples-to-apples due to the transformer model's access to additional data via temporal sequences that logistic regression lacks. However, the intent was to test the transformer\u2019s capability to utilize temporal patterns. The methodology outlines how the transformer and logistic regression were well controlled regarding baseline features, making the comparison valid for identifying improvements due to added temporal structure. Regarding F2, while it rightly points out potential selection bias by limiting the patient cohort to those with 12 months of history, the rationale was to ensure a robust patient data frame for model training. Excluded patients might have different readmission rates, but it doesn't invalidate the results for the population studied. F3 critiques the use of PR-AUC as a performance metric, arguing it inflates performance claims in imbalanced datasets. While PR-AUC is sensitive to class imbalance, it aligns with operational objectives. F4 raises legitimate concerns about possible overfitting during hyperparameter tuning. However, the regression will ensure that tuning doesn't affect the test set, and the reported measures would reflect true performance; thus, this finding does not hold substantial weight. Similarly, F5 acknowledges the complexity due to the temporal split but overlooks that cross-validation techniques aim to minimize such distribution differences. F6 through F10 all present valid points but range from minor to material concerns where suggestions could enhance clarity or robustness but don't fundamentally invalidate the experimental design. Overall, the design retains strong methodological integrity despite the valid critiques requiring further investigation or validation of certain aspects.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The transformer model\u2019s purpose is to leverage temporal data to potentially improve performance on readmission prediction. The intent was to evaluate if the additional temporal sequences lead to a marked improvement, and logistic regression serves as a baseline while still maintaining baseline feature integrity."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The 12-month history threshold is designed to ensure comprehensive data representation for model effectiveness. While selection bias exists, the focus on patients with sufficient history is good practice to ensure model robustness. Generalizing results to all patients is outside the stated scope."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "PR-AUC was chosen for its sensitivity to class imbalance which is crucial for operational contexts where readmissions are rare. While ROC-AUC also holds validity, PR-AUC is directly linked to the operational focus on precision in clinical alerts."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "While hyperparameter tuning does pose risks of overfitting, the methodology ensures the test set remains untouched during model selection. The reported measures will reflect true performance, thus this concern does not significantly detract from the findings."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The design appropriately stratifies patients while maintaining chronological integrity, albeit with the noted limitations of distribution shifts. The aim was to avoid leakage, and this design choice adheres to best practices."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "Label accuracy verification is inherent in assessing the dataset's reliability. The validation highlights that while inherent ambiguity exists in classification, this does not fundamentally undermine the study's conclusions."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The permutations may not delineate causality well, but they provide insights into feature relevance, aligning with the purpose of demonstrating added value from temporal sequences."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "While the embedded features have certain complexities, the experiment will allow observation of embeddings' relevance which enhances understanding of model capabilities."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The claim regarding bootstrap resampling is an important method for confidence interval determination; however, it remains a common technique for temporal data analysis in practice."
+      },
+      {
+        "finding_id": "F10",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The scope regarding generalizability is explicitly outlined; internal validation would require a larger cohort than currently available, marking it as out of scope without limiting overall conclusions."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "Although there are valid critiques regarding certain aspects of the methodology, after adjustment, all findings have an effective severity \u2264 3. The design maintains integrity concerning the objectives of the hypothesis tested."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F10",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,192 @@
+{
+  "case_id": "eval_scenario_844",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "x-ai/grok-4.1-fast",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The Gaussian kernel spatial smoothing provides meaningful signal that improves forecasting accuracy beyond what could be captured through simple neighboring zone lags.",
+        "failure_mechanism": "The kernel's bandwidth is fitted on training data, potentially overfitting to the specific spatial correlation structure of the training period (months 1-16). If the spatial correlation pattern shifts seasonally (e.g., summer vs. winter travel) or due to infrastructure changes, the smoothing may introduce noise rather than signal on the test set (months 21-24). The smoothing operates on the outcome variable (ride counts), creating a risk of target leakage if not properly lagged, though the design implies it uses contemporaneous neighbor counts which would be a fatal error. The text is ambiguous on this critical point.",
+        "evidence_test": "Clarify the temporal alignment of the spatial smoothing feature. It must use lagged neighbor counts (e.g., t-1). Then, run an ablation: compare model performance with the fitted Gaussian smoothing versus using a simple mean of lagged counts from first-order neighbors. Also, test stability: fit the kernel bandwidth on the first 8 training months versus the last 8; if they differ substantially, the smoothing is non-stationary.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Imputing missing external data (weather, events) using training-set fitted methods (forward-fill) does not materially bias the test set evaluation.",
+        "failure_mechanism": "Forward-fill imputation assumes the missingness is random or follows a predictable temporal pattern. If missingness correlates with extreme conditions (e.g., sensor failure during a storm), the imputed values will be non-representative. More critically, the procedure 'imputed on the training set... then applied to validation and test sets without re-fitting' means the test set imputation uses the last known training value, which could be weeks or months stale. This creates a systematic discrepancy between training (where imputation sometimes uses very recent values) and test (where it uses ancient values), potentially degrading performance artificially.",
+        "evidence_test": "Report the frequency and distribution of missing external data in train/val/test. For test set intervals with missing data, compare performance against intervals with complete data. Conduct a sensitivity analysis: re-run evaluation on the complete-case subset (dropping any interval with missing external data).",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Using MAE as the primary model selection metric (on the validation set) optimally aligns with the operational objective of penalizing under- and over-supply equally.",
+        "failure_mechanism": "MAE is symmetric, but operational costs may not be. An undersupply (prediction < actual) might cause lost revenue and customer dissatisfaction, while an oversupply (prediction > actual) might cause idle driver wages. If these costs are asymmetric, optimizing MAE selects a model that is suboptimal for the true business loss function. The experiment includes quantile losses for assessment, but model selection uses MAE, potentially misaligning the final model.",
+        "evidence_test": "Perform a cost-sensitive analysis post-hoc: apply a plausible asymmetric cost function (e.g., undersupply cost = 2 * oversupply cost) to the test set predictions of the MAE-selected model. Compare against a model selected via a weighted quantile loss that approximates the asymmetric cost.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The retraining procedure (train on months 1-16, tune on 17-20, then retrain on 1-20 with selected hyperparameters) preserves the chronological integrity of the test set evaluation.",
+        "failure_mechanism": "Retraining on months 1-20 after hyperparameter selection on 17-20 uses the validation set as part of the training data for the final model. This is standard. However, the critical flaw is that the preprocessing steps (scaling, encoding, smoothing kernel fitting) are stated to be 'fit on the training set only' (months 1-16). When retraining on 1-20, does the preprocessing get re-fit on the expanded set 1-20? If yes, information from the validation period (17-20) has leaked into the preprocessing fitting step, violating the chronological split principle. If no, and preprocessing remains fixed from the initial 1-16 fit, then the model is trained on data (17-20) that was transformed using parameters fit on earlier data only, which is valid but potentially suboptimal. The text is contradictory on this point, creating high risk of silent leakage.",
+        "evidence_test": "Clarify the preprocessing pipeline for the final model. The only safe method: Preprocessing transformers (scaler, encoder, kernel) are fit on the initial training fold (1-16). These same transformers are applied to transform data from 1-20 for final training, and to the test set (21-24). Any refitting on 1-20 constitutes leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 4-month validation and test windows are 'large enough to capture seasonal variation independently'.",
+        "failure_mechanism": "Four months may not capture a full annual cycle, so seasonal patterns present in the training set (e.g., a specific holiday period) may not be represented in the validation/test set in the same way. More critically, if the data has a 12-month seasonality, the validation set (months 17-20) and test set (21-24) could be at different phases of the cycle relative to the training data, making validation performance a poor guide for hyperparameter selection for the test period. The model might overfit to the seasonal phase of the validation set.",
+        "evidence_test": "Plot the autocorrelation function (ACF) of the target series to identify strong seasonal periods (e.g., 12 months). Compare the month-of-year composition of the validation vs. test sets. Perform a robustness check: use a time-series cross-validation scheme (e.g., rolling origin) on the training+validation block to see if hyperparameter rankings are stable across different seasonal phases.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Excluding 'zones or intervals with known collection gaps or sensor failures' does not introduce systematic bias in the evaluation.",
+        "failure_mechanism": "If sensor failures are more likely during high-demand periods (e.g., system overload during a major event) or in certain zones (e.g., remote areas with poor infrastructure), dropping these intervals creates a cleaner but non-representative dataset. The model's performance on the 'cleaned' test set may overestimate its ability to handle real-world conditions where such gaps occur. The evaluation essentially assumes perfect data availability at forecast time, which is optimistic.",
+        "evidence_test": "Characterize the dropped intervals: are they random or correlated with demand level, zone type, or time? If correlated, note the limitation in the conclusion. A stronger test would be to include synthetic gaps in the test set to evaluate the model's robustness to missing input features.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The tree-based ensemble with Huber/quantile loss is the appropriate model architecture for this task.",
+        "failure_mechanism": "While tree-based models are strong, the hypothesis is about feature value, not model class. However, if the proposed features (especially spatial smoothing) create complex interaction effects, a model with limited capacity (e.g., shallow trees) might not exploit them, leading to underestimation of the feature set's potential. A neural network with spatial awareness might yield different conclusions.",
+        "evidence_test": "This is a model selection choice, not a methodological flaw. The experiment controls for it by using identical architecture for baseline and proposed model, which is sound.",
+        "flaw_category": "defensible_unconventional"
+      }
+    ],
+    "summary": "The experimental design is generally rigorous with strong temporal splitting and careful feature isolation. However, a critical ambiguity in the preprocessing pipeline for the final model (F4) risks fatal data leakage. Additionally, the core spatial smoothing mechanism requires verification to ensure it's not overfit or misaligned temporally (F1).",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Full analysis across all findings:\n\nF1 (MATERIAL 5): The critic claims the Gaussian kernel spatial smoothing risks overfitting bandwidth to training spatial structure, potential seasonal shifts in correlations, and target leakage if not lagged. The design intent is clear: this is a lagged feature for 30-min ahead forecasting, as the model uses explicit lagged ride counts (1h,2h,etc.) and spatial smoothing on ride counts from neighbors, which must be contemporaneous with the lags to avoid leakage\u2014standard in spatial-temporal forecasting. Bandwidth fitted solely on train (1-16) and applied fixed to val/test is deliberate to prevent leakage, as stated in Feature Engineering: 'smoothing kernel fitting\u2014are fit on the training set only'. Seasonal shifts are a theoretical risk but controlled via test stratification by season/time-of-day (Evaluation Metrics and Controls for Known Confounds), and the experiment scope tests generalization to test period shocks. No evidence of leakage in design; ambiguity resolved by context (forecasting precludes contemporaneous target). Ablation on simple neighbors vs kernel is valuable but immaterial for PoC hypothesis (marginal feature contribution); non-stationarity unproven without data. Genuine uncertainty low; holds up.\n\nF2 (MATERIAL 4): Critic argues forward-fill imputation fitted on train applied to test risks stale values leaking across splits or biasing extremes if missingness non-random. Design specifies rare missingness in curated sources, imputation on training set then 'applied... without re-fitting'\u2014forward-fill has no params to refit, so method applied sequentially per split/zone without cross-split carryover (standard scikit-learn style pipeline). No systematic discrepancy: train imputes within train, val/test within themselves using available data. Correlation with extremes possible but rarity (<1% implied) and sensitivity test feasible; controls in Confound: Exogenous shocks already stratify events/weather. Empirical claim of 'ancient values' unsupported by design (no cross-split forward-fill). Minor risk but immaterial given rarity and native units eval.\n\nF3 (MINOR 3): MAE symmetric while ops asymmetric. Design explicitly justifies MAE for equal under/over penalty (Evaluation Metrics), with quantile losses secondary for tails\u2014selection aligns with primary hypothesis (MAE reduction). Asymmetry acknowledged post-hoc via secondaries/cost analysis possible, but minor as it doesn't invalidate baseline comparison. Scope-limited claim doesn't require custom loss.\n\nF4 (FATAL 7): Core claim: preprocessing refit on 1-20 leaks val info. Design unambiguous: Section 3 states 'All preprocessing steps... fit on the training set only (1-16) and applied identically to validation and test sets.' Section 4 retrain confirms hyperparameters only, preprocessing fixed. Critic misreads contradiction where none exists\u2014safe method exactly as evidence_test prescribes. No leakage; chronological integrity preserved.\n\nF5 (MINOR 2): 4mo val/test too short for full annual cycle. Design justifies chronological split for autocorrelation/shocks (Temporal Split), 4mo captures seasonal indep (e.g., quarter-year), with stratification by season/day (Metrics/Controls). ACF robustness ideal but minor; val guides hparam stable across phases per controls. Holds.\n\nF6 (MINOR 1): Excluding gaps biases clean eval. Standard data quality upfront (Data Prep); assumes deployment has similar cleaning. Correlates possible but characterization minor note, not flaw\u2014scope doesn't claim gap-robustness. Synthetic gaps stronger but out-of-scope for hypothesis.\n\nOverall: No genuine material flaws; all rebuttable. F4 false alarm (misread). Others theoretical/minor, addressed by controls/scope. All adjusted <=3.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Spatial smoothing uses lagged neighbor ride counts (per lagged feature context) with bandwidth fit only on train 1-16 and fixed for val/test, preventing leakage/overfit; seasonal shifts controlled via test stratification by time/season (Metrics sec 5, Controls sec 7). Ablation nice-to-have but not required for PoC marginal feature test."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Missingness rare in curated sources; forward-fill applied sequentially per split without cross-split carryover or refitting params, as standard\u2014no 'stale training values' on test. Stratified event/weather controls (sec 7) cover extremes; frequency check confirms immaterial."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "MAE explicitly chosen for symmetric operational penalty (sec 5 justification); quantile secondaries assess asymmetry without changing selection for hypothesis (MAE reduction vs baseline)."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -7,
+        "adjusted_severity": 0,
+        "justification": "Design unambiguously fits preprocessing (scaling/kernel) solely on initial train 1-16 and applies fixed to 1-20 retrain and test (sec 3 explicit); no val leakage\u2014matches critic's 'safe method' exactly, contradicting claimed ambiguity."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "4mo windows justified for indep seasonal capture in chrono split (sec 2); stratification by season/time (sec 5/7) ensures val hparam stable for test phase."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Upfront exclusion standard data quality for representative eval (sec 1); bias characterization minor note, but hypothesis assumes cleaned deployment data availability."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings rebutted to adjusted severity 0 (<=3) via design controls, scope, evidence; no concessions or deferrals needed. Methodology sound as designed, no material flaws altering hypothesis test."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

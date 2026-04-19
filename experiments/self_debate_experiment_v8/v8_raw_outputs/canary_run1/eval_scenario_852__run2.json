@@ -1,0 +1,242 @@
+{
+  "case_id": "eval_scenario_852",
+  "stratum": "regular",
+  "flaw_category": "eval_inflation",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The label generation process ('malicious' if confirmed phishing/BEC within 7 days, 'benign' otherwise) accurately reflects the true operational threat and is sufficiently reliable for training and evaluation.",
+        "failure_mechanism": "Retrospective 7-day window for analyst confirmation introduces systematic false negatives. Malicious emails that are never reported by users, evade detection by other security controls, or have analyst confirmation delayed beyond 7 days will be mislabeled as 'benign'. This creates a training set where the hardest-to-detect threats (the primary target of an advanced model) are incorrectly labeled as negative. The model learns that this pattern is safe, compromising its ability to detect novel, stealthy, or zero-day phishing that doesn't fit the reporting/confirmation profile of known attacks.",
+        "evidence_test": "Audit the holdout test set for emails that were initially labeled 'benign' but were later (after 7 days) identified as malicious through other means (e.g., threat intelligence feeds, incident response). If the proportion is non-trivial (>1-2%), the label noise is biased and harmful. Alternatively, simulate the effect by training a model on the current labels and evaluating its performance on a manually verified gold-standard subset where labels were determined by exhaustive, time-unconstrained analysis.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Inter-rater agreement (kappa) on a ~200-email sample is a sufficient proxy for overall label quality, and a kappa < 0.70 triggers only a 'discussion of limitations'.",
+        "failure_mechanism": "Kappa measures agreement, not correctness. Analysts could systematically agree on a wrong label (e.g., both marking a sophisticated spear-phishing email as benign). A small (~200 email) stratified sample provides limited power to detect rare but critical labeling errors in the minority (malicious) class. Furthermore, a kappa < 0.70 is a major red flag indicating fundamental uncertainty in the ground truth, which invalidates any subsequent model performance claims. The proposed response ('discussion') is insufficient; it should trigger a root-cause analysis and potential redesign of the labeling protocol before proceeding.",
+        "evidence_test": "For the ~200-sample review, have analysts also provide a confidence score and reasoning. Analyze disagreement cases: are they concentrated on specific email types (e.g., business compromise vs. credential phishing)? Calculate not just kappa but also precision/recall of each analyst against a third-party adjudicator or a consensus from a larger panel for the disputed emails.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratifying by label within each temporal fold 'preserves class distribution' and 'protects against random imbalance' without introducing future information leakage.",
+        "failure_mechanism": "Stratified sampling within a chronological split is typically done by sorting data by time, then performing the split, and finally adjusting to meet distribution targets. This process can subtly violate the strict temporal order if, to meet stratification quotas, instances are moved across the time boundary (e.g., a later malicious email is moved into the validation set to boost its malicious count, or an earlier one is pushed forward). This constitutes a mild form of signal leakage, as the model's validation/test performance is assessed on a distribution that was artificially made more representative of the training set than a pure time-based split would yield.",
+        "evidence_test": "Implement the stratified split exactly as planned. For the validation and test sets, compare the actual time distribution of emails (e.g., weekly counts) to the distribution that would have resulted from a pure time-based split (e.g., first N days of the period). A significant difference, especially a cluster of 'moved' emails near the time boundary, indicates leakage. The severity increases if the model's tuning or evaluation is sensitive to these small distributional shifts.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 'sender reputation' feature (fraction of emails from a domain labeled malicious in the training set) is a safe, leakage-free feature that captures useful signal without contaminating the evaluation.",
+        "failure_mechanism": "This feature is computed from training-set labels only, which prevents direct label leakage. However, it introduces a different risk: **concept leakage via the feature definition**. If a phishing campaign uses a new domain exclusively in the test period, its reputation feature will be zero (or based on minimal prior history). If the same attacker uses a domain that sent a few benign emails in the training period, its reputation will be low but non-zero. The model may learn to rely heavily on this reputation signal. This creates a silent misconfiguration where the model appears to perform well on test data from domains seen in training, but its performance on truly novel attacker infrastructure (a key hypothesis test) is obscured. The 'sender reputation confound' check only catches if reputation *alone* is powerful, not if the transformer is *over-relying* on it.",
+        "evidence_test": "Ablation study: train the transformer model (1) with the full feature set, and (2) with sender reputation masked/zeroed out. Evaluate both on a subset of the test set consisting *only* of emails from sender domains that sent zero emails in the training period. A significant performance drop in condition (1) vs. (2) on this novel-domain set indicates over-reliance on the reputation feature.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Hyperparameter tuning via grid search over 50 trials on the validation set provides a 'fair comparison' between the transformer and BoW models because they receive 'equivalent tuning effort'.",
+        "failure_mechanism": "Equivalent budget (# trials) does not ensure fairness when model classes have radically different hyperparameter sensitivities and search spaces. A transformer has orders of magnitude more parameters and more sensitive hyperparameters (learning rate, warmup steps, layer-specific learning rates, dropout schedules). A 50-trial grid search is likely insufficient to find a near-optimal transformer configuration, whereas it may be ample for tuning the regularization strength `C` of a logistic regression. This risks under-tuning the transformer, making the comparison biased against it. The claim of a 'fair comparison' is thus contingent on an unverified assumption that 50 trials is sufficient for both model families.",
+        "evidence_test": "Perform a sensitivity analysis: for each model class, run a much larger hyperparameter search (e.g., 200 trials via Bayesian optimization) and plot the validation performance vs. trial number. If the transformer's performance curve is still steeply rising at trial 50 while the logistic regression curve has plateaued, the comparison is unfair. Alternatively, report the best validation score found for each model as a function of the number of trials.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Partitioning the final test period (months 16-18) into two random halves for a 'deployment-readiness confirmation pass' and a 'final holdout' does not compromise the temporal integrity of the evaluation.",
+        "failure_mechanism": "The test period was chosen to evaluate temporal generalization. Splitting it randomly *within* that period mixes time. The 'confirmation pass' uses data from the later part of the test period to make decisions about model configuration before evaluating on the 'final holdout' from the earlier part. This is a form of temporal leakage, as information from the future (relative to the holdout split) influences the final evaluation. While the effect may be small over a 3-month window, it violates the principle of a strict chronological forward-testing simulation.",
+        "evidence_test": "Compare the final reported metrics (on the second half) when using the proposed method vs. using a strictly chronological split within the test period: e.g., use months 16-17 for confirmation/tuning final thresholds, and month 18 as the final holdout. A material difference in metrics indicates the random split introduced leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 'metadata-only baseline' achieving >80% of the transformer's test PR-AUC is conclusive evidence that 'sender reputation, not semantic understanding, drives performance'.",
+        "failure_mechanism": "This threshold (80%) is arbitrary. A metadata model achieving, say, 75% of the transformer's PR-AUC could still indicate that reputation is the dominant driver, with semantic features providing a marginal boost. The binary threshold risks a false conclusion. Furthermore, this test does not rule out interaction effects; the transformer might be leveraging semantics primarily *in conjunction with* metadata, not in isolation.",
+        "evidence_test": "Instead of a binary threshold, report the relative performance deltas. Perform a more rigorous ablation: train (1) metadata-only, (2) text-only (transformer), (3) full model. Compare performance gains. Use statistical testing to see if the full model's improvement over the metadata-only model is significant.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "'Minimal preprocessing\u2014only HTML tag stripping and non-ASCII removal\u2014is applied to preserve semantic nuance.'",
+        "failure_mechanism": "Removing non-ASCII characters may inadvertently strip meaningful signal for phishing detection in a global enterprise. Attackers often use internationalized domain names (IDNs) or include non-Latin characters in display names to spoof trusted entities (homograph attacks). Removing these characters makes such attacks invisible to the model, creating a blind spot. The assumption that semantic nuance is preserved only for ASCII text is production-limiting.",
+        "evidence_test": "Analyze the training/test data for the presence of non-ASCII characters in known malicious emails. If present, create a small evaluation set of homograph attack examples and test the model's performance on them with and without the non-ASCII removal preprocessing.",
+        "flaw_category": "context_dependent"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The experiment's focus on 'enterprise email' implies that the findings generalize to other email security contexts.",
+        "failure_mechanism": "Enterprise email traffic has specific characteristics (internal vs. external senders, specific jargon, approved mailing lists) that may not exist in consumer or smaller business settings. A model fine-tuned on this data may not perform as well elsewhere.",
+        "evidence_test": "Test the final model on a held-out dataset from a different organization or a public phishing corpus.",
+        "flaw_category": "context_dependent"
+      }
+    ],
+    "summary": "The experimental design is thoughtful and addresses many common pitfalls (temporal splits, leakage checks). However, two potentially fatal flaws exist: 1) a systematic bias in the labeling process that may train the model to ignore the hardest threats, and 2) insufficient rigor in validating label quality. Several material concerns regarding stratification leakage, feature design, and tuning fairness weaken the robustness of the comparison.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Analyzing all 8 findings to determine which cross the design-change threshold:\n\n**F1 (FATAL, 7):** The 7-day retrospective labeling window creates systematic false negatives for stealthy threats\u2014the very attacks an advanced model should detect. Since these uncaught attacks become labeled as benign, the model learns this pattern is safe. The proposed mitigation (200-email re-review) only measures inter-rater agreement on currently available labels, not whether undiscovered threats exist in the 'benign' class. This is a fundamental flaw affecting the core validity of detecting novel threats. The evidence test directly identifies this as >1-2% mislabeling being a problem\u2014this is unverified and likely present.\n\n**F2 (MATERIAL, 6):** Kappa measures agreement, not correctness. A small sample may miss rare critical errors. However, this is a known limitation of PoC work that doesn't invalidate the transformer vs. BoW comparison\u2014both models train on the same labels. The critique is valid but doesn't cross the design-change threshold for this experiment type.\n\n**F3 (MATERIAL, 5):** Concerns about stratification crossing time boundaries. The design explicitly states stratifying 'within each temporal fold' which preserves temporal ordering if implemented correctly. This is a valid concern but one that can be verified during implementation. If done properly, no leakage occurs. The design intent is sound, implementation caveat only.\n\n**F4 (MATERIAL, 5):** Sender reputation feature creates potential over-reliance. However, Section 6 'Controls for Confounds and Leakage' explicitly addresses this: 'A metadata-only baseline... If this model achieves >80% of the transformer's test PR-AUC, the conclusion is that sender reputation, not semantic understanding, drives performance.' The design already anticipates and controls for this confound. The critique is valid but the defense already addresses it.\n\n**F5 (MATERIAL, 4):** 50 trials may under-tune transformer vs. BoW. This is a legitimate concern about fairness, but for a PoC comparing model families, equal budget is a reasonable experimental design choice. It doesn't invalidate whether transformers provide benefit\u2014it only affects how much benefit we can measure. This is a scope/efficiency concern, not a validity concern.\n\n**F6 (MATERIAL, 3):** Random splitting within test period creates temporal leakage. The 'confirmation pass' uses future data (relative to holdout) to make decisions. Section 7 explicitly describes this split. This violates the chronological integrity goal stated in Section 2. This IS a genuine flaw.\n\n**F7 (MINOR, 2):** 80% threshold is arbitrary. This is a reasonable suggestion for refinement but doesn't invalidate the experiment. The binary threshold is a simplification that serves the PoC purpose.\n\n**F8 (MINOR, 1):** Non-ASCII removal may miss homograph attacks. This is a known limitation for certain attack types but doesn't invalidate the core comparison for standard phishing patterns. Production-limiting but PoC-sufficient.\n\nF1 and F6 are the findings that cross the design-change threshold. F1 is particularly serious because it fundamentally biases against detecting the hardest threats. F6 creates temporal leakage that violates the core temporal testing goal.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The 7-day window creates systematic false negatives for stealthy zero-day threats that an advanced model should detect. The proposed mitigation (200-email re-review) only measures agreement on currently available labels, not whether undiscovered threats exist in the benign class. This fundamentally biases the experiment against detecting the attacks we claim to target. The evidence test (>1-2% mislabeling) is likely unverified and present given the nature of phishing detection ground truth."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "While kappa measures agreement not correctness and the sample may miss rare errors, this limitation applies equally to both transformer and BoW models training on the same labels. For a PoC comparison of model families rather than production-grade deployment, this is an acceptable limitation. The design acknowledges label noise in Section 1 and Section 6."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The design explicitly states stratifying 'within each temporal fold' which preserves temporal ordering by construction. Proper implementation stratifies within fixed windows rather than across boundaries. If implemented as stated, no leakage occurs. The critic's concern applies only to implementation error, not design intent. Section 2 clarifies this is about preserving class distribution 'within splits' not across them."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Section 6 'Controls for Confounds and Leakage' explicitly addresses this: 'A metadata-only baseline... If this model achieves >80% of the transformer's test PR-AUC, the conclusion is that sender reputation, not semantic understanding, drives performance.' The design anticipates and controls for sender reputation confounds. The critique's ablation suggestion on novel domains is a useful refinement but the core concern is already addressed."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Equal tuning budget (50 trials) is a deliberate design choice for PoC fairness\u2014both models receive identical effort. While the transformer may be under-tuned relative to optimal, this doesn't invalidate whether transformers provide benefit over BoW given equal effort. The claim is about 'equivalent tuning effort' which is satisfied. This is a production concern, not a PoC validity concern."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 3,
+        "justification": "Random splitting within the test period violates the temporal integrity goal. The 'confirmation pass' uses data from later in the test period to influence evaluation on earlier data. This is temporal leakage that contradicts Section 2's stated goal of evaluating temporal generalization. The design explicitly uses random split (Section 7) rather than chronological split, which is a genuine flaw."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The 80% threshold is arbitrary as noted, but this is a refinement for production-grade analysis. For the PoC comparison of whether transformers provide semantic benefit, a binary threshold is sufficient. The critique suggests better statistical testing, which is valid but doesn't invalidate the core experiment conclusions about transformer vs. BoW performance."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Non-ASCII removal may miss homograph attacks, but this affects only a subset of international attacks. For the primary hypothesis of transformer vs. BoW on standard phishing patterns, this is an acceptable limitation. This is a production deployment consideration, not a PoC validity concern."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "Two findings (F1 and F6) were CONCEDEd at severity 7 and 3 respectively. F1's concession on label noise creates a fundamental validity issue\u2014the experiment cannot properly test detection of stealthy threats when the hardest attacks are mislabeled as benign. F6's concession on temporal leakage means the test evaluation is compromised. These two material/fatal flaws require methodology changes before the experiment can be considered valid for its stated purposes."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 3,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

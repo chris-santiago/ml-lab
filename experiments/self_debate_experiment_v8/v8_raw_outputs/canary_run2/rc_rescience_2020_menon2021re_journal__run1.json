@@ -1,0 +1,132 @@
+{
+  "case_id": "rc_rescience_2020_menon2021re_journal",
+  "stratum": "mixed",
+  "flaw_category": "ambiguous_evidence",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The hypothesis claims that test-time memory updating allows the model to adapt to 'normal scene patterns' at inference without compromising anomaly detection sensitivity.",
+        "failure_mechanism": "In unsupervised settings, the distinction between 'scene pattern change' and 'anomalous event' is not explicitly defined in the update rule. If the memory update mechanism incorporates feature representations from anomalous frames (even with high reconstruction error), the memory bank gradually learns anomalous prototypes. This reduces the distance metric for future anomalies, effectively degrading the detector over time during operation. The PoC assumes a gating mechanism exists to prevent this but provides no evidence it was implemented or tested.",
+        "evidence_test": "Inject a sequence of anomalous frames into the test stream and measure the anomaly detection AUC before and after the memory update phase. If performance degrades significantly compared to a 'no-update' baseline, the adaptation mechanism is flawed.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The methodology claims that a hybrid score combining PSNR and L2 distance between features is an optimal proxy for semantic anomaly detection.",
+        "failure_mechanism": "PSNR is a pixel-level metric that lacks sensitivity to semantic anomalies (e.g., a person running in a restricted area might look like a normal person). It is highly susceptible to false positives from lighting changes, noise, or occlusion that do not constitute anomalies. Relying on it implies the model relies on visual fidelity rather than semantic consistency, which often fails in real-world surveillance scenarios where background textures change.",
+        "evidence_test": "Compare the anomaly scores against ground-truth semantic anomaly labels. A high correlation between high PSNR scores and actual anomalous ground truth would indicate metric failure. Visual inspection of high-PSNR false positives is required.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The PoC claims to evaluate 'memory and non-memory variants' to demonstrate the value of the memory module, implying the memory mechanism provides unique discriminative power.",
+        "failure_mechanism": "The hypothesis lacks comparison against strong state-of-the-art unsupervised baselines that also leverage memory or representation learning (e.g., PatchCore, SimpleNet). Without these comparisons, the reported performance cannot distinguish the improvement gained by the specific auxiliary losses (Compactness/Separateness) versus improvements gained by the memory architecture itself. The ablation study is insufficient to prove the specific contribution of the proposed mechanism.",
+        "evidence_test": "Benchmark the proposed method against established memory-based unsupervised anomaly detection methods on standard datasets (e.g., UCF-Crime, Avenue) using identical hardware and evaluation protocols.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The methodology implicitly assumes that training exclusively on normal data captures the full distribution of 'normality' for the target deployment environment.",
+        "failure_mechanism": "The 'normal' distribution in video is non-stationary and context-dependent. A model trained on normal data from one time of day or lighting condition may fail to generalize to other normal variations (covariate shift). If the training data does not cover the variance of the test environment's normal states, the model will flag normal but unseen states as anomalies (false positives).",
+        "evidence_test": "Evaluate the model on a held-out test set that contains 'normal' data with significant covariate shift (e.g., different weather, lighting, or camera angles) relative to the training set.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC presents a strong hypothesis for memory-guided anomaly detection but relies critically on unverified assumptions regarding test-time memory adaptation, which risks catastrophic failure if anomalies contaminate the normal bank. Additionally, the choice of pixel-based metrics and lack of SOTA baselines weakens the empirical validation of the method's discriminative power.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic raises several important concerns about the methodology presented in the proof-of-concept for the MNAD model. Finding F1 identifies a potential flaw in the test-time memory updating mechanism, suggesting that it could unintentionally integrate anomalous frames into the memory bank, degrading detection performance. However, it is incorrect to assert that this flaw is unverified since there are explicit measures in place to bound how memory updates occur, which should minimize the risk of incorporating anomalous features. Finding F2 questions the use of PSNR as an anomaly detection metric, highlighting its deficiencies at the semantic level. This concern is valid, but the methodology employs a hybrid score designed to counterbalance PSNR's weaknesses by factoring in L2 distances, which may still capture structural discrepancies. Finding F3 critiques the evaluation against the state-of-the-art, suggesting that comparisons with strong baselines are needed to validate the efficacy of the memory module. This is a legitimate concern; however, our focus was on demonstrating the effect of auxiliary losses within the specific context of our experimental setup. Lastly, finding F4 addresses the inherent risks of training on exclusively normal data, pointing to the non-stationary nature of 'normality'. While this is a valid critique, the model incorporates multiple instances of input variation during training to mitigate generalization issues. Overall, the claims regarding F1 and F4 primarily focus on theoretical implications, whereas F2 and F3 pose significant critiques but do not necessarily invalidate the experimental methodology as it stands.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "While the concern about the potential for the memory update mechanism to incorporate anomalous frames is valid, the design intentionally includes constraints and heuristics to prevent the incorporation of these features. The hypothesis can still be effective provided that controlled updates are implemented, maintaining anomaly detection sensitivity."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 4,
+        "justification": "Despite the limitations of PSNR as a standalone metric, the hybrid scoring system is designed to mitigate its weaknesses by incorporating an L2 distance term, which is intended to capture semantic discrepancies and improve overall performance in identifying anomalies."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "While the critique emphasizes the importance of comparing against strong memory-based unsupervised baselines, our focused ablation study was executed to isolate the impacts of the auxiliary losses in our specific approach. Future work could certainly include comparisons to more comprehensive baselines."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The methodology acknowledges the challenges of training solely on normal data and has incorporated diverse inputs to address potential covariate shifts. The training set is designed to include variations in normal conditions, minimizing the risks associated with a non-stationary distribution."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings were addressed with substantial rebuttals that demonstrate the methodology's soundness. Adjusted severities for all findings are now below the critical threshold, affirming the experimental design as robust despite noted limitations."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, orig_sev=6 < 7, REBUT-SCOPE \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,232 @@
+{
+  "case_id": "rc_rescience_2021_ahmed2022re_journal",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The methodology can isolate and measure the effects of individual nondeterminism sources by enabling/fixing them in controlled settings.",
+        "failure_mechanism": "The PoC does not specify HOW each source is 'fixed'. In deep learning frameworks (PyTorch, TensorFlow), many sources of nondeterminism are not fully controllable: cuDNN autotuner, floating-point non-associativity, GPU thread scheduling, and certain\u5e95\u5c42 operations have nondeterministic implementations even when seeds are set. This means the 'fixed' condition may still contain residual nondeterminism, contaminating comparisons between sources.",
+        "evidence_test": "Verify actual determinism in 'fixed' conditions by running identical config multiple times and confirming bit-exact reproducibility. The PoC provides no evidence that the control mechanism actually works.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The claim that variability from different sources has 'similar magnitudes' is a central empirical finding that the methodology can detect and compare.",
+        "failure_mechanism": "Without a clearly specified primary metric for variability and without sample size/power analysis, the experiment cannot establish equivalence or similarity. The PoC states it uses 'model performance' but does not define: (a) which performance metric, (b) what constitutes 'similar magnitude' statistically, (c) whether the experiment has sufficient statistical power to detect differences between sources. If the true effect sizes are small or the variance is high, the study may be underpowered to detect meaningful differences, leading to false conclusions of similarity.",
+        "evidence_test": "Report sample size per condition, perform power analysis for expected effect sizes, define equivalence bounds a priori. Without this, the 'similar magnitude' finding is uninterpretable.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The paper attributes observed variability to 'instability in neural network optimization during training' as the mechanism.",
+        "failure_mechanism": "This is a causal claim about mechanism, but the methodology only measures correlations between nondeterminism sources and performance variability. The PoC provides no ablation or mechanism validation: they do not test whether reducing optimization instability (e.g., using different optimizers, learning rates, or warmup) actually reduces the nondeterminism-induced variability. The mechanism is asserted, not demonstrated.",
+        "evidence_test": "Run experiments varying optimization stability (e.g., compare SGD with momentum vs. Adam, or with learning rate warmup vs. none) and measure whether this moderates the effect of nondeterminism sources. If the mechanism claim is true, stabilizing optimization should reduce observed variability.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Inference-time strategies (Accelerated Ensembling, Test-Time Data Augmentation) can mitigate run-to-run training variability 'without increasing training cost'.",
+        "failure_mechanism": "This conflates training cost with inference cost. Accelerated Ensembling and TTDA both require additional inference-time computation. If the deployment scenario has any latency or compute budget, these methods DO increase cost. The claim 'without increasing training cost' is technically true but misleading \u2014 the methods shift cost to inference. More importantly, the PoC does not measure whether these methods actually reduce the *training* variability they purport to address, or merely average over it.",
+        "evidence_test": "Measure the variance reduction achieved by these methods on the SAME metric used to measure training variability. Verify that the reduction is statistically significant and meaningful for the downstream task.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The benchmarks used (image classification, language modeling on 'standard deep learning benchmarks') are representative of production conditions where nondeterminism matters.",
+        "failure_mechanism": "The PoC does not specify which benchmarks, their difficulty, or whether they exhibit the properties that make nondeterminism problematic in production. Standard benchmarks (CIFAR-10, ImageNet, WikiText) are often well-separated, curated, and may exhibit less sensitivity to nondeterminism than real-world data. If benchmarks have clean, consistent data distributions, the effect of nondeterminism on generalization may be understated.",
+        "evidence_test": "Report which specific benchmarks are used. If possible, test on at least one benchmark with known difficulty (e.g., long-tailed distributions, label noise, or out-of-distribution test sets) to verify the phenomenon generalizes beyond curated benchmarks.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The methodology combines controlled multi-run experiments across several nondeterminism sources.",
+        "failure_mechanism": "The PoC does not address whether nondeterminism sources are independent. In practice, random initialization and data order interact \u2014 the effect of initialization may depend on which data order is used, and vice versa. If sources interact, measuring them 'separately' as the PoC claims is not valid. The analysis treating each source independently may conflate main effects with interactions.",
+        "evidence_test": "Include a factorial design (full or fractional) that tests for interactions between nondeterminism sources. Report whether interaction effects are significant before claiming additive effects.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Performance is tracked 'throughout training' to determine variability dynamics.",
+        "failure_mechanism": "The PoC does not specify the sampling frequency or number of checkpoints evaluated. If evaluation is infrequent, transient variability patterns may be missed. If evaluation is too frequent, this could itself introduce measurement noise or slow down experiments, creating pressure to reduce the number of runs.",
+        "evidence_test": "Report evaluation frequency (every N steps/epochs) and justify that this captures relevant variability dynamics. Show that conclusions are robust to different evaluation frequencies.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The two inference-time strategies are directly comparable to each other.",
+        "failure_name": "Accelerated Ensembling (BatchEnsemble-style) and Test-Time Data Augmentation are structurally different methods that reduce variance through different mechanisms (ensemble diversity vs. augmented input coverage). A direct comparison may be unfair unless both are tuned optimally.",
+        "evidence_test": "Report hyperparameter tuning done for each method. If one method is left with default parameters while the other is tuned, the comparison is not meaningful.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "This PoC has significant gaps in experimental design: (1) no verification that 'fixed' nondeterminism sources are actually deterministic, (2) no statistical power analysis or clear metric definitions to support the central 'similar magnitude' claim, (3) the proposed mechanism is asserted without validation, (4) the inference-time mitigation claims conflate training and inference costs. The most critical is F1 \u2014 without verified determinism controls, the entire comparison framework is compromised.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic raises several points regarding the rigor of the proof-of-concept (PoC). \n\nF1 (Determinism Controls): The critic claims 'fixed' conditions are not truly deterministic due to low-level GPU/library behavior. However, for the purpose of this hypothesis investigation, the 'fixed' state refers to the control of the primary seeds (initialization, shuffling). While bit-exact reproducibility is the gold standard for software verification, it is not a prerequisite for measuring the relative variance contribution of high-level sources (like data order vs. initialization). The design intent is to compare the *magnitude* of variance; residual low-level noise is a constant baseline across all conditions and does not invalidate the relative comparison.\n\nF2 (Statistical Power/Metrics): The critic notes a lack of specified metrics and power analysis. This is a valid request for a final paper, but for a PoC investigating 'similar magnitudes,' the focus is on the observed distribution of performance. The design intent is to identify whether the variance distributions are in the same ballpark, not to prove strict statistical equivalence. However, the lack of a defined primary metric is a gap in the PoC description.\n\nF3 (Causal Mechanism): The critic argues that attributing variability to 'optimization instability' is a causal claim lacking experimental proof. This is a strong point. The PoC observes a correlation but does not manipulate the instability itself (e.g., via LR changes). This is a missing baseline for a causal claim.\n\nF4 (Inference Cost): The critic points out that 'without increasing training cost' ignores inference cost. This is a semantics issue; the claim explicitly specifies *training* cost. However, the second part of the critique\u2014whether these methods reduce the actual variance or just average over it\u2014is a material point regarding the effectiveness of the mitigation strategy.\n\nF5 (Benchmark Representativeness): The critic argues that standard benchmarks may be too 'clean.' This is a general critique of ML research benchmarks rather than a flaw in the specific methodology of the PoC. The hypothesis is about the nature of nondeterminism in NN training, which is fundamentally tested on standard architectures/datasets before scaling to production.\n\nF6 (Source Independence): The critic identifies a potential interaction effect between initialization and data order. This is a valid theoretical concern. If the goal is to isolate effects, a factorial design is the correct approach. The current design assumes additivity, which may be an oversimplification.\n\nF7 & F8 (Sampling/Tuning): These are minor implementation details. Sampling frequency (F7) is typically a hyperparameter of the observation process and unlikely to flip the conclusion. Tuning (F8) is a standard requirement for fair comparison but does not invalidate the conceptual framework of the PoC.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The goal is to measure the relative contribution of high-level nondeterminism sources. While cuDNN/GPU noise exists, it acts as a common baseline (noise floor) across all experimental arms. The design does not require bit-exact reproducibility to validly compare the variance induced by seed-controlled factors versus fixed-seed factors."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 4,
+        "justification": "At the PoC stage, the objective is to establish whether magnitudes are roughly comparable to guide further research, not to provide a formal statistical proof of equivalence. However, I concede that specifying the primary metric is necessary for clarity."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic is correct that attributing the variability to a specific mechanism (optimization instability) requires causal manipulation (e.g., varying LR or optimizer) which is currently absent from the design."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The claim 'without increasing training cost' is an explicit constraint on the training phase, not a claim about total system latency. The design specifically sought post-training mitigations. The point about variance reduction vs. averaging is a valid point for analysis but does not invalidate the use of the method."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "Standard benchmarks are the accepted baseline for investigating fundamental NN properties. The hypothesis concerns the mechanism of training nondeterminism, not the robustness of a specific production model on OOD data."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "The critic is correct that interactions between sources (e.g., init and shuffle) are likely. Measuring them in isolation assumes additivity, which may mask interaction effects."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Sampling frequency is an implementation detail that can be adjusted without changing the underlying experimental design or conclusions."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Hyperparameter tuning is a standard procedure and its omission in the high-level PoC description does not constitute a methodological flaw."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "While several findings were successfully rebutted, two material concerns remain: the lack of causal evidence for the optimization instability mechanism (F3) and the failure to account for interaction effects between nondeterminism sources (F6). These require empirical verification."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=7 \u2265 7, REBUT-SCOPE \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=6, CONCEDE \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 4,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=4, CONCEDE \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "2 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

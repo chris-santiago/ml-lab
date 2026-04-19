@@ -1,0 +1,139 @@
+{
+  "case_id": "hyp_204_case",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "nvidia/nemotron-3-super-120b-a12b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The comparison isolates the effect of the ranking objective (LambdaMART) vs. the classification objective (Logistic Regression).",
+        "failure_mechanism": "The PoC compares a high-capacity non-linear model (LambdaMART/GBDT) against a low-capacity linear model (Logistic Regression). Any observed gain in Recall@5 is more likely attributable to the model's ability to capture non-linear feature interactions and high-cardinality categorical data (like Rule ID) than to the ranking loss function. The 'Ablation' mentioned only controls for features, not for the model architecture's capacity.",
+        "evidence_test": "Include a baseline of a Gradient Boosted Decision Tree (GBDT) trained with binary cross-entropy loss using the same feature set as the LambdaMART model.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The evaluation (Recall@5) measures the model's ability to prioritize critical incidents for analysts.",
+        "failure_mechanism": "The PoC defines 'groups' for ranking as 'all alerts on a host in a 24-hour window.' In a real SOC triage workflow, analysts typically triage a global queue of alerts across the entire enterprise, not just per-host buckets. By evaluating on these small, artificial groups, the model may appear to rank effectively within a host, but fail miserably when forced to rank the top 5 alerts across the whole organization (the actual deployment objective).",
+        "evidence_test": "Evaluate Recall@5 on a global daily queue of all alerts across all hosts, rather than per-host groupings.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The extended features (specifically ticket metadata) do not introduce label leakage.",
+        "failure_mechanism": "The 'extended features' include 'Incident-response ticket metadata from the past 7 days on the same host.' Since labels are defined as the creation of a high-severity ticket within 24 hours, a host that is currently under attack will have multiple related tickets. If the model sees that a host already has 'high severity' tickets from 3 days ago, it is essentially seeing a proxy for the current label (the attack campaign), which is not available for the very first alert of a new campaign\u2014the most critical alert to catch.",
+        "evidence_test": "Compare model performance on 'First Alert of Campaign' vs. 'Subsequent Alerts of Campaign.' If performance drops significantly on first alerts, the model is relying on ticket-history leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 30-day maturation window eliminates ambiguous cases.",
+        "failure_mechanism": "While a maturation window handles delayed labels, excluding all alerts without mature labels introduces selection bias. If certain types of attacks are consistently ignored or 'lost' in the system (never getting a ticket), they are excluded from the dataset. The model is trained only on alerts that were *eventually* processed, potentially ignoring the most difficult 'silent' failures of the current SOC process.",
+        "evidence_test": "Analyze the distribution of Rule IDs and Host types in the excluded (non-mature) set versus the included set to check for systematic bias.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "One-hot encoding Rule IDs is an effective way to handle rule identifiers.",
+        "failure_mechanism": "With a 24-month window, the number of unique Rule IDs may be very high, leading to extremely sparse matrices that could slow down training or lead to overfitting in the linear baseline.",
+        "evidence_test": "Check the cardinality of Rule IDs; if it exceeds a few hundred, consider target encoding or embeddings.",
+        "flaw_category": "null"
+      }
+    ],
+    "summary": "The PoC suffers from two fatal flaws: it confuses model capacity (GBDT vs. Logistic Regression) with objective function (Ranking vs. Classification), and it evaluates ranking on per-host buckets which does not align with the actual SOC triage objective of ranking a global queue.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 claims that the observed gain in Recall@5 may stem from LambdaMART's higher model capacity (non-linear GBDT) rather than the ranking loss, since the comparison is against a linear logistic regression baseline. The methodology includes an ablation model (LambdaMART on baseline features only) to isolate ranking from feature richness, but does not control for model capacity. This is a plausible concern, though the claim about causality is speculative and not directly tested by the PoC.\n\nF2 argues that evaluating Recall@5 on per-host 24\u2011hour groups does not reflect the real SOC workflow where analysts prioritize a global queue. The design deliberately chose host\u2011based grouping to reduce variance and focus on a meaningful triage unit; the critic's point applies to a different operational scope (global ranking) rather than the stated experiment scope.\n\nF3 contends that ticket\u2011history features (past\u20117\u2011day ticket count, median resolution time, median severity) leak label information because they correlate with the current label. The methodology explicitly excludes post\u2011investigation fields to avoid leakage; ticket metadata are pre\u2011triage information available at alert time, so they constitute legitimate predictive features, not leakage. The critic's leakage argument misunderstands what constitutes leakage.\n\nF4 asserts that the 30\u2011day maturation window introduces selection bias by discarding alerts that never mature (e.g., ignored attacks). While true that unlabeled alerts are omitted, the design accepts this bias to train on high\u2011confidence labels; the impact on the hypothesis test is likely small, making the concern minor relative to the experiment's goals.\n\nOverall, each critique raises a valid theoretical point, but either the design already addresses it, the concern lies outside the stated scope, or the empirical claim lacks support from the PoC.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic's claim that any Recall@5 gain is more likely due to model capacity than the ranking loss is an empirical assertion about causality that is not tested or supported by the PoC output. The PoC does not include a linear ranking baseline, so the critic's attribution remains speculative."
+      },
+      {
+        "finding_id": "F2",
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The experiment's scope is to evaluate ranking quality within host\u2011based 24\u2011hour windows as a realistic proxy for analyst triage focus. The critic's concern about global\u2011queue ranking pertains to a different operational context (global prioritization) that was not claimed as part of the study's evaluation."
+      },
+      {
+        "finding_id": "F3",
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "Ticket\u2011history features are pre\u2011triage information (count, resolution time, severity) available at alert time, not post\u2011investigation fields. The methodology explicitly excludes only post\u2011investigation fields to prevent leakage; thus these features do not constitute label leakage but represent legitimate historical signals."
+      },
+      {
+        "finding_id": "F4",
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "While excluding alerts without mature labels may introduce some selection bias, the effect on the hypothesis test is minor because the goal is to learn from clear, high\u2011confidence labels. This concern does not materially affect the experiment's conclusions about ranking versus classification."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "After rebuttals, all findings have adjusted severity \u2264 3, satisfying the EXONERATE condition; thus the defense prevails and no empirical test is required."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

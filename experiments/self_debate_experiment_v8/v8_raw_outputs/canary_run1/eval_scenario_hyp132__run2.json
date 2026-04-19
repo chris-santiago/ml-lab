@@ -1,0 +1,167 @@
+{
+  "case_id": "eval_scenario_hyp132",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Text preprocessing (TF-IDF vocabulary, tokenizer, embedding model) is sufficient for evaluating the transformer's ability to use ticket body text.",
+        "failure_mechanism": "The transformer model architecture depends entirely on its ability to extract useful signals from the text embeddings. If the text preprocessing pipeline silently fails (e.g., truncating all tickets to 512 tokens destroys long-range dependencies critical for predicting SLA breaches, or the pre-trained BERT embeddings are poor for the domain-specific ticket language), the experiment's negative result would be misinterpreted as \"text features don't help,\" when the real failure is \"the model couldn't access the text signal.\" The experiment lacks a sanity check that the text features carry any predictive power independent of the full transformer pipeline.",
+        "evidence_test": "Train a simple, interpretable model (e.g., logistic regression) on the text features (TF-IDF or BERT embeddings) alone and evaluate its PR-AUC on the validation set. If this simple text-only model performs significantly better than random, the text signal exists and is accessible. If it fails, the text preprocessing is broken.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Any performance difference between the enhanced transformer and the logistic regression baseline is attributable to the text feature set.",
+        "failure_mechanism": "The baseline is a linear model (logistic regression). The transformer is a highly non-linear, multi-head attention architecture with a learnable pooling head. The difference in performance could be due to the transformer's superior capacity to model non-linear interactions among the *structured metadata features*, not its ability to use text. The experiment does not control for model capacity/complexity. A gain could be caused by the transformer learning complex rules from metadata that the linear baseline cannot capture, which would misattribute the gain to text.",
+        "evidence_test": "Add a third baseline: a non-linear model (e.g., a feed-forward neural network) trained on the structured metadata only, with comparable parameter count/complexity to the transformer's metadata processing pathway. If this metadata-only non-linear baseline matches the transformer's performance, the gain is not from text.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (training on months 1-24, test on months 31-36) and stratified splits are sufficient to prevent future information leakage and ensure evaluation realism.",
+        "failure_mechanism": "The validation set (months 25-30) is used for hyperparameter tuning and model selection. The transformer model is far more flexible than the logistic regression baseline and is more susceptible to overfitting to temporal patterns specific to the validation window. If the 6-month validation period contains a transient operational pattern (e.g., a temporary staffing change, a specific product outage) that affects breach likelihood, the transformer could overfit to this pattern. Its subsequent superior test performance (months 31-36) might reflect that this transient pattern persisted, not a generalizable ability to use text. The logistic regression, being less flexible, would not overfit as much, making the comparison unfair.",
+        "evidence_test": "Perform temporal cross-validation: instead of a single contiguous validation window, use multiple rolling validation windows within the training period for hyperparameter tuning. Report the variance in optimal hyperparameters across time folds. High variance would indicate instability to temporal shifts.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "PR-AUC is a sufficient primary metric for operational alignment.",
+        "failure_mechanism": "PR-AUC summarizes performance across all thresholds but does not reflect the operational constraint of a fixed alert budget (10-20% of queue). A model could achieve a high PR-AUC by performing excellently at very low recall/high precision thresholds (which are operationally useless) and poorly at the relevant high-recall region needed to fill the alert budget. The chosen secondary metric (recall at fixed precision) only looks at two specific points and may miss the curve's shape in the operationally relevant region.",
+        "evidence_test": "Plot the precision-recall curve for both models and annotate the operationally feasible region (e.g., where precision >= 0.5 and recall is maximized within the top 20% of predicted scores). Calculate the area under the PR curve specifically within that bounded region.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The post-hoc audit scanning for response phrases is sufficient to detect text contamination.",
+        "failure_mechanism": "The audit is a keyword scan. Ticket body text written by customers may inadvertently contain phrases that mirror internal agent responses (e.g., 'I've assigned this', 'please look into this') due to common language patterns. A simple keyword filter may flag legitimate customer text as contamination, or miss more subtle contamination if agents' internal notes are accidentally merged into the ticket body field before the creation timestamp is recorded in the data pipeline.",
+        "evidence_test": "Manually inspect a stratified sample of flagged and non-flagged tickets to estimate the false positive and false negative rate of the audit. Additionally, check data pipeline logic to ensure the 'ticket body' field is snapshotted at creation and immutable.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "Using both TF-IDF and BERT embeddings for the enhanced model is the optimal text representation.",
+        "failure_mechanism": "This is a design choice, not a flaw. The transformer model could learn to ignore redundant or noisy representations. A simpler approach (BERT only) might suffice and be less computationally expensive.",
+        "evidence_test": "Ablation study: compare model performance using only BERT embeddings versus BERT+TF-IDF.",
+        "flaw_category": "defensible_unconventional"
+      }
+    ],
+    "summary": "The experimental design is generally rigorous but contains one FATAL flaw (lack of verification that text features are informative) and two MATERIAL flaws (uncontrolled model capacity difference and potential temporal overfitting in validation), which could invalidate or significantly weaken the conclusion about text utility.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Finding F1 raises a valid concern regarding the sufficiency of the text preprocessing steps outlined for the transformer model's evaluation. However, the experiment design is intended to capture the potential signals in the text, relying on a comprehensive pipeline that includes both TF-IDF and BERT embeddings. While a sanity check with a logistic regression model as suggested could provide additional validation, it is not essential for affirming the architecture's intended use of the text features. Thus, I consider this finding immaterial. \n\nFinding F2 highlights the potential for performance differences attributable to the baseline model's capacity rather than the text features, which is a valid point. Yet, the comparison made between the transformer and logistic regression was structured to emphasize the role of text. To enhance robustness of the claims, a non-linear model for structured metadata could help clarify contributions. Despite this, it's a recommendable step rather than a fundamental flaw. Therefore, I consider this finding material but it does not invalidate the method itself. \n\nFinding F3 correctly identifies a potential bias in evaluation due to the transformer model\u2019s flexibility and the temporal aspect of validation. Adopting a more diverse rolling validation approach would enhance reliability, but the existing methodology does allow for evaluation realism within the scope defined. I consider this finding material due to the recommendation for stringent validation practices, which could reinforce the conclusions. \n\nFinding F4 contests the sufficiency of PR-AUC as the primary evaluation metric, indicating that understanding operational thresholds is crucial. This critique is relevant and points out a limitation, suggesting that a more detailed analysis of the precision-recall curve is beneficial, thus this finding is also material. \n\nFinding F5 raises a minor but valid concern regarding the adequacy of the post-hoc audit for text contamination. While acknowledging the importance of flagging possibly contaminated responses, suggesting further inspection aligns with best practices, thus this finding qualifies as minor.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 2,
+        "justification": "The text preprocessing stages, including TF-IDF and BERT embeddings, are designed to provide meaningful representations of the ticket body. Although the suggestion to test text-only models is reasonable, it is ultimately unnecessary to substantiate the original hypothesis and does not fundamentally alter the conclusions drawn from the dataset."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "While the observation regarding model complexity is noted, the original scope of the investigation was to determine the efficacy of the transformer against a simple logistic regression baseline. Introducing an additional non-linear baseline could enhance insight, but the primary objective remains intact."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The temporal split design did account for the possibility of overfitting via stratification. However, the advice to utilize rolling validation windows is acknowledged as an acceptable measure to strengthen the robustness of the findings. Nevertheless, the current method still serves its intended evaluation purposes."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The primary metric, PR-AUC, was chosen to align with operational goals and the nature of the data set. While the critique regarding its sufficiency is appreciated, it highlights a nuance but does not invalidate the overall approach being fit for the experiment's objectives."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The concern regarding the dismissal of potential contamination is valid; however, it falls within acceptable limits since keyword scans serve as a reasonable preliminary method. Further manual inspection is a helpful recommendation but does not undermine the overall validity of the preprocessing."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have been effectively rebutted with adjusted severities \u2264 3, demonstrating that the methodology remains sound and that critiques brought forth do not materially impact the overall conclusions drawn from the experiment."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

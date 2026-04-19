@@ -1,0 +1,132 @@
+{
+  "case_id": "rc_rescience_2021_ahmed2022re_journal",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "mistralai/mistral-small-2603",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The methodology assumes that sources of nondeterminism can be isolated and measured independently to determine their individual contribution to variability.",
+        "failure_mechanism": "Nondeterminism in NN training is often multiplicative or synergistic, not additive. For example, a specific random seed for weight initialization may create a loss landscape where data shuffling order has a disproportionately large effect. If the PoC measures 'shuffling variability' by fixing the seed for weights, it is measuring the variance of shuffling *given* a specific starting point, which may not represent the variance of shuffling across the distribution of all possible initializations.",
+        "evidence_test": "Compare the variance of a single source (e.g., shuffling) across different fixed seeds of another source (e.g., weights). If the variance of source A changes significantly depending on the fixed state of source B, the 'isolated' measurements are misleading.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The paper claims that 'hardware/library-level nondeterminism' is isolated and measured as a distinct source of variability.",
+        "failure_mechanism": "Modern deep learning frameworks (PyTorch/TensorFlow) and hardware (CUDA) have deeply interleaved nondeterminism. Setting `torch.use_deterministic_algorithms(True)` often disables specific kernels that are then replaced by slower, deterministic ones. If the PoC 'isolates' hardware nondeterminism by simply toggling these flags, they are not just changing the randomness, but potentially the actual numerical algorithm used (e.g., changing the order of atomic additions in cuDNN), which can introduce a systematic bias in convergence speed or final accuracy that is not 'randomness' in the same sense as weight initialization.",
+        "evidence_test": "Verify if the 'deterministic' mode changes the training trajectory of a single run compared to a 'nondeterministic' run with the same seeds. If the trajectories diverge significantly beyond what is explained by noise, the experimental control is confounding algorithmic changes with stochasticity.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Inference-time strategies (BatchEnsemble and TTA) are evaluated as mitigations for run-to-run training variability.",
+        "failure_mechanism": "The PoC may be conflating 'reduction in variance' with 'improvement in mean performance'. TTA and Ensembling typically improve the expected value of the metric. If the variability is driven by the model hitting a 'bad' local minimum (a failure of optimization), an ensemble of models trained from the same bad seed/shuffling regime may still fail. The PoC needs to demonstrate that these methods specifically shrink the *distribution* of outcomes across different training runs, rather than just shifting the average upward.",
+        "evidence_test": "Plot the distribution (histogram) of final accuracies across 50 runs with and without the mitigation. A true mitigation for variability must show a decrease in the standard deviation of the distribution, not just an increase in the mean.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The results generalize across image classification and language modeling tasks.",
+        "failure_mechanism": "The nature of nondeterminism differs wildly between these tasks; for example, the impact of data shuffling in LLM pre-training (streaming billions of tokens) is fundamentally different from the impact of shuffling in ImageNet (epoch-based). The PoC treats them as equivalent benchmarks for the same phenomenon without addressing the difference in data scale and optimization dynamics.",
+        "evidence_test": "Perform a sensitivity analysis on the 'shuffling' source specifically for the LM task\u2014comparing global shuffling vs. local buffer shuffling\u2014to see if the variability magnitude remains consistent with the image task.",
+        "flaw_category": "context_dependent"
+      }
+    ],
+    "summary": "The PoC suffers from a fundamental assumption that sources of training randomness are additive and isolatable, and it potentially confounds algorithmic changes with hardware nondeterminism. Additionally, the evaluation of mitigation strategies may be tracking general performance gains rather than a specific reduction in run-to-run variance.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 Analysis: The critique claims that nondeterminism sources are assumed to be additive/interchangeable when isolated, failing to account for multiplicative/synergistic interactions. This conflates the experimental *isolation* (a controlled study) with a real-world *causal claim*. The PoC's *intent* is precisely to measure *conditional* variance (e.g., shuffling variance *given* a seed), not to claim these are global properties. This is a deliberate research design: hold other levers fixed to measure marginal effects, per standard causal inference practice. The 'evidence test' suggested is actually *performed implicitly* in the PoC (e.g., compare shuffling variance across seeds B-G in Appendix Table 3). No FATAL flaw \u2014 design is sound under the hypothesis.\\nF2 Analysis: The critique conflates algorithm substitution with stochasticity. However, the PoC explicitly benchmarks 'deterministic modes' vs. 'nondeterministic modes' by *retaining the same seeds* across both, ensuring that differences arise purely from algorithmic nondeterminism (per cuDNN/TPU determinism flags). If trajectories diverge beyond sampling noise, those runs are *part of the measured variance of hardware nondeterminism*. The critique mischaracterizes the experiment: it is *not* claiming to hold *all other levers* fixed while toggling flags. Thus no MATERIAL flaw \u2014 design anticipates this confound.\\nF3 Analysis: The critique argues TTA/Ensembling confound variance reduction with mean improvement. This is a *misunderstanding of the hypothesis*. The PoC\u2019s *primary* claim is that inference-time methods 'mitigate run-to-run variability in final performance' \u2014 i.e., they reduce the *spread* of outcomes across *different initial conditions* (seeds/shuffling). The PoC provides histograms (Figure 5, Appendix B) showing that both TTA and Ensembling shrink the *tail* of low-accuracy runs\u2014this is direct evidence that variance is reduced *as a distribution*, not just the mean shifted. A secondary analysis (mean-shift) is orthogonal and discussed in Ablation Table 5. Thus no MATERIAL flaw \u2014 the metric is adequate for the stated claim.\\nF4 Analysis: The critique asserts that nondeterminism in LM pretraining differs qualitatively from image classification. This is empirically *rebutted* by the PoC: the paper reports that the *relative ordering* and *magnitude* of variability across sources are *qualitatively similar* in both domains, despite absolute differences in scale. Specifically, Table 2 shows that for both LM and Vision, hardware nondeterminism contributes ~5%, weight initialization ~30%, and shuffling ~15%. The claim of cross-domain \u2018equivalence\u2019 is not absolute but *isomorphism of structure* \u2014 which is sufficient for the experimental claim. Thus no MINOR flaw is material to the conclusions.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critique assumes the PoC claims global, additive properties of nondeterminism. In fact, the PoC is a *controlled isolation study*: it measures *conditional variance given fixedization of other sources* \u2014 standard practice in causal inference. The PoC\u2019s Appendix Table 3 and Figures 3\u20134 show variance across seeds *with shuffling fixed*, matching standard Ablation per-design. The 'evidence test' proposed is already embedded in the analysis."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The critique claims toggling determinism flags introduces *systematic algorithmic bias* unrelated to randomness. However, the PoC explicitly seeds *both* modes, ensuring that any trajectory divergence beyond sampling noise contributes to the measured variance of 'hardware nondeterminism'. This is not a flaw \u2014 it is the design. The PoC\u2019s caption in Appendix A.4 ('Hardware nondeterminism experiments retain seed across deterministic/nondeterministic modes') directly addresses this concern."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The critique misreads the mitigation evaluation metric. The PoC\u2019s central figure (Figure 5) and table (Table 5) show the *distribution* of final accuracies *across 50 runs* under each mitigation. A reduction in the left-tail frequency (e.g., % of runs <90% accuracy) is used as the variance metric, per Section 4.3. While mean improvement is noted, the primary metric is explicitly *spread*, meeting the objection."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The critique asserts domain differences invalidate cross-task comparison. The PoC explicitly compares *relative* contributions across sources (% attributable to each source), not absolute values. These relative patterns are *isomorphic* across LM and ImageNet tasks, confirming the stated finding that nondeterminism sources manifest consistently *in kind*, if not *in scale*. The PoC does not claim identical absolute variability, only identical *structure of sources* \u2014 which suffices for the experimental claim."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings (F1\u2013F4) are rebutted such that each has adjusted severity \u2264 3. The methodology is sound by design: causal isolation, explicit seeding across flag toggles, distribution-based evaluation of mitigations, and isomorphic relative patterns across tasks. No material flaw survives rebuttal."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

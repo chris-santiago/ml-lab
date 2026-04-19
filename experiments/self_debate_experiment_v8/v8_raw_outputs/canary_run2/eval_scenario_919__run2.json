@@ -1,0 +1,132 @@
+{
+  "case_id": "eval_scenario_919",
+  "stratum": "mixed",
+  "flaw_category": "context_dependent",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "mistralai/mistral-small-2603",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Grouping near-duplicates prevents campaign variants from appearing in both training and evaluation windows without data leakage.",
+        "failure_mechanism": "To determine which messages are 'variants' of the same campaign, one must compare messages across the entire 18-month dataset. This requires global knowledge of the future (Test set) to correctly define the composition of the past (Train set). Consequently, the train set construction is influenced by information from the test set, violating the chronological independence required for a valid evaluation of future detection performance.",
+        "evidence_test": "Inspect the cluster definition process. If clustering is performed on the full 18 months prior to splitting, calculate the correlation between cluster assignment in Train and Test. If Test data influenced cluster formation, the independence assumption is invalid.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A 21-day maturation window is sufficient to capture all finalized case outcomes for labeling.",
+        "failure_mechanism": "Sophisticated phishing campaigns, such as Business Email Compromise (BEC) or slow-burn credential theft, often take longer than 21 days for human analysts to confirm and escalate. Excluding messages not finalized within this window artificially removes positive labels from the dataset (False Negatives in the label creation process), causing the model to be trained on a distribution that lacks these hard, late-detectable cases.",
+        "evidence_test": "Analyze the time-to-resolution histogram for confirmed phishing cases. Calculate the percentage of confirmed phishings that exceed 21 days post-receipt. If this percentage is non-trivial, the training set is biased against slow-maturing attacks.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A frozen tokenizer and imputer fit on training data will robustly handle out-of-domain vocabulary or feature distributions in the test set.",
+        "failure_mechanism": "Freezing a tokenizer trained on historical data means that new attack vectors using novel vocabulary, slang, or TLDs will be mapped to unknown tokens (<UNK>). This results in silent information loss where the model receives embeddings of zero-information tokens, potentially degrading performance without triggering obvious metric failures or error states.",
+        "evidence_test": "Compute the Out-of-Vocabulary (OOV) ratio for test set texts compared to the training vocabulary. If the OOV ratio is high, the frozen model is effectively blind to the new signal.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Pooled text embeddings retain sufficient semantic information to detect phishing intent.",
+        "failure_mechanism": "Phishing detection often relies on positional cues (e.g., 'Verify' at the start vs. end of an email, subject-body divergence). Global pooling operations (CLS or Mean) discard sequence order and positional context, implicitly assuming that the frequency of keywords matters more than their structure or placement.",
+        "evidence_test": "Compare performance of the pooled model against a sequence-aware model (e.g., bi-LSTM or attention over tokens) on a subset of data specifically engineered with positional phishing cues (e.g., keyword manipulation).",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC contains a FATAL signal leakage in the duplicate removal strategy (requiring global knowledge of the future) and a MATERIAL label noise issue (21-day window truncation) that undermines the evaluation of slow-burn attacks. Structural assumptions regarding pooling and frozen tokenizers further limit the reliability of performance claims.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "=== F1 Analysis ===\nThe critic claims that grouping near-duplicates across the entire 18-month dataset before splitting creates leakage because train-set construction uses future information. This is a valid critique of naive global clustering, but the design explicitly groups near-duplicates using features available at receipt time (normalized URL sets and subject hashes). These features do not require global knowledge\u2014URLs and subjects are extracted per-message and hashed immediately, making cluster formation inherently receipt-time-local. The confound control section clarifies that deduplication and near-duplicate grouping are performed strictly before any temporal split and only on per-message signals. Therefore, no future information leaks into train-set composition. The critic's 'evidence_test' confuses global clustering with local feature extraction, ignoring the design intent.\n\n=== F2 Analysis ===\nThe critic argues that 21 days is insufficient to capture all finalized phishing outcomes. This is a valid concern for certain slow-maturing attacks, but it is explicitly scoped as an acceptable trade-off. The maturation window is designed to balance label reliability with coverage. The methodology states that only messages with finalized case outcomes are included, and a 21-day maturation window is imposed before extraction. While some sophisticated attacks may mature beyond 21 days, the design controls for this by using *finalized* outcomes, meaning analyst escalations are complete, not necessarily that the attack is trivial to detect. The risk of label bias is acknowledged and constrained but not eliminated; however, the scope of the PoC is to evaluate future-time detection under *realistic label maturation delays*, not to solve the label maturation problem in general. Thus, the critique targets a scope boundary, not a design flaw within scope.\n\n=== F3 Analysis ===\nThe critic warns that a frozen tokenizer trained on historical data may perform poorly on novel vocabulary in the test set, leading to silent information loss. This is a legitimate concern for production systems but not for the PoC. The design explicitly uses a pretrained transformer tokenizer fine-tuned on the training set. The tokenizer and imputer are frozen *after* training and not retrained to reflect new data, which is standard practice for controlled evaluations. The risk of OOV tokens is mitigated by using a model pretrained on broad corpora (e.g., BERT family), which generalizes to many domains. While performance degradation on highly novel texts is possible, it is not a flaw\u2014it is a feature of the evaluation's test for robustness. The critic's concern applies to production deployment, not to the validity of the comparative experiment within the stated protocol.\n\n=== F4 Analysis ===\nThe critic argues that pooled embeddings discard positional cues critical to phishing detection (e.g., keyword order). This is a valid theoretical limitation. However, the methodology explicitly states that this test evaluates the *added value* of raw-text representation learning over structured baselines, not whether language understanding is complete. The transformer's text embeddings are concatenated with rich structural and temporal features (SPF outcomes, Reply-To mismatch, geography, burstiness, etc.), which capture many non-semantic phishing signals. The confound controls (seen/unseen senders, link-only vs. attachment-bearing, business unit) ensure that gains are not artifacts of content patterns alone. The design does not claim to solve positional detection but tests whether text embedding complements existing signals\u2014a valid sub-hypothesis within scope.\n\n---\nSummary: F1 and F4 are rooted in misunderstandings of design intent. F2 and F3 reflect real risks but are either accepted as scope trade-offs (F2) or valid domain risks outside the PoC's focus (F3). No finding irretrievably invalidates the methodology for its stated purpose.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The design groups near-duplicates using only per-message, receipt-time features (URLs and subjects), with clustering defined strictly *before* temporal splits. No future information influences train-set composition. The 'evidence_test' conflates global agglomerative clustering with local feature hashing; the latter is a designed control against campaign duplication without leakage."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The 21-day maturation window is a deliberate scope decision to balance label reliability and timeliness. Slow-maturing attacks beyond 21 days are acknowledged as a class of cases the PoC controls for but does not fully cover. This is not a flaw within scope; it reflects the realistic constraints of enterprise reporting workflows, which the experiment is designed to emulate."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "A frozen tokenizer is part of the controlled experiment design to isolate the value of representation learning from adaptive preprocessing. Production robustness is out of scope. The pretrained tokenizer is chosen for broad generalization, and OOV penalties are an accepted trade-off in evaluating new data performance. This is not a failure of the PoC's methodology."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "The PoC tests whether text embeddings add value over structured baselines under realistic signal drift. Positional semantics are not the hypothesis under test. The inclusion of structured signals and confound controls ensures that the evaluation is valid for its intended sub-hypothesis: whether learned representations of text improve ranking beyond handcrafted features."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings are rebutted using design or scope justifications, reducing their effective severity below 4. The methodology is sound for its stated purpose of evaluating future-time phishing detection with realistic label maturation and leakage controls."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

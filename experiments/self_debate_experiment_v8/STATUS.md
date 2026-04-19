@@ -4,7 +4,7 @@
 penalty-aware scoring. [→ OBJECTIVE.md]
 
 **Branch:** `feat/v8-defender-iteration`  
-**Last updated:** 2026-04-18
+**Last updated:** 2026-04-18 (canary run 2 complete; run 3 pending)
 
 ---
 
@@ -17,7 +17,9 @@ penalty-aware scoring. [→ OBJECTIVE.md]
 | `scripts/model_selector.py` | ✅ Done | `load()` + `model_generator()` (independent random draws); N→n bug fixed |
 | `scripts/run_pipeline.py` | ✅ Done | Async critic→defender→adjudicator via OpenRouter; resume, seed file, dry-run, rich progress |
 | `scripts/scorer.py` | ✅ Done | MCC, DER, IDR, FAR, FHR, ARR, VS (per-case majority + global kappa), Brier losses (critic + defender), AOR, wDCR, CER, NIT rate, FCE; penalty-aware scoring |
-| `scripts/run_pipeline.py` | ✅ Updated | **Adjudicator LLM call removed.** Pipeline is now critic → defender → `derive_verdict()`. Verdict derived deterministically from (adjusted_severity, rebuttal_type) per finding; no API call, no sampling variance. [→ decision c93e0fb6] |
+| `scripts/run_pipeline.py` | ✅ Updated | **Adjudicator LLM call removed.** Pipeline is now critic → defender → `derive_verdict()`. Verdict derived deterministically from (original_severity, adjusted_severity, rebuttal_type) per finding; no API call, no sampling variance. [→ decision c93e0fb6] |
+| `scripts/run_pipeline.py` | ✅ Updated | **Canary run 1 bug fixes:** (1) `adjusted_severity` floor clamped to `max(0, value)` in `validate_defender_output()` — defenders were emitting negative values trivially clearing the ≤3 threshold. (2) `build_critic_user_msg()` wrapper added — framing clarifies no separate code file exists, fixing "please provide implementation code" parse failures. (3) `max_tokens` raised to 8192 — unterminated JSON from output truncation. (4) `_sanitize_json_string()` added to `extract_json()` — handles literal control chars in model JSON output. (5) Plain-text no-findings fallback in `parse_response()`. [→ discovery 2b3ebbd8] |
+| `scripts/run_pipeline.py` | ✅ Updated | **`derive_verdict()` FATAL rule:** FATAL findings (original_severity ≥ 7) partially rebutted to adj_sev 4–6 now yield `empirical_test_agreed` instead of `defense_wins`. Full clearance to adj_sev ≤ 3 required for exoneration. [→ discovery 2b3ebbd8] |
 
 ---
 
@@ -26,12 +28,14 @@ penalty-aware scoring. [→ OBJECTIVE.md]
 | Prompt | Status | Key changes |
 |---|---|---|
 | `prompts/CRITIC.md` | ✅ Done | NIT filter, severity 0–10 scale, `flaw_category` taxonomy, `no_material_findings` flag |
-| `prompts/DEFENDER.md` | ✅ Updated | Added critic-exhaustiveness framing block: defender now knows the critic surfaces all issues by design; REBUT-IMMATERIAL is the expected response to minor findings, not partial concession |
-| `prompts/ADJUDICATOR.md` | ✅ Retired as LLM prompt | Now serves as spec document for `derive_verdict()`. Rewritten to pure lookup table (no semantic judgment). No longer sent to any model. [→ decision c93e0fb6] |
+| `prompts/DEFENDER.md` | ✅ Updated | Added critic-exhaustiveness framing block; DEFER section-scan instruction. [→ experiment f634bda9] |
+| `prompts/DEFENDER.md` | ✅ Updated | **Canary run 1 fix:** REBUT-IMMATERIAL restricted to MINOR findings (original sev 1–3) only; adjustment tightened to −1 to −2. All other adjustment caps tightened: REBUT-DESIGN −2 to −4, REBUT-SCOPE −2 to −4, REBUT-EVIDENCE −3 to −5. Proportionality guidance added. [→ discovery 2b3ebbd8] |
+| `prompts/ADJUDICATOR.md` | ✅ Retired as LLM prompt | Now serves as spec document for `derive_verdict()`. Updated to reflect FATAL-finding rule: original_sev ≥ 7 + adj_sev 4–6 + REBUT-* → `empirical_test_agreed`. [→ decision c93e0fb6, discovery 2b3ebbd8] |
 
-**Intervention priority (post Phase 1):** Intervention B only. Intervention A (critic NIT filter)
-already present in CRITIC.md; Intervention C (adjudicator) retired in favor of hard verdict rules.
-AOR now measures defender self-consistency, not LLM override rate.
+**Intervention priority (post canary run 1):** Prompt and scoring calibration only. Intervention A
+already present in CRITIC.md; Intervention C retired in favor of hard verdict rules. AOR measures
+defender self-consistency. Root cause of IDR=0.083 was REBUT-IMMATERIAL misuse + floor bug —
+both fixed. Run 2 tests whether DER holds while IDR recovers.
 
 ---
 
@@ -144,9 +148,14 @@ Also fixed: canary_full.json was out of sync with canary_cases.json (7 additions
       Keep in pool. Reasoning trace parsing handled by `strip_think_tags()` in run_pipeline.py.
       Cost accounted for in MODELS.md estimate. CER inflation risk monitored via MES.
 
+- [x] **Pool trimmed to 10 models** [→ canary run 1 diagnostics]
+      `xiaomi/mimo-v2-flash` dropped (extreme per-run variance + inverted critiques). [→ experiment f634bda9]
+      `z-ai/glm-4.7-flash` dropped (4/27 assignments timed out or returned empty responses in canary run 1).
+      Pool now 10 models. canary_seeds.json regenerated (random.seed(42)) with zero bad-model assignments.
+
 - [x] **Model seed file generated** [→ MODELS.md §Seed Control, PROTOCOL.md §Phase 2]
-      canary_seeds.json: 42 cases × 3 runs = 126 assignments. random.seed(42), independent
-      draws per run from 12-model pool. Hold constant across all canary iterations.
+      canary_seeds.json: 45 cases × 3 runs = 135 assignments. random.seed(42), independent
+      draws per run from 10-model pool. Holds constant across all canary iterations.
 
 - [x] **FHR baseline defined** [→ OBJECTIVE.md §Success Criteria]
       No pre-run absolute target meaningful without data. Resolved: FHR floor is
@@ -167,16 +176,177 @@ Also fixed: canary_full.json was out of sync with canary_cases.json (7 additions
 
 ---
 
-## Prompt Iteration Log [→ PROMPTS.md §Prompt Changelog Template]
+## Protocol and Scoring Reframe
 
-_No iterations run yet. First entry will be the Phase 0.5 baseline._
+**Documented 2026-04-18 — based on user clarification of ml-lab design intent**
 
-| Version | Change | DER before | DER after | Verdict |
-|---|---|---|---|---|
-| baseline | v7 prompts under penalty-aware scoring | — | TBD | — |
-| critic-v1 | NIT filter + severity taxonomy + flaw_category | TBD | — | pending |
-| defender-v1 | Presumption of soundness + EXONERATE path | TBD | — | pending |
-| adjudicator-v1 | Cost model + significance filter | TBD | — | pending |
+ml-lab is not a binary critic-wins / defender-wins system. It is a structured methodology review with three possible outcomes, each valid:
+
+| Verdict | Meaning | Correct when |
+|---|---|---|
+| `critique_wins` | Undeniable flaw — no valid defense exists | Planted flaw with no design control |
+| `empirical_test_agreed` | Genuine ambiguity — both sides argue well, empirical evidence needed | Real concern, methodology partially addresses it, significance is uncertain |
+| `defense_wins` | Critic raised non-issues or misread the design | Sound methodology, no material flaws |
+
+**`empirical_test_agreed` is a designed and expected outcome, not a failure mode.** The system explicitly anticipates ambiguity — this mirrors hard real-world cases where reasonable experts disagree. The correct protocol response is "run the experiment; data decides."
+
+**Implication for scoring targets:**
+
+Prior scoring framed IDR as rate of `critique_wins` on flawed cases. This was wrong — it penalized `empirical_test_agreed` on cases where the flaw is real but genuinely uncertain in significance. The correct FDR (Flaw Detection Rate) should be:
+
+```
+FDR = rate of NOT defense_wins on FLAWED cases
+    = (critique_wins + empirical_test_agreed) / total flawed cases
+```
+
+DER (Defense Exoneration Rate) remains `defense_wins` / total SOUND cases. But `empirical_test_agreed` on a sound case is now acceptable — it means the system found genuine uncertainty, which may warrant an experiment even if the hypothesis was sound.
+
+FAR (False Alarm Rate) should specifically track `critique_wins` on SOUND cases — the worst error mode (false accusation of an undeniable flaw on a sound design).
+
+**Implication for protocol choice:**
+
+ml-lab supports two primary protocols — both are valid, chosen by the user at the start:
+- **Ensemble**: 3 independent critics, findings union-pooled, single defender pass
+- **Multi-round**: R1 critic → R1 defender → R2 critic challenges → R2 defender
+
+The prior canary iterations tested single-round (not either intended protocol). The correct evaluation should test the protocol ml-lab actually runs. Running full canary on single-round measures a baseline that doesn't reflect intended use.
+
+**Defender calibration direction (from user):**
+- Both critic and defender should stand firm for their full allotted rounds
+- DEFER is the correct call for genuine ambiguity — not CONCEDE under pressure
+- CONCEDE is reserved for undeniable flaws with no design control anywhere in the methodology
+- The CONCEDE trigger in DEFENDER.md was over-aggressive; softened to allow DEFER on ambiguous cases
+
+---
+
+## Canary Run Log
+
+| Run | Key changes | DER | IDR | FAR | ARR | MCC | Verdict |
+|---|---|---|---|---|---|---|---|
+| canary_run1 | Framing block + DEFER instruction + deterministic verdict + 10-model pool | 1.00 | 0.083 | 0.00 | 0.00 | +0.169 | DER fixed; IDR collapsed — over-rebuttal |
+| canary_run2 | REBUT-IMMATERIAL → MINOR only; tighter adj caps (−2 to −4); FATAL REBUT-* floor rule | 0.565 | 0.083 | 0.435 | 0.500 | +0.079 | Caps over-tightened: DER collapsed, IDR unchanged |
+| canary_run3 | Restore caps (REBUT-DESIGN −3 to −5, REBUT-SCOPE −3 to −5, REBUT-EVIDENCE −4 to −6); add CONCEDE trigger | pending | pending | — | — | — | **NOT RUN** — pivoted to multi-round / ensemble probe before full canary |
+
+---
+
+### Multi-Round + Ensemble Probe Results (2026-04-18)
+
+**Probe cases:** eval_scenario_858 (SOUND, defense) and eval_scenario_777 (FLAWED, regular)
+**Seeds:** probe_run3_seeds.json (3 runs each, same model assignments across all protocol variants)
+
+**Under original scoring (IDR = rate of `critique_wins` on FLAWED):**
+
+| Protocol | 858 DER | 777 IDR | Notes |
+|---|---|---|---|
+| Single-round run3 (restored caps, CONCEDE trigger) | 3/3 = 1.00 | not measured | Pre-citation baseline |
+| Multi-round + citation req | 0/2 = 0.00 | 2/3 = 0.67 | Citations dampened sound defense; over-concession on 858 |
+| Multi-round (no citation req, DEFER guidance) | 1/3 = 0.33 | 1/2 = 0.50 | Defenders still conceding FATAL on sound case R1 |
+| Ensemble (3 critics, no citations) | 0/2 = 0.00 | 1/3 = 0.33 | Spurious sev=9 from 3rd critic → FATAL rule fires on sound case |
+
+**Under revised scoring (FDR = NOT `defense_wins` on FLAWED, `empirical_test_agreed` counts as correct):**
+
+| Protocol | 858 (sound) no-false-alarm | 777 FDR | Notes |
+|---|---|---|---|
+| Multi-round (no citation, DEFER guidance) | 1/3 acceptable (1 ETA, 2 CW false alarms) | 1/2 = 0.50 (1 ETA ✓, 1 DW ✗) | False alarms from R1 defender conceding FATAL on sound |
+| Ensemble | 2/2 acceptable (both ETA, no false alarms) | 2/3 = 0.67 (1 CW, 1 ETA, 1 DW) | ETA on sound = acceptable; ensemble narrows but doesn't eliminate misses |
+
+**Key findings:**
+- Citation requirement: indiscriminate — fires on sound cases as readily as flawed ones. Reverted.
+- Multi-round concession pressure: R2 challenge creates pressure to update toward CONCEDE even when sound. DEFER guidance in DEFENDER_R2.md partially mitigates but doesn't eliminate it.
+- Ensemble + FATAL rule: a spurious sev=9 from any critic → minimum adj_sev=4 → FATAL rule → ETA on sound case. Under new framing this is *acceptable* (not a false alarm in the old sense).
+- `empirical_test_agreed` on flawed cases: correct outcome. 777 run0 (multi-round): critics found real orig=9/8 flaws, defender partially rebutted to adj=4 — ETA is the right verdict here.
+- Dominant failure on 777: defenders bringing FATAL findings to adj_sev ≤ 3 via REBUT-DESIGN without conceding. FDR failure mode is over-rebuttal, not missing flaws entirely.
+
+**Structural observations:**
+- Single-round is the only protocol that consistently gives defense_wins on sound cases (DER=1.00)
+- But single-round is not the intended ml-lab protocol
+- Multi-round's R2 challenge step creates asymmetric pressure regardless of protocol variant
+- The DEFER → ETA path is the system's designed resolution for genuine ambiguity; it was being suppressed by over-aggressive CONCEDE prompting
+
+**canary_run1 failure analysis** [→ discovery 2b3ebbd8]:
+- IDR=0.083 (11/12 flawed cases falsely exonerated)
+- Dominant pattern: REBUT-IMMATERIAL misapplied to FATAL findings (sev 8–9) with −6 to −8 adjustments
+- Floor bug: adjusted_severity going negative, trivially clearing the ≤3 threshold
+- Cumulative zeroing: 8–10 findings all knocked to 0 with no concessions (wDCR=0.015)
+- FATAL partially rebutted to adj_sev 4–6 still yielded `defense_wins` under old table
+
+**Fixes applied before canary_run2:**
+1. Code: `max(0, adjusted_severity)` floor enforcement in `validate_defender_output()`
+2. DEFENDER.md: REBUT-IMMATERIAL restricted to MINOR (orig sev 1–3); adj −1 to −2
+3. DEFENDER.md: All other adjustment caps tightened (REBUT-DESIGN −2 to −4, etc.)
+4. derive_verdict(): orig_sev ≥ 7 + adj_sev 4–6 + REBUT-* → `empirical_test_agreed`
+
+**canary_run2 failure analysis:**
+- DER collapsed (1.00 → 0.565): caps over-tightened for REBUT-DESIGN/SCOPE/EVIDENCE.
+  21 of 29 blocked defense findings had orig_sev 7–8; with −5 max they would reach adj_sev ≤ 3.
+  8 sev-9 findings remain blocked even with −5 cap (FATAL rule applies; empirical_test_agreed correct).
+- IDR still 0.083: CONCEDE trigger missing. 17 REBUT-DESIGN findings on flawed cases reach adj_sev ≤ 3
+  regardless of cap level — defenders writing plausible-sounding but factually unsupported justifications.
+  Cap changes cannot fix this; requires an explicit CONCEDE instruction.
+- AOR jumped 0.017 → 0.308: FATAL rule is functioning (derive_verdict overrides on 31% of findings).
+
+**Fixes applied before canary_run3:**
+1. DEFENDER.md: Adjustment caps restored — REBUT-DESIGN −3 to −5, REBUT-SCOPE −3 to −5, REBUT-EVIDENCE −4 to −6
+2. DEFENDER.md: CONCEDE trigger added — if no explicit methodology control addresses a FATAL/MATERIAL
+   finding AND it would affect the primary metric, CONCEDE is required; do not fabricate design justifications
+
+---
+
+## Re-Labeling Pass (2026-04-18)
+
+**Trigger:** Protocol and scoring reframe — `empirical_test_agreed` is now a valid and expected outcome for genuinely ambiguous cases. Prior labels applied `critique_wins` to all regular (flawed) cases, which was correct only for undeniable flaws (leakage, direct metric mismatch). Cases where a competent defender can produce a mechanistically valid partial rebuttal, and the significance is empirically uncertain, should be `empirical_test_agreed`.
+
+**Labeling criterion:**
+- `critique_wins`: No design control can rebut this. Undeniable flaws: preprocessing leakage, test-set contamination, direct hypothesis/metric mismatch. A competent defender scanning the methodology finds nothing to cite.
+- `empirical_test_agreed`: The flaw is real but a defender can construct a valid partial rebuttal, and whether it changes the conclusion requires empirical verification. Examples: unequal baseline tuning, proxy label validity, scope-based cohort restriction, partial reproducibility.
+
+**Changes (7 cases re-labeled):**
+
+| Case | Old | New | Reason |
+|---|---|---|---|
+| hyp_016_case_1 | critique_wins | empirical_test_agreed | Max-risk AUC limitation — defender can argue temporal patterns still show up in discrimination; horizon-specific test needs empirical verification |
+| eval_scenario_773 | critique_wins | empirical_test_agreed | Unequal baseline tuning — whether tuning explains the gap requires running the experiment |
+| eval_scenario_777 | critique_wins | empirical_test_agreed | Cohort restriction (≥12 months history) is defensible scope decision for a sequence model |
+| eval_scenario_185 | critique_wins | empirical_test_agreed | Analyst escalation labels — "prioritizing analyst responses" is a valid SOC operational framing; proxy validity is genuinely uncertain |
+| rc_rescience_2021_wang2022 | critique_wins | empirical_test_agreed | Partial reproduction with ambiguous results — some experiments worked, some didn't |
+| eval_scenario_844 | critique_wins | empirical_test_agreed | Demand vs. fulfillment label proxy — whether they're correlated enough requires empirical verification |
+| rc_rescience_2021_kirca2022 | critique_wins | empirical_test_agreed | Reproducibility ambiguity — central claims might hold despite documentation gaps |
+
+**Unchanged (critique_wins, 5 cases):**
+
+| Case | Flaw type | Why unchanged |
+|---|---|---|
+| eval_scenario_705 | Preprocessing leakage on full corpus | Undeniable — future data influenced scalers, no design scan rebuts this |
+| hyp_037_stage4 | Preprocessing leakage on full corpus | Same |
+| eval_scenario_801 | Stratified split (not chronological) + preprocessing leakage | Both issues are undeniable temporal leakage |
+| eval_scenario_812 | Span-level hypothesis, report-level metric | Direct hypothesis/metric mismatch — no design rationale explains testing X with a metric for Y |
+| eval_scenario_852 | Test set used in model selection | Test contamination is undeniable |
+
+**Final case distribution (45 total):**
+
+| Label | Count | % |
+|---|---|---|
+| defense_wins | 23 | 51% |
+| empirical_test_agreed | 17 | 38% |
+| critique_wins | 5 | 11% |
+
+**Files updated:** `canary_cases.json`, `canary_full.json` — `correct_position`, `final_verdict`, `correct_verdict`, and `ideal_debate_resolution.type` updated for all 7 cases.
+
+---
+
+## Future Consideration: Case Regeneration for 3-Outcome Framework
+
+**Added 2026-04-18 — flag for next benchmark planning cycle**
+
+The current canary set was generated under a binary flaw/sound framing and then re-labeled to fit the three-outcome system. The distribution reflects what was available from v7 (23 defense / 17 ETA / 5 critique_wins), not an intentional design toward the three outcomes. Consider regenerating cases purpose-built for this framework:
+
+- **`critique_wins` cases (~20% target):** Unmistakable, undeniable flaws — preprocessing leakage that spans train/test, direct hypothesis-metric mismatches, explicit test contamination. A defender scanning the entire methodology finds nothing to cite. These should be relatively rare in real practice, which is why the target is ~20% rather than a third.
+
+- **`defense_wins` cases (~40% target):** Sound methodology where a critic can raise plausible-sounding concerns, but a prepared defender scanning the task_prompt finds explicit controls, stated design rationales, or scope decisions that directly address every concern. The test is whether the system avoids false alarms.
+
+- **`empirical_test_agreed` cases (~40% target):** The hardest category to construct well. The flaw should be real but not undeniable — a competent defender can produce a valid partial rebuttal (citing a scope decision, a stated control, or a design tradeoff), yet the significance of the flaw for the primary conclusion genuinely requires empirical verification. These cases test whether the system correctly surfaces ambiguity rather than forcing a winner.
+
+**Generation guidance for ETA cases:** The most realistic ETA cases arise from: (a) unequal baseline tuning (tuning gap could explain the delta — but maybe not); (b) proxy label validity (label is imperfect but correlated — whether correlation is sufficient needs testing); (c) distribution shift within stated scope (methodology acknowledges limitation but doesn't quantify it); (d) partial reproducibility where some experiments transfer and others don't. Cases with planted flaws where a standard experimental ablation would settle the question are ideal ETA targets.
 
 ---
 
@@ -186,5 +356,6 @@ _No iterations run yet. First entry will be the Phase 0.5 baseline._
 |---|---|---|
 | `label_cases.py` | Original 40 cases (LABELS dict) | Should be committed |
 | `_reshuffle_labels.json` | 7 additions from reshuffle pass | Should be committed |
-| `canary_cases.json` | Final 42 labeled cases | ✅ Committed (d424ad4) |
-| `canary_full.json` | Raw v7 source for all 42 cases | ✅ Committed (d424ad4) |
+| `canary_cases.json` | Final 45 labeled cases | ✅ Committed |
+| `canary_full.json` | Raw v7 source for all 45 cases | ✅ Committed |
+| `canary_seeds.json` | 45 × 3 model assignments, seed=42, 10-model pool | ✅ Committed (ee419cf) |

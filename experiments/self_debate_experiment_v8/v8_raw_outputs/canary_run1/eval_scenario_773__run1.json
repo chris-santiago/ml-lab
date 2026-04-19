@@ -1,0 +1,316 @@
+{
+  "case_id": "eval_scenario_773",
+  "stratum": "regular",
+  "flaw_category": "missing_baselines",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Longitudinal time-series features (Stream A) computed over the entire admission do not leak post-discharge outcome information",
+        "failure_mechanism": "The temporal split anchors at discharge date, but features computed from 'the entire admission' may include measurements recorded after the decision point. In EHR systems, lab results and vitals often have lag times (results posted hours after collection). If a patient is about to be readmitted, their last values during the 'admission' could reflect post-discharge clinical status. The model effectively has access to information that would not be available at the time predictions must be made (discharge time).",
+        "evidence_test": "Analyze timestamp distributions: calculate the median and 95th percentile lag between measurement collection time and EHR recording time. Reconstruct features using only measurements with timestamps proven to precede discharge. Compare model performance with time-bounded features vs. full features. If performance drops significantly with time-bounded features, leakage is confirmed.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Discharge summary embeddings (Stream B) do not contain information about post-discharge outcomes or planned follow-up that would not be available at prediction time",
+        "failure_mechanism": "Discharge summaries are authored at discharge and may contain: (1) explicit references to follow-up plans that correlate with readmission risk, (2) documentation of patient education about warning signs that correlates with likelihood of return, (3) social work notes about home support that predicts readmission. The model uses these embeddings as fixed features without controlling for what textual information they encode. This is outcome-related information embedded in the input that leaks via the discharge summary itself.",
+        "evidence_test": "Perform ablations: train model on discharge summaries with all follow-up references removed (using NER/regex to mask phrases like 'follow up', 'return if', 'return to'). Compare performance. Alternatively, use a model trained only on early-portions of notes (first 50% of tokens) vs. full notes. If performance degrades significantly, content leakage is confirmed.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 5-fold cross-validation within the training window properly prevents temporal leakage of outcomes",
+        "failure_mechanism": "The document specifies temporal splitting into train/val/test windows (months 1-36, 37-42, 43-60), then applies 5-fold CV 'on the training set' for hyperparameter selection. However, if these 5 folds are created via random stratification (as implied by 'stratified cross-validation'), they will mix temporally adjacent admissions from months 1-36. Admissions near month 36 may share temporal patterns with month 37-42 data that the model exploits. The fold containing month 36 data is validated on admissions that are temporally adjacent to the validation window, potentially inflating estimates.",
+        "evidence_test": "Implement temporal cross-validation: ensure each fold contains only admissions from a contiguous time block within the training window, with validation folds drawn from the later portion of the training window. Compare CV performance under random vs. temporal folding. If random folding shows significantly higher CV scores, temporal leakage is present.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline model uses a 'fixed, clinically conservative hyperparameter configuration' that represents a fair comparison to the multimodal model",
+        "failure_mechanism": "The baseline uses a deliberately constrained hyperparameter configuration while the hypothesis model receives full hyperparameter search. This creates an asymmetric comparison where the multimodal model is optimized while the baseline is not. Any performance difference could reflect optimization disparity rather than feature value. The document explicitly states the baseline is 'simpler feature set' and uses 'fixed configuration' to avoid 'absorbing gains through extensive optimization'\u2014this is a deliberate weakening of the baseline that makes the comparison unfair.",
+        "evidence_test": "Run baseline with hyperparameter search matching the multimodal model (same search space, same CV folds). If baseline performance rises to match or nearly match the multimodal model, the original comparison was invalid.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Missing lab/vital patterns are analyzed for correlation with readmission and sensitivity analyses are performed",
+        "failure_mechanism": "The document states missingness patterns 'are analyzed for correlation with readmission status' and 'sensitivity analyses compare imputed vs. non-imputed baselines,' but this is described as part of 'confound detection' without specifying whether these analyses are actually performed and included in the final evaluation. The wording suggests planned analyses rather than completed ones. Without these analyses, the missing data handling could introduce bias that is not quantified.",
+        "evidence_test": "Verify that: (1) correlation between missingness patterns and readmission status is reported, (2) model performance with complete-case analysis vs. imputed data is compared, (3) missingness indicators as features are tested. Absence of these results means the claim is untested.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Feature importance analysis can determine whether embeddings carry signal independent of documentation verbosity (note length)",
+        "failure_mechanism": "Feature importance in tree-based models measures predictive contribution but does not establish independence. Length and embeddings may both contribute (positive feature importance for both) even if they capture the same underlying signal. The test 'if improvement is driven solely by length' requires controlling for length, not just observing feature importance. The model can use length for some predictions and embeddings for others\u2014both showing importance but with residual confounding.",
+        "evidence_test": "Run ablation: train model with embeddings projected to lower dimension + orthogonalized to length feature, or use embeddings as-is but train on length-matched subsets. If performance remains after controlling for length, then signal is independent. Current approach cannot distinguish shared vs. independent signal.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 6-month validation window confirms metric stability before test evaluation",
+        "evidence_test": "Check whether validation metrics are reported and whether they are within confidence intervals of test metrics. The document mentions using validation for 'confirmation' but does not specify pass/fail criteria or thresholds for 'stability.' Without explicit criteria, this step is cosmetic.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Precision at 80% recall is an appropriate primary metric reflecting the clinical objective",
+        "failure_mechanism": "Precision at fixed recall assumes a single operating point is clinically relevant. However, different clinical contexts (e.g., limited vs. extensive case management resources) would warrant different thresholds. The document does not explore performance at other operating points or analyze cost-sensitive scenarios. The metric choice is reasonable but not validated against actual clinical workflow requirements.",
+        "evidence_test": "Report precision-recall curves across full threshold range. Analyze how precision changes at different recall thresholds (50%, 70%, 90%). Compare the 80% recall threshold against clinical capacity constraints (e.g., what fraction of patients can be managed given staffing).",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The temporal split (training months 1-36, test months 43-60) ensures the test set genuinely represents future deployments",
+        "failure_mechanism": "A 7-month gap (months 37-42) between validation and test may not be sufficient to detect gradual concept drift. If discharge practices, documentation styles, or patient populations drift over time, the test set performance may not reflect deployment conditions years later. The experiment only tests a single future window, not the robustness of the model over time.",
+        "evidence_test": "Analyze performance trends across validation window (months 37-42) broken into smaller intervals (e.g., monthly). If metrics trend upward or downward, concept drift is occurring. Test performance may be an artifact of that specific time window.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Stratified temporal split prevents site-level confounding",
+        "failure_mechanism": "Stratification by hospital and service line ensures proportional representation, but does not prevent the model from learning hospital-specific patterns that correlate with readmission rates. If Hospital A has both higher documentation detail and higher readmission rates, the model could learn ' Hospital A pattern' rather than generalizable clinical risk factors. Stratification addresses representation, not confounder control.",
+        "evidence_test": "Train on all hospitals except one, test on held-out hospital. If performance degrades significantly, site-specific confounding is present. Report within-hospital vs. across-hospital performance.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F11",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Pre-trained PubMedBERT embeddings are 'fixed' and do not introduce training-set leakage",
+        "failure_mechanism": "Using pre-trained embeddings is generally safe, but PubMedBERT was trained on biomedical literature\u2014not hospital-specific discharge summaries. The embedding space may not be optimal for readmission prediction. However, this is a minor concern as the embeddings are frozen and no leakage occurs.",
+        "evidence_test": "Compare against domain-specific discharge summary embeddings (e.g., ClinicalBERT trained on MIMIC notes). If performance differs significantly, domain mismatch is affecting results.",
+        "flaw_category": "defensible_unconventional"
+      },
+      {
+        "finding_id": "F12",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The 5% absolute precision gain threshold is operationally meaningful",
+        "failure_mechanism": "This is a reasonable but arbitrary threshold. The clinical significance of a 5% gain depends on baseline precision\u2014going from 40% to 45% has different implications than 80% to 85%. The document does not tie this threshold to actual case management capacity or cost-benefit analysis.",
+        "evidence_test": "Perform cost-benefit analysis: given case manager capacity constraints, calculate expected readmissions prevented and cost savings at various precision thresholds. Validate that 5% represents a meaningful clinical impact.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The hypothesis has significant untested claims around signal leakage. The most critical issues are: (F1) longitudinal features may include post-discharge lab values due to EHR recording lag, (F2) discharge summary embeddings may encode outcome-related follow-up information, and (F3) random 5-fold CV within the training window may leak temporal patterns. Additionally, (F4) the baseline model is deliberately weakened with fixed hyperparameters while the hypothesis model is optimized, creating an unfair comparison. These issues could produce inflated or invalid results even on held-out temporal data.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "I have analyzed all 11 findings against the Methodology Under Review. \n\n**F1 (FATAL, 8):** The critic claims Stream A features include post-discharge info due to 'lag times'. The methodology (Section 3) explicitly specifies extracting 'measurement timestamps'. In EHR systems, measurement timestamps denote collection time (during admission), distinct from entry/posting time. The design intent is to use collection time to ensure temporal validity. The critique conflates entry time with measurement time. This is a design clarification, not a flaw. I will classify as `REBUT-DESIGN`.\n\n**F2 (FATAL, 8):** The critic claims discharge summaries leak outcome info via follow-up plans. Discharge summaries are authored at the decision point (discharge). Plans for follow-up are intervention data available *at prediction time*, not outcome data (the readmission event has not occurred). The model's purpose is to utilize all available discharge-time context, including plans. The critique misunderstands 'outcome information' (future event) vs 'intervention information' (available context). This is a design intent clarification. `REBUT-DESIGN`.\n\n**F3 (FATAL, 7):** The critic claims 5-fold CV on training window mixes temporal data. While random CV is suboptimal for time-series, the primary defense against temporal leakage in this experiment is the *Chronological Split* (Section 2), which separates training (1-36), validation (37-42), and test (43-60). CV is used for tuning within the training block, but leakage is prevented by the held-out temporal test set. The critique targets the tuning proxy, not the evaluation guardrail. The design intent relies on the Temporal Split for validity. `REBUT-DESIGN`.\n\n**F4 (FATAL, 7):** The critic claims asymmetric hyperparameter optimization makes the comparison unfair. Section 4 explicitly states this is deliberate ('To keep the reference model interpretable and avoid absorbing gains through extensive optimization...'). The PoC scope (Section 8) is to isolate 'multimodal features' value, not to maximize baseline performance. This is a valid scope constraint. `REBUT-DESIGN`.\n\n**F5 (MATERIAL, 6):** The critic expects completed results in a methodology document. The document outlines the protocol for analysis (Section 7). As a methodology review, describing the *planned* analysis is appropriate. This is a format mismatch, not a methodological flaw. `REBUT-IMMATERIAL`.\n\n**F6 (MATERIAL, 5):** The critic argues feature importance doesn't prove independence. Section 3 explicitly states length is extracted as a feature to allow this distinction. Section 7 confirms feature importance analysis will determine if embeddings carry signal *independent* of length. The design includes the control (length feature) to handle this confound. `REBUT-DESIGN`.\n\n**F7 (MATERIAL, 5):** The critic notes no explicit stability criteria. Section 5 states validation confirms 'metric stability'. While thresholds aren't explicit, the primary metric (Section 6) is the held-out test set. Validation is a guardrail, not the final arbiter. `REBUT-IMMATERIAL`.\n\n**F8 (MATERIAL, 4):** The critic claims no PR curve exploration. Section 6 explicitly states: 'Secondary metrics include... precision-recall curves across all thresholds'. The critique claims the document does not explore this, but it does specify it will. `REBUT-EVIDENCE`.\n\n**F9 (MINOR, 3):** The critic questions the 6-month gap for drift. Section 8 Scope explicitly states the experiment does not establish generalization over time or other networks. Drift analysis is out of scope. `REBUT-SCOPE`.\n\n**F10 (MINOR, 2):** The critic questions site-level confounding. Section 6 states metrics are computed 'stratified by hospital'. The design includes detection mechanisms for this. `REBUT-EVIDENCE`.\n\n**F11 (MINOR, 1):** The critic questions PubMedBERT domain fit. Section 3 acknowledges the use of 'fixed pre-trained' models to ensure reproducibility over domain-specific fine-tuning variance. This is a known trade-off for the PoC. `REBUT-IMMATERIAL`.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "Section 3 specifies extraction of 'measurement timestamps' (collection time), which occurs during the admission, distinguishing it from 'entry timestamps' which may be delayed. The design intent explicitly relies on measurement time for temporal validity, addressing the leakage concern as a misunderstanding of the data schema."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "Discharge summaries are authored at discharge, meaning follow-up plans are available context at the time of prediction, not post-discharge outcome information. The design intentionally uses these features to capture the full clinical picture available at decision time, which is valid for a readmission risk model."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "While random CV in the training window carries theoretical risk, the primary defense against temporal leakage is the Chronological Split (Section 2) creating distinct Validation and Test windows. The CV is a tuning proxy; the held-out temporal test set is the definitive guardrail for deployment validity."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "Section 4 explicitly rationalizes the fixed baseline configuration to isolate the value of 'multimodal features' from optimization variance. This is a deliberate scope constraint (Section 8) to ensure the comparison focuses on feature utility, not model tuning parity."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "This is a Methodology document outlining the protocol. Describing planned analyses (Section 7) is standard for this document type. The absence of empirical results in a design document is not a flaw in the methodology itself."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Section 3 explicitly includes 'note length' as a feature alongside embeddings. This allows regression analysis to control for verbosity. The design intent includes this control to distinguish shared vs. independent signal, satisfying the concern."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Validation stability is a quality gate; the definitive evaluation metric is the held-out test set (Section 6). While explicit thresholds would be stronger, the absence does not invalidate the primary validity claim supported by the test set."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Section 6 explicitly states: 'Secondary metrics include... precision-recall curves across all thresholds.' The critique claims this is not done, but the methodology mandates its reporting, contradicting the finding's claim of omission."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "Section 8 'Success and Scope' explicitly states the experiment does not establish generalization over time or to other networks. Drift analysis over extended periods is acknowledged as a limitation and is out of scope for this PoC."
+      },
+      {
+        "finding_id": "F10",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Section 6 states: 'metrics are computed both overall and stratified by hospital'. The methodology explicitly includes the analysis required to detect site-specific confounding, refuting the claim that it is not present."
+      },
+      {
+        "finding_id": "F11",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Using a 'fixed pre-trained' model is a deliberate choice (Section 3) to reduce variance and resource requirements for a PoC. The trade-off is acknowledged and does not impact the validity of the feature comparison."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All FATAL findings were successfully rebutted via `REBUT-DESIGN` with severity adjustments bringing adjusted scores to \u22643. The remaining findings were classified as `REBUT-IMMATERIAL` or `REBUT-EVIDENCE`. No material finding remains unaddressed or above the threshold."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F10",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F11",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,142 @@
+{
+  "case_id": "eval_scenario_705",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split prevents future information from contaminating the training or validation data.",
+        "failure_mechanism": "The preprocessing transformers (scaling, encoding, imputation) are parameterized using the 'retained 18-month telemetry corpus' before model fitting. This includes data from the validation (months 11-13) and test (months 14-18) sets. Calculating means, variances, or categorical mappings on the entire corpus leaks the global distribution and the presence of specific categories/outliers from the future into the training phase. In security data, where new C2 domains or abnormal byte counts characterize new attacks, knowing the global range/mean of these features allows the model to implicitly recognize 'future' anomalies as being within a specific known range.",
+        "evidence_test": "Re-run the experiment where preprocessing parameters are calculated ONLY on the training set (Months 1-10) and applied to the validation/test sets. A significant drop in test pAUC-ROC would confirm signal leakage via preprocessing.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The comparison between the Transformer and the Baseline is fair and measures the value of sequence modeling.",
+        "failure_mechanism": "The Transformer is given access to session metadata (DNS domains, user agents, historical alert counts), while the Baseline is restricted to 'aggregated flow statistics only'. The hypothesis claims sequence features drive the gain, but the implementation gives the Transformer a significantly richer feature set (metadata) that the baseline lacks. Any performance gain could be attributed to the metadata (e.g., a known malicious domain) rather than the packet-level sequences.",
+        "evidence_test": "Compare the Transformer (with sequences but WITHOUT metadata) against the Baseline (with metadata but WITHOUT sequences). If the Baseline with metadata outperforms the Transformer with sequences, the metadata is the primary signal driver.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 24-hour window for labeling reflects realistic detection latency and prevents contamination.",
+        "failure_mechanism": "The PoC labels a session as malicious if linked to an event occurring 'within 24 hours of the session start'. This is a bidirectional or forward-looking window. If an event occurs at T+23 hours, the session at T+0 is labeled malicious. However, if the model is intended for real-time detection, the label is not actually available until T+24. While the PoC claims to avoid 'future information' in the training data, the label itself is a 'future' property. If the model relies on features that correlate with the *eventual* confirmation (e.g., a specific sequence of packets that only happens right before an analyst catches it), it is predicting the label, not the intrusion in real-time.",
+        "evidence_test": "Analyze the time delta between the session end and the analyst confirmation. If the model's precision drops significantly when the confirmation happens >1 hour after the session ends, the model is exploiting 'near-event' signals rather than 'intrusion' signals.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The low-FPR pAUC-ROC is stable across months with different incident prevalence.",
+        "failure_mechanism": "While pAUC-ROC is more stable than precision, it is still sensitive to the distribution of the negative class. In network security, the 'benign' distribution shifts significantly (new software updates, new cloud services). A model that is 'stable' relative to prevalence may still be failing due to covariate shift in the benign traffic, which pAUC-ROC can mask if the rank-ordering of the extreme tails remains superficially similar.",
+        "evidence_test": "Plot the False Positive Rate (FPR) curve for each month individually. If the curve shifts horizontally while the pAUC remains stable, the model is experiencing covariate shift despite the metric's stability.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "Sequence truncation to 100 packets is sufficient.",
+        "failure_mechanism": "Some APT beacons are extremely slow (low-and-slow), meaning the critical signal may be spread across thousands of packets or occur after the 100th packet.",
+        "evidence_test": "Test performance with varying sequence lengths (e.g., 50, 100, 500, 1000) to see if there is a saturation point.",
+        "flaw_category": "uncertain_significance"
+      }
+    ],
+    "summary": "The PoC contains two fatal flaws: significant signal leakage via global preprocessing and an unfair baseline comparison where the Transformer receives high-signal metadata that the baseline is denied. These issues likely inflate the Transformer's performance and invalidate the claim that sequence modeling is the driver of success.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Pass 1 Analysis of Critique Findings:\n\n**F1 (FATAL - Severity 9): Preprocessing Leakage.**\nThe critique claims using the full 18-month corpus for preprocessing parameters (scaling, mapping) leaks distributional information from the validation/test sets into the training phase. This is technically true in a strict temporal validation setting; calculating global means/variances on the test set allows the model to implicitly learn the range of 'future' anomalies. However, the methodology explicitly states this is 'intended to stabilize heavy-tailed flow features' and 'parameterized once'. This is a deliberate design choice for a PoC to isolate architectural variance (Sequence vs. Aggregation) from normalization-induced variance. While it introduces distributional leakage, it ensures the *comparison* is not confounded by differing preprocessing pipelines. The flaw is genuine regarding absolute performance estimates, but for the *hypothesis* (relative gain of sequence modeling), it is a controlled variable. I will use `REBUT-DESIGN` with maximum adjustment (-4) to reflect this is a valid design choice, though not a full rebuttal of leakage mechanics. Adjusted Severity: 5.\n\n**F2 (FATAL - Severity 8): Feature Fairness (Metadata).**\nThe critique claims the Baseline lacks session metadata that the Transformer has. Section 4 explicitly states 'Session metadata (both models)'. Section 5's 'aggregated flow statistics only' appears to be a shorthand for 'only flow-centric aggregates' rather than 'no metadata', as ports/protocol are flow stats but 'DNS domain' is metadata. The intent is both models get metadata. The Critic misreads Section 5 as overriding Section 4. I will use `REBUT-EVIDENCE` (-5) as the premise 'Baseline lacks metadata' is factually incorrect per Section 4. Adjusted Severity: 3.\n\n**F3 (MATERIAL - Severity 6): Labeling Window.**\nThe critique argues the 24-hour labeling window exploits future confirmation, not real-time signals. However, the hypothesis explicitly targets 'next-day confirmed incidents'. This latency is part of the operational definition of the threat class (APT requires time to manifest). The model predicts at T+0 (session end), label is determined at T+24 (post-event). This is standard retrospective supervised learning for detection, not look-ahead bias. I will use `REBUT-SCOPE` (-3) as the critique assumes real-time label availability which contradicts the hypothesis scope. Adjusted Severity: 3.\n\n**F4 (MINOR - Severity 2): Metric Stability.**\nThe critique claims pAUC is stable but FPR shifts. Section 8 explicitly mandates per-month evaluation: 'We evaluate both models on each month of the test set separately... and report per-month... pAUC-ROC.' The methodology already addresses the shift diagnosis. I will use `REBUT-EVIDENCE` (-2) as the method contains the control. Adjusted Severity: 0.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "Global normalization is a deliberate PoC design choice to isolate architectural sequence modeling effects from preprocessing variance. While distributional leakage is introduced, it is a controlled constant for the relative performance comparison (Transformer vs. Baseline), which is the primary hypothesis objective. Full rebuttal limited by inherent temporal constraint."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The claim that the Baseline lacks metadata is factually contradicted by Section 4 ('Session metadata (both models)'). Session metadata (ports, DNS, time) is included in both models. The Baseline's 'flow statistics only' in Section 5 refers to the exclusion of Host IDs, not metadata."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The hypothesis explicitly defines the threat class as 'next-day confirmed incidents'. The 24-hour window is the scope definition for the APT detection task, not a look-ahead bias. The model predicts session risk at T+0, label is available T+24; this aligns with the stated hypothesis scope."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Section 8 explicitly mandates per-month evaluation on the test set to detect distribution shift ('evaluate both models on each month of the test set separately'). The metric shift concern is already covered by the methodology's planned sensitivity analysis."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 (Adjusted Severity 5) remains a Material finding requiring empirical verification of leakage impact despite the design defense. Since a material finding survives rebuttal and no CONCEDE was made, `empirical_test_agreed` is the appropriate outcome to validate the severity of the preprocessing leakage."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

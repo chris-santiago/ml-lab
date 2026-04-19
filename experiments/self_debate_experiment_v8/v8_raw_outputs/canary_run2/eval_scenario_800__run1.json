@@ -1,0 +1,132 @@
+{
+  "case_id": "eval_scenario_800",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Treating competing events (death, hospice, LTC placement) as censoring (label = 0) accurately reflects the clinical use case of identifying acute care readmissions.",
+        "failure_mechanism": "This is a fundamental misapplication of survival analysis. In survival modeling, censoring means the event *might* have happened, but we stopped observing. Labeling a patient who died as '0' (not readmitted) is not censoring; it is treating a competing risk as a negative outcome. This creates a 'competing risk bias' where the model learns to associate high-risk clinical markers (which lead to death) with a 'safe' outcome (no readmission), effectively penalizing the model for correctly identifying the sickest patients.",
+        "evidence_test": "Compare the model's predicted risk for patients who died vs. those who were truly not readmitted. If the model assigns lower risk to those who died despite high acuity, the label encoding is contaminating the signal.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The survival model's performance gain is attributable to longitudinal features and the survival framework.",
+        "failure_mechanism": "The baseline is a Logistic Regression on static features, while the survival model is described as 'flexible alternatives' like Random Survival Forests or Gradient-Boosted Survival Trees. The PoC compares a linear model (baseline) to non-linear ensemble models (hypothesis). Any gain in AUC is likely due to the model's ability to capture non-linear interactions between static features, not the addition of longitudinal data or the survival objective.",
+        "evidence_test": "Implement a non-linear baseline (e.g., Random Forest or XGBoost classifier) using only the static features. If the performance gap disappears, the 'longitudinal' claim is invalidated.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split prevents leakage and mirrors real-world deployment.",
+        "failure_mechanism": "While the split is chronological, the 'Longitudinal features' include lab trajectories from the prior 6 months. If a patient had an admission in month 30 (Train) and another in month 31 (Validation), their data from the first admission (which is in the training set) will be used as a feature for the prediction of the second admission (in the validation set). This is 'patient-level leakage' where the model learns specific patient IDs/patterns rather than generalizable clinical signals.",
+        "evidence_test": "Check for patient ID overlap between the train and validation/test sets. If overlap exists, re-evaluate performance on a 'patient-exclusive' test set where no patient in the test set appears anywhere in the training history.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Imputation fit on training data only prevents leakage.",
+        "failure_mechanism": "The PoC mentions 'missingness indicators' and 'imputation'. In EHR data, the *fact* that a test was ordered is often more predictive than the value. If the imputation method fills values based on global training means/medians without accounting for the temporal sparsity of the specific patient's record, it may introduce noise that masks the longitudinal signal the hypothesis seeks to prove.",
+        "evidence_test": "Compare AUC using simple forward-fill (clinical carry-forward) vs. global imputation to see if the imputation strategy is suppressing the longitudinal signal.",
+        "flaw_category": "synthetic_data_assump"
+      }
+    ],
+    "summary": "The PoC contains two fatal flaws: a fundamental misunderstanding of competing risks in survival analysis (treating death as a negative outcome) and an unfair baseline comparison (linear vs. non-linear models). Additionally, patient-level leakage is likely present despite the temporal split.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Analysis of each finding:\n\n**F1 (FATAL, sev 8):** The critic claims treating competing events (death, hospice, LTC) as censoring with label=0 creates 'competing risk bias.' However, the methodology explicitly states the clinical use case: identifying patients who will return to acute care. From a clinical operations standpoint, a patient who dies within 30 days did NOT experience a readmission \u2014 they are not a target for readmission prevention efforts. This is a deliberate design choice with clear rationale: predicting readmission in the population that survives. The critic's evidence test (comparing risk for died vs. not readmitted) misunderstands the task \u2014 the model is not predicting mortality. While competing risk bias is a real concern in formal survival analysis, this is explicitly not a mortality prediction task. The design choice is justified by the stated use case.\n\n**F2 (FATAL, sev 7):** The critic argues the baseline uses Logistic Regression (linear) while the hypothesis uses non-linear ensemble methods (Random Survival Forests), so any gain is due to model capacity rather than longitudinal features. The methodology explicitly addresses this in Section 6: 'an ablation study trains a survival model on static features only and compares it to the baseline; any performance gap due to methodology (not features) becomes explicit.' This ablation is exactly the control the critic is requesting. Additionally, the survival model description includes Cox PH (linear) as an option alongside flexible alternatives. The design anticipates and controls for this confound.\n\n**F3 (MATERIAL, sev 5):** The critic claims patient overlap between train/validation sets creates 'patient-level leakage.' However, for readmission prediction, a patient's prior history (including prior admissions) is precisely the information needed to predict future readmission. If a patient appears in training with an admission in month 30 and in validation with an admission in month 31, using their historical data from month 30 to predict month 31 readmission is the intended design \u2014 this is real clinical signal, not leakage. The concern would only apply if the task were predicting risk for entirely new patients. The design correctly uses longitudinal patient history.\n\n**F4 (MINOR, sev 2):** The critic questions whether global imputation might mask the longitudinal signal. This is a legitimate concern about imputation strategy, but the methodology already includes missingness indicators (which capture the 'fact of missingness' the critic mentions) and fits imputation on training data only. This is standard practice for EHR proof-of-concept. The concern is real but represents standard methodological simplification rather than a design flaw.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The methodology explicitly defines the clinical use case: identifying patients who will return to acute care. A patient who dies within 30 days did NOT experience a readmission \u2014 they are not a target for readmission prevention. This is a deliberate design choice with explicit rationale in Section 1. While competing risk bias is a formal concern in survival analysis, the design scope is explicitly NOT mortality prediction but readmission in survivors. The design choice is justified by the stated operational use case."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "Section 6 explicitly specifies an ablation study: 'trains a survival model on static features only and compares it to the baseline.' This is exactly the control the critic requests. Additionally, the methodology lists 'Cox proportional hazards regression' (linear) as the primary model, with flexible alternatives as options. The design anticipates and controls for the model capacity confound. The ablation isolates methodology effects from feature effects."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "For readmission prediction, a patient's longitudinal history (including prior admissions) is the core clinical signal. If a patient appears in both train and validation, using their historical data is intentional \u2014 this is how real clinical risk prediction works. The critic's concern would only apply if the task were predicting first-ever admissions for new patients. The design correctly leverages patient history; this is not leakage but the intended signal for readmission modeling."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The methodology already includes missingness indicators (capturing the predictive value of 'test ordered vs. not ordered') and fits all imputation on training data only. This is standard practice for EHR proof-of-concept. While alternative imputation strategies could be explored, this approach is adequate for the experiment's scope and does not materially affect the validity of comparing longitudinal vs. static approaches."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All four advancing findings have been rebutted with design justifications and severity adjustments. After adjustment, F1 is severity 4, F2 is severity 3, F3 is severity 2, and F4 is severity 1. No finding exceeds adjusted severity 3, meeting the EXONERATE threshold. Each finding represents a deliberate design choice with explicit rationale in the methodology, not a fundamental flaw. The ablation study (F2), explicit use case definition (F1), and longitudinal patient history (F3) are all intentional design elements that the critic misinterpreted as flaws."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

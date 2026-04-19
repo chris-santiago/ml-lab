@@ -1,0 +1,132 @@
+{
+  "case_id": "eval_scenario_hyp_140_0",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "nvidia/nemotron-3-super-120b-a12b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split at the alert level prevents leakage of future information.",
+        "failure_mechanism": "In cybersecurity, an 'incident' typically consists of a cluster of related alerts over time. If Alert A (Day 1) and Alert B (Day 3) are part of the same intrusion, and Alert A is in the training set while Alert B is in the test set, the model may learn the specific 'fingerprint' of that unique intrusion (e.g., a specific rare IP or unusual file path) during training. When it sees Alert B in the test set, it isn't predicting based on generalizable attack patterns, but recognizing a specific entity-cluster it has already seen, leading to inflated performance.",
+        "evidence_test": "Perform a 'Cluster-Based Split' where all alerts associated with the same incident ID or the same entity within a specific time-window are moved together into either train or test. If PR-AUC drops significantly compared to the alert-level split, the original results were inflated by incident-level leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Excluding alerts without a final disposition after 7 days minimizes label noise.",
+        "failure_mechanism": "This introduces a systemic selection bias (survivorship bias). In real SOC operations, the most complex, stealthy, or ambiguous attacks often take *longer* than 7 days to investigate and resolve. By dropping these, the PoC is training and evaluating only on 'easy' or 'obvious' cases that were quickly triaged. The model may appear highly performant on these cases but fail completely on the high-impact, long-dwell incidents the GNN is theoretically best suited to detect.",
+        "evidence_test": "Compare the distribution of alert types and 'severity' levels between the excluded (no disposition in 7 days) and included datasets. If the excluded set contains a disproportionate amount of high-severity alerts or specific complex alert types, the evaluation is biased toward simple cases.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 30-day lookback window captures the necessary context for the GNN to operate.",
+        "failure_mechanism": "The hypothesis assumes that the 'relational structure' providing the signal exists within a 30-day window. However, Advanced Persistent Threats (APTs) often operate on timelines of months or years. If the primary signal is a slow lateral movement pattern, a 30-day window truncates the graph, potentially removing the very edges that would differentiate a true intrusion from a benign anomaly, thus limiting the tGNN's theoretical advantage over the tabular baseline.",
+        "evidence_test": "Run a sensitivity analysis on the window size (e.g., 7, 30, 90, 180 days). If performance increases monotonically with window size, the 30-day window is an arbitrary constraint that may be masking the model's true potential or failing to capture the target signal.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The model is evaluated on a single enterprise SOC's data.",
+        "failure_mechanism": "SOC environments are highly idiosyncratic (specific toolsets, naming conventions, and 'normal' behavior). A model that learns the specific noise of one environment may overfit to that organization's unique baseline, making the results specific to that company's infrastructure rather than a generalizable property of Temporal GNNs for triage.",
+        "evidence_test": "Test the trained model on a dataset from a different enterprise or a public cybersecurity dataset (e.g., DARPA) to check for domain generalization.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The PoC suffers from two fatal flaws: incident-level signal leakage caused by alert-level splitting and severe selection bias by discarding long-tail investigations. These likely result in an overestimation of the model's real-world utility.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Finding F1 raises concern that alert-level temporal split may leak intrusion-specific patterns when alerts from the same incident appear in both train and test, potentially inflating performance. The methodology does not explicitly prevent incident-level leakage, but the split is designed to avoid future information leakage and the comparative evaluation (GNN vs. baselines) may still be valid if both models benefit equally from any such leakage. \n\nFinding F2 argues that excluding alerts without disposition after 7 days introduces survivorship bias, preferentially retaining quick\u2011to\u2011resolve, low\u2011complexity alerts. The design treats the 7\u2011day window as an operational realism constraint; analyst disposition within that period is used as ground truth, and alerts lacking disposition are considered noisy or low\u2011priority. Whether this biases the dataset toward 'easy' cases is debatable and hinges on the assumption that severe, stealthy attacks are resolved quickly. \n\nFinding F3 questions whether a 30\u2011day lookback window is sufficient to capture the relational signal of long\u2011duration APTs. The window is a deliberate trade\u2011off between computational feasibility and capturing recent precursor activity; the same window is used for baselines, so any advantage attributed to the GNN is isolated from window\u2011size effects. Longer windows could improve absolute performance but are not necessary to test the hypothesis that graph structure adds value over tabular features. \n\nFinding F4 points out that training and testing on a single enterprise SOC may limit generalizability due to environment\u2011specific noise. The study does not claim broad generalization; it aims to demonstrate that a temporal GNN can exploit relational structure in a realistic SOC setting. Overfitting to one environment is a known limitation but does not invalidate the internal comparison of model architectures. \n\nOverall, each critique identifies a plausible issue, but none undermines the core hypothesis that the tGNN leverages graph structure to improve triage performance relative to equivalent baselines under the stated experimental protocol.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic\u2019s concern about incident\u2011level leakage is valid for absolute performance, but the experiment\u2019s goal is to compare the tGNN against tabular and sequential baselines using the same alert\u2011level split. Any leakage would affect all models similarly, so the relative advantage of graph structure remains unbiased. The design does not need to prevent intrusion\u2011specific leakage to test the hypothesis."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "Excluding alerts lacking a disposition within 7\u202fdays reflects operational reality: SOC analysts are expected to triage alerts within a week, and longer\u2011dwelling alerts are often low\u2011priority or lack sufficient evidence for a confident label. This choice reduces label noise without systematically retaining only 'easy' alerts; severe incidents tend to be acted upon quickly, so the bias alleged by the critic is unlikely to skew the dataset toward trivial cases."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The 30\u2011day lookback window is a deliberate design trade\u2011off that captures recent entity interactions sufficient for triage while keeping computation tractable. The same window is used for all baselines, isolating the effect of graph structure from window\u2011size effects. Even if longer windows could improve absolute performance, they are not required to test whether relational structure provides an advantage over tabular features."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "Evaluation on a single SOC does limit external generalizability, but the study\u2019s scope is to establish that a temporal GNN can exploit relational structure in a realistic setting, not to claim universal performance. Overfitting to one environment is a known limitation that does not affect the internal comparison of model architectures, which is the hypothesis under test."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been rebutted with adjustments that reduce their adjusted severity to 3 or lower, satisfying the EXONERATE condition. Consequently, the methodology remains sound and the critique does not change the recommendation."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

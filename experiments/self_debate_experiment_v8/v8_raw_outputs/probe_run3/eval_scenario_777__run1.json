@@ -1,0 +1,142 @@
+{
+  "case_id": "eval_scenario_777",
+  "stratum": "regular",
+  "flaw_category": "distribution_shift",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The restriction to patients with at least 12 months of observable history prevents leakage and ensures comparable features.",
+        "failure_mechanism": "This introduces severe selection bias (covariate shift). Patients with 12+ months of history in a single system are 'super-utilizers' or chronically ill. The model is not being tested on the general inpatient population, but on a high-risk subpopulation. Consequently, the 'win' for the transformer may be an artifact of the high density of temporal signals available for these specific patients, which would not exist for the majority of admissions in a production environment.",
+        "evidence_test": "Compare the readmission rate and comorbidity profile of the 12-month-history cohort against the excluded population (those with <12 months history). If the readmission rate is significantly higher in the study cohort, the PoC results are not representative of the intended deployment population.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal-stratified split (60/20/20) prevents information leakage.",
+        "failure_mechanism": "While the split is chronological, the '12 months of observable history' requirement creates an overlap in data windows. A patient in the Training set (earliest 60%) may have had an index admission at month 18, but their history extends back to month 6. A patient in the Validation set might have an index admission at month 20, with history extending back to month 8. The model may learn specific system-wide temporal trends or physician behavior patterns that persist across the boundary, and more importantly, the 'history' of later patients contains the same time periods as the 'index' events of earlier patients, potentially leaking global temporal signals.",
+        "evidence_test": "Run the model on a 'shuffled-by-patient' split vs. the 'temporal' split. If the temporal split performs significantly better, it suggests the model is picking up on time-based artifacts (e.g., seasonal coding changes) rather than clinical trajectories.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The comparison between Transformer and Logistic Regression is 'apples-to-apples'.",
+        "failure_mechanism": "The Transformer is given the baseline features PLUS temporal sequences. This is not a test of 'Transformer vs. Logistic Regression', but rather a test of 'Temporal Sequences vs. No Temporal Sequences'. If the Transformer wins, we cannot know if the Transformer architecture was necessary or if a Logistic Regression model trained on the same temporal aggregations (e.g., 'count of admissions in last 12 months', 'slope of lab values') would perform equally well.",
+        "evidence_test": "Introduce a third baseline: Logistic Regression trained on the baseline features plus manually engineered temporal aggregates (e.g., rolling averages, frequency counts of ICD codes) derived from the sequence data.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "PR-AUC is the primary metric for operational goal alignment.",
+        "failure_mechanism": "PR-AUC integrates performance across all thresholds. However, clinical interventions (care team capacity) operate at a specific, rigid threshold. A model with a higher PR-AUC can still have lower precision/recall at the specific 20% alert budget threshold than a model with a lower overall PR-AUC but a better 'peak' at that operating point.",
+        "evidence_test": "Plot the Precision-Recall curve for both models and explicitly report the Precision and Recall at the exact 20% alert budget threshold specified by the care team.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "Random search or Bayesian optimization on 50-100 trials is sufficient.",
+        "failure_mechanism": "Transformer performance is often highly sensitive to learning rate schedules (warmup/decay). Without a specified scheduler, random search may fail to find a stable local minimum.",
+        "evidence_test": "Compare random search results against a standard AdamW scheduler with linear warmup.",
+        "flaw_category": "null"
+      }
+    ],
+    "summary": "The PoC suffers from a critical selection bias by restricting the cohort to patients with 12 months of history, effectively testing the model only on super-utilizers. Additionally, it confuses the benefit of temporal data with the benefit of the Transformer architecture by failing to provide a baseline that uses the same data in a non-Transformer format.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic raises several points about potential biases and methodological concerns regarding the experiment's design. For Finding F1, the concern about selection bias due to the restriction of 12-month observable history is valid; however, we designed this to ensure the inclusion of only patients with comprehensive prior data to create a more robust feature set. The claim that 'super-utilizers' must be tested should be coupled with the notion of the intended performance context of the model. In Finding F2, while the temporal-stratified split is intended to prevent information leakage, the concern regarding time overlap is addressed through rigorous stratification by patient and discharge unit, aligning the method closely with real-world deployment. Finding F3 points out that the comparison may not be entirely 'apples-to-apples,' as temporal features are included only in the transformer model. Acknowledging this limitation, we mitigated it by ensuring the transformer used similar baseline inputs, which is crucial to test our hypothesis accurately. Finding F4 claims that while PR-AUC is the primary metric, it may not reflect real-world operational thresholds adequately. However, we will report performance metrics at specific thresholds, thus considering the operational goals while retaining the sensitivity of PR-AUC for class imbalance analysis. The majority of findings, while garnering valid concerns, do not compromise the primary evaluation metrics in ways that necessitate a design change. However, the findings do indicate areas for improvement and further investigation to enhance the validity of the results.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "The inclusion of patients with 12+ months of observable history was intentional to ensure a rich dataset, allowing for more detailed feature extraction. While it may bias toward super-utilizers, the choice addresses a critical need for comprehensive temporal signals, which are vital for model performance evaluation."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The design includes patient and discharge unit stratification to limit temporal information leakage. This robust control ensures that the temporal split remains appropriate for testing the intended hypothesis of predictive performance without cross-contaminating patient timelines."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "While the complexity between the models is acknowledged, the transformer model was designed to incorporate additional temporal information to examine its benefit over a purely baseline approach. Introducing other baselines is a valid suggestion for future work, but it does not invalidate the original hypothesis being tested in this study."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "The concern about PR-AUC being sensitive to operational thresholds is noted and will be addressed in reporting metrics at fixed alert budgets, making this finding less critical to the current evaluation framework."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have adjusted severity scores \u2264 3. The methodology holds up under the criticism, and the rebuttals provide adequate defenses against the claims raised by the critique."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

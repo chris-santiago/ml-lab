@@ -1,0 +1,282 @@
+{
+  "case_id": "eval_scenario_862",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "xiaomi/mimo-v2-flash",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "deepseek/deepseek-v3.2"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline model has access to equivalent feature information as the transformer, and performance differences isolate the value of learned text representations",
+        "failure_mechanism": "The transformer receives raw text with full token-level access to every word and character, while the baseline receives only hand-engineered keyword flags and metadata. This creates an information asymmetry where the transformer can learn arbitrary patterns in text (typosquatting, homoglyphs, zero-day phishing language, obfuscation techniques) that the baseline cannot possibly capture through limited keyword flags. The baseline is intentionally designed to be weaker on text processing, so performance differences may simply reflect this information gap rather than superiority of learned representations. The experiment cannot distinguish whether the advantage comes from: 1) richer text information available to transformer, 2) superior architecture for text modeling, or 3) transformer's ability to learn patterns the baseline is architecturally prohibited from learning.",
+        "evidence_test": "Create a third model: a gradient-boosted model that receives the same raw text tokens as the transformer, encoded via a separate text featurization (e.g., character n-grams, TF-IDF on subword tokens, or even a frozen transformer encoder that feeds into the GBDT). If this hybrid baseline matches transformer performance, the advantage is from information, not architecture. If it still underperforms, the architecture matters.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split ensures models generalize to 'novel, unseen attack patterns' rather than memorizing campaigns",
+        "failure_mechanism": "The temporal split prevents the model from seeing the exact same emails in train/test, but phishing campaigns evolve incrementally, not discontinuously. Attackers reuse infrastructure (IP addresses, domains, hosting providers), sender identity patterns (display name conventions), subject line templates ('Urgent: Your invoice', 'Password reset required'), and technical tactics (URL shorteners, attachment types). A model trained on Q1-Q12 can recognize Q16 campaigns through transfer learning of these persistent patterns. The temporal split does not test true generalization to fundamentally novel attack vectors (e.g., if future attacks use brand-new infrastructure or techniques not seen in training at all). The experiment conflates temporal extrapolation (what it tests) with genuine novelty detection (what it claims to test).",
+        "evidence_test": "Measure campaign overlap: for each malicious email in Q16, calculate the fraction of its features (sender domain, IP range, attachment type, subject keywords) that appear in Q1-Q12 training data. If >80% of Q16 'novel' attacks share infrastructure/patterns with training data, the split is testing extrapolation, not novelty.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "PR-AUC is the appropriate metric for low-FPR security operations and directly reflects the operational requirement",
+        "failure_mechanism": "PR-AUC integrates over all recall/precision values, but security teams operate at specific, fixed operating points (e.g., must catch 95% of threats while blocking <2% of legitimate mail). A model can achieve higher PR-AUC by improving precision at high recall values that are operationally irrelevant, while failing at the critical low-FPR regime. More critically, PR-AUC is sensitive to the class ratio in the evaluation set, and the test set's malicious rate (0.1-5%) may not reflect the actual production class ratio after filtering, creating misleading comparisons. The metric does not directly measure the business-critical quantity: expected loss prevented vs. operational cost of false positives.",
+        "evidence_test": "Report precision, recall, and F1 at the actual deployment thresholds (e.g., FPR=0.01, 0.02, 0.05). Compare which model wins at each threshold. If the 'superior' transformer has lower precision at FPR=0.01 but higher PR-AUC, it is not superior for the stated operational requirement.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Labels are clean and low-noise because uncertain/disputed cases were excluded",
+        "failure_mechanism": "The 1-7 day review lag introduces a temporal gap where an email's final label may depend on information not available at delivery time (e.g., subsequent user reports, threat intelligence updates, downstream campaign detection). Emails delivered as benign at delivery time may be retroactively labeled malicious if they later trigger detection rules. Conversely, emails initially flagged as suspicious may be cleared after investigation. This creates label leakage: the label depends on post-delivery evidence, but the model is making predictions at delivery time. The exclusion of uncertain cases also biases the dataset toward 'clear-cut' examples, potentially overestimating performance on ambiguous emails that are common in production.",
+        "evidence_test": "Sample 100 emails from the validation set and have security analysts re-label them using only the information available at delivery time (headers, content, real-time threat intel). Measure the label disagreement rate with the original labels. If >5% disagreement, label leakage is present.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer's advantage, if present, is due to learned text representations rather than metadata memorization",
+        "failure_mechanism": "The transformer processes concatenated text where sender/domain tokens appear at fixed positions. During fine-tuning, the model can learn sharp weights on these metadata tokens, effectively becoming a blackbox memorization engine for sender reputation. The SHAP/attention analysis is post-hoc and may not reveal this if the model distributes 'credit' across many tokens. The ablation study (removing metadata from both) tests whether metadata is *necessary* but not whether it's *sufficient* for the transformer's advantage. If the transformer's edge vanishes when metadata is removed, it proves metadata drove the gain. But if the edge persists, it doesn't prove text learning\u2014only that text-only is still better than baseline. The baseline is at a structural disadvantage because its feature engineering may not capture interactions that the transformer learns automatically (e.g., sender domain + specific subject keyword combinations).",
+        "evidence_test": "Train a 'metadata-only' transformer that receives only sender, domain, recipient, and attachment metadata (no body/subject text). If this metadata-only transformer matches the full transformer's performance, the text component adds no value. If it underperforms, but the full transformer's advantage disappears in the ablation, the advantage is from text-metadata interactions, not raw text alone.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The BPE tokenizer fit exclusively on training data prevents leakage and is appropriate for all three quarters",
+        "failure_mechanism": "BPE tokenizers trained on Q1-Q12 may be suboptimal for Q16 if new attacker tactics introduce novel tokens (new domain TLDs, brand names, obfuscation patterns, zero-day exploit names, new file types). The tokenizer will either out-of-vocabulary (OOV) these tokens or represent them as subword fragments, losing semantic information. This could artificially suppress transformer performance on Q16, making the baseline look relatively better, or conversely, the transformer may learn to handle OOV tokens in ways the baseline cannot (since baseline is limited to engineered features). The tokenizer policy is not verified to be adequate for the temporal shift.",
+        "evidence_test": "Measure OOV rate on Q16 test set: what fraction of tokens in Q16 emails are OOV under the Q1-Q12 tokenizer? If OOV rate >5%, the tokenizer may be a confounder. Also measure performance after retraining tokenizer on Q1-Q16 (leaky but diagnostic) to see if OOV handling is a bottleneck.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 12-month training set provides sufficient signal for the transformer to learn generalizable patterns",
+        "failure_mechanism": "With 0.1-5% malicious rate and 16 quarters of data, the training set may contain very few examples of certain rare but critical attack types (e.g., APT campaigns, zero-day exploits). The transformer, with millions of parameters, may overfit to the majority attack patterns in training data while never learning to detect rare threats. The temporal split compounds this: if Q16 contains an attack type that appeared only 1-2 times in training (or not at all), the model will fail silently. The experiment does not verify class coverage or test performance stratified by attack type.",
+        "evidence_test": "Stratify test set by attack type (commodity phishing, BEC, malware, APT). Report PR-AUC per type. If transformer underperforms on rare types despite high overall PR-AUC, it's not generalizing across the threat spectrum.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Early stopping on validation PR-AUC prevents overfitting and selects the best generalizing model",
+        "failure_mechanism": "With severe class imbalance (0.1-5% malicious), PR-AUC on a small validation set (3 months) may have high variance. Early stopping based on noisy PR-AUC can select a suboptimal checkpoint\u2014either too early (undertrained) or too late (overfit to specific validation-set attacks). The patience of 2 epochs may be insufficient if the validation PR-AUC fluctuates due to class imbalance. The transformer could memorize validation-set sender/domain patterns in the first few epochs and then stop, appearing to generalize well.",
+        "evidence_test": "Compare PR-AUC on validation vs. test for each epoch of training. If validation PR-AUC plateaus early but test PR-AUC continues improving (or degrades sharply), early stopping is selecting a suboptimal model. Also measure validation PR-AUC variance across folds or bootstraps.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer's text preprocessing (HTML removal, whitespace normalization) preserves all relevant signal",
+        "failure_mechanism": "HTML tags can contain obfuscation signals (hidden divs, comment-based payloads, malicious JavaScript in script tags) that are removed by preprocessing. Attackers also use HTML structure (nested tables, CSS-based hidden text) to evade detection. Stripping HTML may remove these signals, but the baseline cannot use them either, so this doesn't create asymmetry. However, the transformer might be penalized relative to what it could achieve with full HTML. More importantly, whitespace normalization can collapse deliberate obfuscation (e.g., 'p h i s h i n g' with spaces) that is a signal in itself. The preprocessing choices are arbitrary and not justified by ablation.",
+        "evidence_test": "Ablation: compare transformer performance with raw HTML vs. cleaned text vs. HTML-stripped only. If performance drops significantly with cleaning, the preprocessing is removing useful signal.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The baseline receives equivalent tuning effort (grid search over hyperparameters)",
+        "failure_mechanism": "Transformer hyperparameter tuning (learning rate, dropout, batch size) is far more complex than GBDT tuning. The transformer has ~100M parameters vs. GBDT's dozens of trees. The grid search space for transformers is non-convex and high-dimensional; grid search is known to be inefficient for neural networks. The baseline's grid (tree depth, learning rate, L2) is more complete. This asymmetry in tuning complexity could disadvantage the transformer, but the claim is that effort is 'equivalent'\u2014subjective. However, this is minor because the transformer likely receives more effective tuning through early stopping and adaptive learning rates.",
+        "evidence_test": "Compare number of hyperparameter configurations evaluated for each model. If transformer tuning evaluates fewer distinct configurations than GBDT, tuning effort is not equivalent. Also measure sensitivity: how much does transformer PR-AUC vary with learning rate vs. GBDT with tree depth?",
+        "flaw_category": "defensible_unconventional"
+      }
+    ],
+    "summary": "The experiment design contains several fatal flaws that prevent it from isolating the value of learned transformer representations. The primary issue is a missing baseline that creates an information asymmetry: the transformer gets raw text while the baseline is limited to engineered features, making performance differences uninterpretable. Additionally, the temporal split tests extrapolation rather than novelty detection, label leakage is likely due to post-delivery labeling, and the primary metric may not reflect operational requirements. While some assumptions about distribution shift and preprocessing are unverified, they are secondary to the fundamental methodology issues.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic findings highlight several potential issues with the experiment design, including information asymmetry, concerns about the temporal split, and the choice of evaluation metrics. However, many of these concerns can be addressed through additional analysis or are mitigated by the experiment's design.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The critique misunderstands the experiment's goal to isolate the value of learned text representations. The suggested hybrid model test is a valid additional analysis but does not invalidate the current comparison."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The temporal split is a deliberate design choice to test temporal extrapolation, which is operationally relevant. While it may not test 'novelty' in the strictest sense, it still evaluates a critical aspect of model performance."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 1,
+        "justification": "While PR-AUC has limitations, it is a standard metric for imbalanced classification. Reporting additional metrics at specific thresholds addresses operational concerns."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "Label leakage is a valid concern, but the experiment compares models under the same labeling conditions. The suggested re-labeling exercise is useful but not critical for the comparison."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The ablation study and feature importance analysis already address this concern to some extent. Further analysis with a metadata-only transformer could provide additional insights."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "Measuring OOV rate and retraining the tokenizer on more data could validate the tokenizer's adequacy. This is an empirical question that requires additional analysis."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "Stratifying test performance by attack type is a useful additional analysis to understand model generalizability across different threats."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "Comparing validation and test PR-AUC across epochs could validate the effectiveness of early stopping. This requires additional empirical analysis."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "While preprocessing choices might affect performance, an ablation study could test the impact. The current preprocessing is a reasonable choice given the context."
+      },
+      {
+        "finding_id": "F10",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The tuning effort comparison is minor and subjective. The transformer and baseline tuning processes are reasonably comparable given the complexity of transformer tuning."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "After rebuttal, all findings have adjusted severity \u2264 3, and several were deferred for empirical testing. The methodology holds up under scrutiny, and the experiment effectively compares the transformer and baseline models."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=5, REBUT-SCOPE \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 4,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 4,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F10",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "3 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

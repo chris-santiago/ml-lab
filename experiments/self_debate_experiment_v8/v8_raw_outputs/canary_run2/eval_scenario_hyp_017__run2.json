@@ -1,0 +1,227 @@
+{
+  "case_id": "eval_scenario_hyp_017",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The transformer model and gradient-boosted baseline are compared fairly because they use the same raw data source",
+        "failure_mechanism": "The comparison is structurally unfair. The transformer accesses raw transaction sequences (last 10-30 transactions per account, with timestamps, amounts, merchant categories, device IDs, IP geolocation, session details). The baseline only receives hand-engineered aggregate statistics (rolling window counts, sums, diversities). The transformer has direct access to information that the baseline can only summarize. Any performance difference cannot distinguish between: (a) sequence modeling providing value, (b) the transformer simply having access to richer/finer-grained features, or (c) the transformer being able to learn the aggregates implicitly plus additional patterns. This is a confound that invalidates the central hypothesis that 'transformer architecture outperforms gradient-boosted aggregates' \u2014 the comparison does not isolate architectural difference from feature information difference.",
+        "evidence_test": "To isolate architectural benefit: (1) Run gradient-boosted trees on the same raw sequence features the transformer uses, or (2) Train transformer on aggregate features only. If gradient-boosted on sequences matches transformer, the benefit is data, not architecture. If transformer on aggregates matches baseline, the transformer architecture adds nothing beyond feature access.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The label (fraud yes/no) derived from sustained chargebacks within 120 days accurately reflects ground truth fraud",
+        "failure_mechanism": "Chargeback-based labeling introduces systematic bias: (1) Not all fraudulent transactions result in chargebacks \u2014 victims may not notice, may not bother to dispute, or may be reimbursed through other means; (2) Chargebacks have varying latency distributions \u2014 120 days may miss late-filing victims or include disputes for genuinely legitimate transactions where the cardholder's claim is eventually rejected; (3) Merchant win rates vary by transaction type, creating differential label quality across merchant categories; (4) Transactions excluded from the 120-day window at study end are removed, but this creates temporal bias \u2014 recent transactions (which may have different fraud patterns) are systematically excluded from evaluation. The model is trained to predict chargeback likelihood, not fraud \u2014 these are related but distinct targets.",
+        "evidence_test": "Compute the chargeback-to-fraud conversion rate in historical data with known fraud outcomes. Check if chargeback rates vary significantly by merchant category, transaction amount, or time period. Compare model performance when trained on alternative labels (confirmed fraud from investigation, or rule-based fraud labels) to assess sensitivity.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The validation set (months 13-16, ~10M transactions) provides sufficient data for reliable hyperparameter tuning across 50 trials",
+        "failure_mechanism": "With typical fraud rates of 0.1-0.5% in CNP transactions, 10M transactions yields only ~10K-50K fraud cases total. Splitting this for hyperparameter search monitoring (not mentioning held-out tuning sets within validation) means the hyperparameter selection is based on a relatively small number of fraud cases. At 0.2% fraud rate and 10M validation transactions, there are ~20K fraud cases total. With 50 trials, this averages ~400 fraud cases per trial for early stopping decisions. This creates high variance in hyperparameter selection and risks overfitting to the specific fraud pattern distribution in months 13-16, which may not generalize to months 17-24.",
+        "evidence_test": "Calculate effective fraud sample size per trial given expected fraud rate. Compare validation fraud distribution to test fraud distribution. Run multiple random validation splits or use cross-validation within the validation period to assess hyperparameter stability.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Performance on months 17-24 test set generalizes to operational deployment conditions",
+        "failure_mechanism": "The 8-month test window (months 17-24) is unusually long for fraud detection evaluation. Fraud patterns exhibit significant temporal dynamics: new fraud vectors emerge, merchant risk profiles change, seasonal patterns (holiday shopping, tax season) create distribution shifts, and fraudsters adapt to existing detection rules. An 8-month gap between training (months 1-12) and end of testing (month 24) spans a full year, during which the training distribution may become stale. The document mentions checking 'out-of-time degradation (comparing months 17-20 vs. 21-24)' as a secondary metric, but the primary comparison is across the full 8-month window, masking potential degradation within the test period.",
+        "evidence_test": "Report performance separately for months 17-20 vs. 21-24. Compute Wasserstein or KL divergence on feature distributions between training period and each test sub-period. If significant degradation exists in 21-24, the claimed performance may overstate operational value.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer uses only features available at authorization time, preventing post-transaction leakage",
+        "failure_mechanism": "While the document states features are 'available at authorization time,' several features may encode post-transaction information: (1) IP-inferred geolocation could be refined after the transaction based on subsequent analysis; (2) Hashed device identifiers, if derived from device fingerprinting that incorporates post-transaction behavioral signals (keystroke dynamics, screen resolution changes during session), could leak information; (3) Account tenure at transaction time is forward-looking if the account was created during the transaction sequence. The document does not specify the exact computation of each feature's timestamp, creating ambiguity about whether any feature includes information from after the transaction moment.",
+        "evidence_test": "For each feature, document the exact data source and computation timestamp. Verify that hashed device IDs are derived only from signals present at session initiation, not from post-transaction analysis. Ensure account tenure is computed as of transaction time, not including the transaction itself.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Precision-Recall AUC at fixed FPR of 2-5% adequately captures operational value",
+        "failure_mechanism": "The metric selects the fixed FPR range (2-5%) based on 'manual review and decline capacity,' but does not specify the exact operating point. PR-AUC across a range of FPR values can mask poor performance at specific operational thresholds. If the bank operates at exactly 2% FPR but the model performs well at 5% FPR, the reported metric may overstate operational value. Additionally, PR-AUC is less interpretable than precision/recall at a specific threshold, and the 'AUC' formulation conflates performance across all thresholds when only one matters operationally.",
+        "evidence_test": "Report precision and recall at the exact operational FPR threshold (e.g., exactly 2% or exactly 3%), not just a range. If the bank can flexibly adjust the threshold, report the precision-recall curve to show trade-offs.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Both models use equal hyperparameter tuning effort (50 trials) ensuring fair comparison",
+        "failure_mechanism": "The hyperparameter search spaces may differ in effective dimensionality. A transformer's performance is more sensitive to certain hyperparameters (learning rate, attention head count, sequence length) than gradient-boosted trees. If the search space for the transformer is not tuned to be equivalently comprehensive for its architecture, the baseline may be artificially constrained. Additionally, 50 trials for a transformer with multiple architectural choices (layers, heads, dropout) may be insufficient to find a good configuration, while 50 trials for gradient-boosted trees (with fewer critical hyperparameters) may be more than enough.",
+        "evidence_test": "Compare convergence curves of hyperparameter search for both models. Check if final performance is still improving at trial 50. Use informed prior hyperparameter ranges based on domain defaults rather than equal trial counts.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": true,
+        "claim": "Excluding transactions declined by pre-existing fraud rules prevents spurious correlations",
+        "failure_mechanism": "The document mentions excluding or flagging transactions declined by pre-existing fraud rules, but does not specify how this is implemented. If declined transactions are simply removed, the model never sees the 'hard negative' cases where fraud was already detected, potentially learning a different decision boundary than needed for production where it must handle all transactions. Additionally, if declined transactions are included but flagged, the model could learn to use the flag as a proxy for fraud (another form of leakage if the flag correlates with the ground truth).",
+        "evidence_test": "Clarify exact treatment of declined transactions. If removed, verify training/test distributions still match production. If flagged, check model does not use flag as a primary predictor.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The hypothesis scope correctly limits conclusions to the 24-month period studied",
+        "failure_mechanism": "The document correctly limits scope to the 24-month period. However, this is a limitation, not a flaw \u2014 the experiment design acknowledges this. No methodology issue here.",
+        "evidence_test": "N/A \u2014 appropriately scoped.",
+        "flaw_category": "null"
+      }
+    ],
+    "summary": "Two FATAL flaws undermine this PoC: (1) the comparison between transformer and gradient-boosted baseline is structurally unfair because the transformer has access to raw sequential data while the baseline only receives aggregate features \u2014 this confound means any performance difference cannot be attributed to architecture; (2) chargeback-based labels are a biased proxy for ground truth fraud, as not all fraud results in chargebacks and chargeback timing varies. These issues invalidate the central hypothesis. Additional MATERIAL concerns include insufficient validation set size for hyperparameter tuning, extended test period vulnerable to distribution shift, and ambiguous feature timing that could introduce leakage.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "### F1 (FATAL 8) - Structural Unfairness / Missing Baselines\nCritique claims comparing Transformer on raw data vs GBT on aggregates is unfair and invalidates the hypothesis. However, Section 9 explicitly states: 'This design establishes whether the transformer architecture outperforms gradient-boosted aggregates on this specific task and data period. It does not establish whether the gain is due to sequence modeling... ablation studies... would be needed to isolate the mechanism.' The critique assumes the hypothesis requires mechanism isolation (an ablation study), but Section 1 and 9 define the hypothesis as operational performance comparison (end-to-end). The critique's premise is factually unsupported by the design document's explicit scope.\n\n### F2 (FATAL 7) - Label Bias (Chargebacks)\nCritique claims chargeback labels are invalid 'ground truth'. In Card-Not-Present (CNP) fraud, chargebacks are the standard, operationally validated proxy for fraud because manual investigation labels are scarce and delayed. Section 2 explicitly states the 120-day window 'aligns with card network chargeback periods and reflects true operational ground truth.' This is a deliberate design choice for operational alignment, not a flaw. The model is designed to predict the operational signal (chargebacks), which is the correct target for the stated objective.\n\n### F3 (MATERIAL 5) - Validation Set Size\nCritique claims 10M transactions (~20K fraud cases) is insufficient for 50 trials. In production fraud detection PoCs, this volume is standard. 20K fraud cases allows for robust validation (stratified folds, early stopping). 400 fraud cases per trial is typical for tuning. The critique's concern about overfitting is mitigated by the held-out Test Set (months 17-24) and temporal validation. This is a standard PoC scale, not a methodological failure.\n\n### F4 (MATERIAL 5) - Test Set Duration / Degradation\nCritique claims 8-month test window masks degradation. Section 6 lists 'out-of-time degradation (comparing months 17\u201320 vs. 21\u201324)' as a secondary metric. The primary metric evaluates the full deployment window (8 months) to measure average operational gain. The degradation analysis is present but secondary. The design intent (operational value) prioritizes the aggregate test performance over the degradation profile, which is consistent with standard deployment readiness checks.\n\n### F5 (MATERIAL 4) - Feature Leakage\nCritique claims features might leak post-transaction info. Section 4 lists features and Section 8 mandates a 'Feature timing audit' that lists 'the computation time and source of every feature'. The design includes a specific control to prevent leakage (audit). The critique notes the document doesn't specify every timestamp in this text, but the existence of the audit control in Section 8 fulfills the requirement for a valid design. The claim of ambiguity is addressed by the documented control.\n\n### F6 (MINOR 3) - Metric Range (FPR 2-5%)\nCritique claims reporting a range masks performance at specific points. Section 6 defines the operational budget as a range (2-5% manual review capacity). Reporting PR-AUC over this band is operationally accurate for a flexible review budget. The critique asks for a single point, but the business constraint is a range. This is a minor detail on metric interpretation, not validity.\n\n### F7 (MINOR 2) - Equal Tuning Effort\nCritique claims 50 trials is insufficient for Transformer compared to GBT. 50 trials is a standard computational budget for fair comparison of effort in a PoC. The search spaces are tuned to be 'equal effort' as per Section 5. The critique speculates on dimensionality but ignores that 50 trials is a standard constraint for resource-limited PoCs. This is a minor calibration issue, not a flaw.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critique asserts the hypothesis requires mechanism isolation, but Section 9 explicitly states this design does not establish mechanism and requires ablation studies for that purpose. The finding is based on an unsupported premise about the hypothesis definition."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "Chargeback-based labeling is a deliberate design choice aligned with Section 2's definition of 'true operational ground truth' for CNP fraud. This is standard industry practice for this task, not a label validity flaw."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "10M transactions (~20K frauds) is a standard scale for fraud detection PoCs. The held-out test set ensures generalization, and 400 frauds per trial is sufficient for tuning stability."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The design explicitly includes out-of-time degradation as a secondary metric (Section 6). The primary metric evaluates the aggregate 8-month deployment window, which is consistent with operational goals."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "Section 8 mandates a 'Feature timing audit' to verify computation timestamps. The design includes the specific control requested by the critique to prevent leakage."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The business constraint is a review budget range (2-5%), not a fixed point. Reporting performance over this operational band is valid and appropriate for the stated objective."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "50 trials is a standard resource budget for PoC hyperparameter search. 'Equal effort' is the design requirement, which is met. Dimensionality differences do not invalidate the comparison."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been successfully rebutted and reduced to an adjusted severity \u2264 3 (EXONERATE conditions met). F1 is out of scope for the stated phase, F2 is a standard industry design choice, and the remaining concerns are mitigated by controls or are immaterial to the PoC's operational goal."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

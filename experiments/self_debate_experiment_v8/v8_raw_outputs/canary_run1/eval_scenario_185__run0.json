@@ -1,0 +1,132 @@
+{
+  "case_id": "eval_scenario_185",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Ticket history features capture historical risk without leaking the target label.",
+        "failure_mechanism": "The label is defined as an alert being linked to a ticket within 24 hours. The features include 'count and summary statistics of incident-response tickets linked to the same host/user/IP in the prior 14 days'. In a SOC environment, a single security incident often generates a burst of multiple related alerts. If Alert A (the first alert) triggers a ticket, and Alert B (a subsequent alert for the same host) occurs 2 hours later, Alert B's 'ticket history' feature will reflect the ticket created by Alert A. Since Alert B is also likely part of that same incident and will be linked to that ticket, the feature becomes a direct proxy for the label (target leakage), rather than a measure of historical risk.",
+        "evidence_test": "Compare the model's nDCG@10 when trained with and without the 'Ticket history' features, specifically for alerts that occur within 24 hours of another alert for the same entity. If performance drops precipitously for intra-incident alerts when history is removed, the model is likely indexing on active incidents rather than predicting risk.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "nDCG@10 is an appropriate measure of triage efficiency for SOC analysts.",
+        "failure_mechanism": "nDCG measures the relative ordering of relevant items. However, triage is a binary gating process: an analyst decides whether to 'investigate' or 'ignore'. A ranker could achieve high nDCG by correctly placing a 'critically' relevant alert at position 1 and a 'moderately' relevant alert at position 5, while still ranking 50 'low-relevance' alerts above a 'high-relevance' alert that falls at position 51. In a high-volume SOC, the 'false negative' cost (missing a high-relevance alert) is far higher than the 'false positive' cost (reviewing a low-relevance alert). nDCG does not penalize the failure to surface all critical alerts within the shift capacity if the few that *are* surfaced are ordered correctly.",
+        "evidence_test": "Calculate the 'Recall@K' (where K is the total shift capacity) and the 'Miss Rate' for high-relevance alerts. If nDCG@10 improves but Recall@K remains stagnant or drops, the model is optimizing for ordering the 'easy' wins while potentially burying critical anomalies.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (text-only) isolates the contribution of entity graph and ticket history features.",
+        "failure_mechanism": "The baseline is a text-only ranker, but the proposed model uses a multimodal input. If the proposed model uses a different architecture to handle the combined inputs (e.g., a neural ranker vs. LambdaMART) or different training dynamics due to feature dimensionality, the gain might be attributed to the *architecture's capacity* to handle high-dimensional data rather than the *signal* within the graph/ticket features themselves.",
+        "evidence_test": "Include a baseline that uses a 'random noise' feature set of the same dimensionality as the graph/ticket features. If the performance gain persists over the noise baseline, the signal is genuine.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Excluding alerts with no disposition within 30 days avoids label bias.",
+        "failure_mechanism": "This assumes that 'no disposition' is missing at random (MAR). In reality, alerts that are ignored by analysts are often the most 'boring' (true negatives) or the most 'overwhelming' (complex failures). By removing them, the training set is biased toward alerts that were 'interesting enough' to be closed, potentially inflating the precision of the model compared to the real-world distribution of all generated alerts.",
+        "evidence_test": "Perform a distribution analysis of 'undisposed' alerts vs 'disposed' alerts on basic metadata (e.g., rule ID frequency). If certain rule IDs are disproportionately missing dispositions, the model will have a blind spot for those alert types.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC has a critical flaw regarding signal leakage in the 'Ticket history' features, which likely act as a proxy for the label during active incidents. Additionally, the reliance on nDCG may mask a failure to improve the actual recall of critical alerts.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1: The critic identifies a plausible target leakage mechanism in ticket history features. The concern is that within-incident alert bursts could cause the 'prior 14-day ticket count' to reflect tickets created by the current incident (if alerts occur within 24 hours of each other for the same entity). This is technically valid - a single incident often generates multiple alerts, and the ticket from Alert A would appear in Alert B's historical features. The design intent was 'historical risk' (past reputation), but the implementation might capture 'active incident signal'. The methodology mentions a generic 'metadata leakage check' but does not specifically address intra-incident correlation. The critic's evidence test is reasonable and would require empirical verification. This concern cannot be resolved by argument alone - it requires running the ablation to see if performance drops specifically for intra-incident alerts. F2: The critic argues nDCG@10 is inappropriate because triage is binary gating (investigate/ignore), not relative ordering. However, the methodology explicitly chose nDCG@10 because 'analysts review alerts in priority order with limited capacity (~10 alerts per shift)'. This is a deliberate design choice aligned with the operational context. Furthermore, the methodology includes secondary metrics (Precision@1/5/10, Recall@K implied by stratified evaluation) to address complementary aspects. The critic is advocating for a different metric philosophy, not identifying a flaw in the chosen approach. The design choice is justified. F3: The critic correctly notes that if the multimodal model uses a different architecture (e.g., neural ranker) than the text-only baseline (e.g., LambdaMART), gains could come from architecture capacity rather than feature signal. However, the experiment's stated scope is comparing multimodal vs text-only ranking - the baseline is text-only as the name implies. Adding a noise-baseline control, while methodologically sound, is a scope expansion beyond the current hypothesis. The current baseline (text-only, same loss function, equivalent tuning) is reasonable for the stated experiment. F4: The critic notes that excluding alerts without disposition within 30 days creates selection bias. However, the methodology explicitly acknowledges this trade-off: 'acknowledging that partial feedback is inevitable in SOC operations and that speculative relevance judgments would introduce label bias.' This is a deliberate design choice to ensure label quality at the cost of coverage. The conclusion does not depend on ignoring this limitation - it is transparently reported.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The concern about intra-incident ticket correlation is technically valid and cannot be resolved by argument alone. The design intent was historical risk (prior 14 days), but the critic correctly identifies that incident alert bursts could cause the feature to capture active incident signal rather than historical reputation. The methodology's generic 'metadata leakage check' does not specifically address this. The proposed evidence test (comparing performance with/without ticket history for alerts within 24 hours of another alert for the same entity) would empirically resolve this question. This is a genuine uncertainty requiring empirical verification."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The choice of nDCG@10 as primary metric is deliberate and justified by the operational context: 'analysts review alerts in priority order with limited capacity (~10 alerts per shift)'. The methodology does not claim nDCG@10 is the only relevant metric - it explicitly includes secondary metrics (Precision@1/5/10, stratified nDCG, etc.) to address complementary aspects. The critic advocates for Recall@K, which is a different metric philosophy, not a flaw in the chosen approach. The design choice aligns with measuring whether 'high-relevance alerts rank above noise at the critical top-10 window'."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The critic's suggested noise-baseline control is methodologically sound but represents a scope expansion beyond the current hypothesis. The stated experiment compares multimodal (text+graph+ticket) vs text-only ranking. The current baseline uses the same ranking loss function and equivalent hyperparameter tuning - it isolates the contribution of additional features within a consistent ranking framework. The critic's proposed control would test whether dimensionality alone drives gains, which is a different question than the current hypothesis."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The selection bias concern is acknowledged in the methodology: 'acknowledging that partial feedback is inevitable in SOC operations and that speculative relevance judgments would introduce label bias.' This is a deliberate trade-off (label quality over coverage) made explicit in the design. The experiment's conclusions do not depend on ignoring this limitation - it is transparently reported. For a proof-of-concept testing the ranking hypothesis, this is a known boundary and does not affect the validity of the comparative result."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Finding F1 received a DEFER rebuttal with adjusted severity 8, indicating a genuine concern that cannot be resolved by argument alone - the proposed evidence test comparing performance with/without ticket history features for intra-incident alerts would empirically determine whether the hypothesized leakage mechanism is active. F2 was successfully rebutted as a deliberate design choice (adjusted to 2), F3 was scoped out as a proposed expansion beyond current hypothesis (adjusted to 0), and F4 was identified as an immaterial acknowledged limitation (adjusted to 0). Since one finding has DEFER status and no FATAL finding was CONCEDEd, the verdict is empirical_test_agreed."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=8, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

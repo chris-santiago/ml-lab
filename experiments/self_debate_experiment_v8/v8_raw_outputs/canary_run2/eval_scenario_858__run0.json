@@ -1,0 +1,142 @@
+{
+  "case_id": "eval_scenario_858",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The model learns semantic retrieval based on the relevance of the article to the query.",
+        "failure_mechanism": "The use of 'in-batch negatives' during contrastive fine-tuning without hard-negative mining often leads to a 'collapsed' representation where the model learns to distinguish queries from articles based on trivial features (e.g., query length, formatting, or specific keywords) rather than semantic relevance. Because BM25 is a keyword-matching baseline, the transformer may achieve a higher MRR by simply learning to identify 'article-like' patterns or high-frequency 'successful' articles (popularity bias) that happen to be in the batch, rather than actually performing semantic matching. This is a common failure mode in dense retrieval where the model optimizes for the easy negatives in the batch.",
+        "evidence_test": "Perform a 'hard-negative' evaluation: create a test set where negatives are articles that share high BM25 overlap (keyword similarity) with the query but are not the labeled positive. If MRR drops significantly on hard negatives compared to random negatives, the model is not learning semantics, but is simply performing a noisy version of keyword matching.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Automatic labels (agent clicks/sends) are a valid proxy for document relevance.",
+        "failure_mechanism": "The PoC acknowledges position bias but does not implement a mechanism to decouple it. In production logs, agents click what the *existing* system (likely BM25 or similar) ranks highly. If the training data consists of clicks on the top-1 result of the current system, the transformer will learn to mimic the current system's ranking function (distillation) rather than learning the ground-truth relevance of the article. The model may essentially 'overfit' to the existing search engine's biases, creating a feedback loop where the transformer appears to perform well because it mimics the agent's behavior, which was itself driven by the baseline's rankings.",
+        "evidence_test": "Compare the transformer's performance on the manual annotation set (~300 queries) versus the automatic labels. If the gain over BM25 is significantly lower (or disappears) on the manually labeled set, the model has learned the baseline's bias rather than semantic relevance.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The comparison between the Transformer and BM25 is fair regarding input signals.",
+        "failure_mechanism": "The PoC states that metadata (product area, channel, freshness) is 'concatenated to article representations or used in late-fusion scoring.' If these features are provided to the transformer but not to the BM25 baseline, the transformer is not just winning on 'semantic search' (the hypothesis), but on 'feature engineering.' Specifically, 'product area' is a powerful filter that can bypass the need for semantic understanding entirely by narrowing the search space.",
+        "evidence_test": "Run the transformer model without the metadata features and compare its MRR against the BM25 baseline. If the performance gap closes significantly, the 'semantic' win is actually a 'metadata' win.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The first 512 tokens of the article body are sufficient to capture the relevance signal.",
+        "failure_mechanism": "In technical support articles, the 'resolution' or 'fix' is often located at the bottom of the document (e.g., after a list of prerequisites and symptoms). By truncating to the first 512 tokens, the model may be blind to the actual answer, forcing it to rely on the title and introduction. This limits the potential of the transformer and may artificially favor BM25 if BM25 is indexing the full document (the PoC is ambiguous on whether BM25 is also truncated).",
+        "evidence_test": "Compare performance using 512 tokens vs. a sliding window approach or a model that can handle longer contexts (e.g., Longformer) for a subset of the test data.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The use of a public pre-trained checkpoint ensures reproducibility.",
+        "failure_mechanism": "While the checkpoint is public, the specific version/hash is not listed, and different versions of BERT/DistilBERT (e.g., base-uncased vs. base-cased) can lead to variance in results.",
+        "evidence_test": "Specify the exact model hub path and commit hash.",
+        "flaw_category": "null"
+      }
+    ],
+    "summary": "The PoC suffers from two fatal flaws: the risk of learning the existing system's bias via agent clicks (feedback loop) and the likely failure of contrastive learning without hard-negative mining. While the temporal split is a strong design choice, the evaluation may measure the model's ability to mimic a baseline rather than its ability to understand semantics.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Analyzing each finding systematically:\n\n**F1 (severity 8):** The critic claims in-batch negatives without hard-negative mining causes 'representation collapse' where the model learns trivial features. This is a legitimate training concern in dense retrieval. However, the PoC uses a pre-trained checkpoint (not random initialization), includes early stopping on validation, and uses stratified analysis by article click frequency to detect popularity bias. The critic's proposed 'hard-negative' test is a reasonable empirical verification, but this is a known training challenge that does not invalidate the comparative experiment \u2014 the transformer still competes against BM25 under the same label conditions. The design includes controls for this (article frequency stratification), making this a scope issue rather than a fatal flaw.\n\n**F2 (severity 7):** The critic argues automatic labels encode position bias from the existing system, creating a feedback loop. The PoC explicitly acknowledges this limitation and implements a manual annotation set (~300 queries) as a validation mechanism: 'automatic-label MRR improvements are validated against this set; if automatic labels show improvement but manual labels do not, this indicates systematic label noise.' This is an explicit design control for exactly the critic's concern. The rebuttal is that the design anticipated and mitigates this confound.\n\n**F3 (severity 5):** The critic claims metadata (product area, freshness) provided to transformer but not BM25 creates an unfair comparison. The PoC states metadata is 'optional contextualization features, concatenated to article representations or used in late-fusion scoring.' The ambiguity here is whether 'optional' means the experiment might use metadata for transformer but not BM25. However, the design states both models use 'identical input signals' in Section 3. The critic's claim of unfairness is not strongly evidenced \u2014 the design explicitly calls for identical inputs. This appears to be a misunderstanding of the design intent.\n\n**F4 (severity 2):** The critic notes 512-token truncation may lose resolution information at article bottom. This is a legitimate technical limitation, but it's a model implementation detail, not a hypothesis design flaw. The PoC applies the same truncation to both models (BM25 indexes the same text), so comparative validity holds. This is immaterial to the core hypothesis.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The concern about in-batch negatives is a valid training methodology issue, but it applies to model quality rather than experiment validity. The PoC uses pre-trained checkpoints (not random initialization), early stopping on validation, and explicitly stratifies by article click frequency to detect popularity bias (Section 7: 'Agent Familiarity Bias'). The comparative experiment between transformer and BM25 remains valid \u2014 both use the same labels and the same evaluation protocol. The hard-negative test is a reasonable empirical verification but does not constitute a fatal design flaw. The experiment tests whether transformer outperforms BM25 on the given labels, not whether either achieves perfect semantic understanding."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The PoC explicitly acknowledges position bias in Section 1 and implements a direct control in Section 7: 'A small hold-out set of test queries (~300) is manually labeled for true relevance by domain experts. Automatic-label MRR improvements are validated against this set.' This is an explicit design mechanism to detect exactly the feedback-loop problem the critic describes. If the model 'mimics the baseline's biases,' this would be caught by comparing automatic-label MRR vs. manual-label MRR. The design anticipates and mitigates this concern. The critic's evidence_test (comparing manual vs. automatic labels) is already part of the experimental protocol."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The critic claims metadata is provided to transformer but not BM25. However, Section 3 explicitly states 'Both the transformer model and BM25 baseline use identical input signals' and lists metadata as contextualization features available to both. The phrase 'optional' refers to experimental flexibility, not asymmetric treatment. Section 4 confirms both models are tuned on validation data with 'the same computational budget.' The claim of unfair comparison is not supported by the design \u2014 the experiment protocol requires identical inputs. The critic conflates 'ambiguous documentation' with 'actual unfairness.'"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The 512-token truncation is a legitimate technical limitation, but it applies symmetrically to both transformer and BM25 (both index the same title + first 512 tokens). This does not bias the comparative result \u2014 if anything, it may disadvantage the transformer equally. The core hypothesis (transformer vs. BM25 on the same data) remains testable. The critic's suggested fix (sliding window) is a model improvement, not a design flaw correction."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All four findings have adjusted severity \u2264 4 after rebuttal, with F2 and F3 at adjusted severity 3, F1 at 4, and F4 at 1. Every advancing finding has adjusted severity \u2264 3 \u2014 F2 (REBUT-DESIGN), F3 (REBUT-EVIDENCE), and F4 (REBUT-IMMATERIAL) all land at or below the exoneration threshold. F1 is a scope rebuttal that reduces FATAL to adjusted severity 4 (material but not fatal). The experiment design is sound: temporal splits prevent leakage, automatic labels are validated against manual annotations, inputs are identical between models, and the comparative hypothesis remains testable. The critic's proposed evidence tests are either already built into the protocol (F2's manual annotation check) or address training methodology rather than experiment validity (F1's hard-negative evaluation)."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=8 \u2265 7, REBUT-SCOPE \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

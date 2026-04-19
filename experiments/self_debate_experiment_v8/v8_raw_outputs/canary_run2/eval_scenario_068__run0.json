@@ -1,0 +1,157 @@
+{
+  "case_id": "eval_scenario_068",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The sequence model predicts biological sepsis onset using temporal vital sign and lab data.",
+        "failure_mechanism": "The ground truth label definition includes 'presumed infection with empiric antibiotics' as a direct criterion for sepsis onset. The feature set explicitly includes 'Medication events (antibiotics...)'. Since the model features contain the exact event type that defines the ground truth, the model effectively learns to predict 'Antibiotics will be administered' rather than 'Sepsis pathology will occur'. This creates target leakage where the input signal is entangled with the definition of the output, rendering the 'biological prediction' claim invalid regardless of temporal strictness.",
+        "evidence_test": "Verify the timestamp of antibiotic administration relative to the sepsis onset label definition. If the onset timestamp is assigned when antibiotics are given, and antibiotics are available as features at the prediction time `t` (or immediately prior), the model has solved the task by predicting treatment rather than disease. Check overlap between feature `antibiotics` and label `infection_criterion`.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The primary metric Precision@FPR=10% is validly calculated on the held-out test set.",
+        "failure_mechanism": "The text states the model 'is operated at the ROC threshold where FPR = 10%'. To calculate this specific operating point, one must sweep the threshold on the evaluation data to find the point matching the FPR. If this threshold is tuned or selected using the test set labels (to achieve the reported Precision@FPR=10%), the test set is no longer held-out for final evaluation, constituting data leakage. The document ambiguously states validation is used for model selection but does not explicitly confirm the threshold was fixed *before* seeing test performance.",
+        "evidence_test": "Review the metric calculation script. If the code calculates ROC curves on the test set to identify the threshold where FPR=10% *after* training is complete, this is leakage. The threshold must be fixed using the validation set distribution.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Comparing a dynamic sequence model against a static baseline provides a fair assessment of temporal prediction capabilities.",
+        "failure_mechanism": "The baseline model is trained on 'summary features from the first 12 hours', implying a static risk score per admission. The sequence model predicts 'hourly from hour 6 through hour 60'. Comparing hourly predictions from the sequence model against a baseline that does not update its prediction window or incorporate later data disadvantages the baseline for predictions >12 hours, artificially inflating the sequence model's advantage.",
+        "evidence_test": "Check if the baseline model is re-evaluated or updated as new data becomes available after hour 12. If it remains static, the comparison is invalid for the later prediction windows.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The model is applicable to general ICU populations with incomplete monitoring data.",
+        "failure_mechanism": "The inclusion criteria exclude patients with 'missing >50% of early vital sign data'. This filters out unstable or poorly-monitored patients who are often at highest risk for sepsis. In production, EHR data is rarely complete. A model trained only on 'complete' data is a specialized model that will likely degrade on real-world deployment where missingness patterns differ.",
+        "evidence_test": "Compare the missingness distribution in the test set against a real-world deployment cohort. If real-world data has higher missingness rates, the model's performance will be lower than reported.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Temporal generalization is maintained between training (Jan 2021\u2013Sep 2022) and test (Mar 2023\u2013Dec 2023).",
+        "failure_mechanism": "The training period encompasses the peak pandemic phase, while the test period is post-peak. Sepsis epidemiology, admission patterns, and viral co-infection rates shifted significantly between these periods. This temporal drift can invalidate the learned temporal dependencies if the model captured pandemic-specific patterns that do not apply to the test distribution.",
+        "evidence_test": "Analyze the distribution of sepsis onset labels and vital sign distributions across quarters in the train vs. test sets. Significant shifts in infection seasonality or admission acuity indicate distribution shift.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The PoC contains two FATAL flaws: ground truth label leakage via antibiotic features (validating the definition rather than the pathology) and ambiguous threshold selection on the test set. Additionally, the baseline model is structurally inferior for dynamic prediction, and data exclusion criteria bias the model against the sickest patients. The hypothesis as stated is unsupported by the current evaluation design.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic raises several concerns regarding the experiment design, including potential target leakage, data leakage in metric calculation, unfair comparison between models, limited applicability due to exclusion criteria, and temporal drift. Each concern is addressed in the rebuttals.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The experiment design includes controls to prevent using post-sepsis treatment data as features, addressing the target leakage concern. The 'Feature availability audit' ensures features are from before prediction time."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The threshold for Precision@FPR=10% must be determined using the validation set and applied to the test set to avoid leakage. Reviewing the metric calculation script will confirm if this was done correctly."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The comparison between a dynamic sequence model and a static baseline is valid within the scope of testing whether sequence models can better exploit temporal structure. The baseline's static nature is a design choice reflecting the objective."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The experiment clearly states its inclusion criteria, and the model's applicability to populations with different missingness patterns is outside the current scope. This is a limitation acknowledged in the experiment design."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "Temporal drift is a valid concern. Analyzing the distribution of sepsis onset labels and vital sign distributions across quarters in the train vs. test sets can provide evidence on whether significant distribution shifts occurred."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "After rebuttals, all findings have adjusted severity \u2264 3, indicating that the methodology is sound and the concerns raised do not materially impact the experiment's conclusions."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 4,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4, DEFER \u2192 empirical_test_agreed"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "case_id": "eval_scenario_hyp132",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The feature 'prior customer SLA compliance rate in the last 90 days' is a predictive and non-leaky signal for future breaches.",
+        "failure_mechanism": "This feature is a direct, aggregated function of the target label (breach status) on historical tickets. Its calculation likely uses the breach status of tickets within the defined lookback window. If the model learns to rely heavily on this feature, it is essentially learning a trend in the historical breach label itself, not learning to predict a new breach from the context of the current ticket. This could lead to inflated performance that fails under concept drift or when the correlation between a customer's past and future breaches weakens.",
+        "evidence_test": "Perform an ablation study: train the baseline model (1) with the historical compliance feature and (2) without it. If performance with the feature is significantly higher, it indicates the model's predictive power is heavily dependent on this label-derived statistic, not on the ticket's intrinsic characteristics. Further, test the feature's predictive power on a time series where the correlation is artificially broken (e.g., shuffle customer IDs within time blocks).",
+        "flaw_category": "ambiguous_evidence"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "TF-IDF representations derived from a training-set-only vocabulary are sufficient and non-degradative when applied to future (test set) ticket text.",
+        "failure_mechanism": "Language and terminology in customer support tickets can evolve over the 36-month period. New product names, error codes, or slang may emerge in the final 6-month test window. A TF-IDF vectorizer fit only on the first 24 months will have a zero value for these new tokens, discarding potentially valuable signal. While the transformer embedding (BERT) may handle unseen tokens via subword units, the TF-IDF component of the 'enhanced features' could become less informative over time, creating an implicit distributional shift that is not accounted for in the model comparison.",
+        "evidence_test": "Analyze the vocabulary overlap between the training set and the test set. Measure the percentage of non-stopword tokens in the test set that are out-of-vocabulary (OOV) for the TF-IDF vectorizer. If OOV rate is substantial (>5-10%), re-run the enhanced model using only the BERT embeddings (dropping TF-IDF) and compare performance to the original setup to see if TF-IDF is harming or helping on the chronological test set.",
+        "flaw_category": "context_dependent"
+      },
+      {
+        "finding_id": "N1",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The post-hoc audit scanning for response phrases (e.g., 'assigned to', 'resolved') is sufficient to guarantee no text leakage.",
+        "failure_mechanism": "An audit based on a pre-defined list of phrases is heuristic and may miss subtler forms of contamination, such as internal ticket IDs, agent names, or jargon that typically only appears after a ticket is in progress. A determined or automated adversary could find leakage paths the audit does not check for.",
+        "evidence_test": "Implement a more rigorous check: train a simple classifier to distinguish between 'ticket body at creation' and 'first agent response' text on a separate dataset. Apply this classifier to the text features used in the experiment. A high accuracy would indicate the presence of distinguishing, potentially leaky, patterns.",
+        "flaw_category": "null"
+      },
+      {
+        "finding_id": "N2",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The selected hyperparameter tuning metric (validation PR-AUC) is perfectly aligned with the final operational deployment objective.",
+        "failure_mechanism": "While PR-AUC is an excellent summary metric for class-imbalanced problems, the ultimate operational goal is to maximize recall within a fixed alert budget (precision constraint). Optimizing for the area under the entire curve may select a model configuration that is suboptimal at the specific high-precision operating points where the system will be deployed.",
+        "evidence_test": "Compare the model selected by validation PR-AUC to a model selected by a direct optimization of 'Recall at Precision >= 0.8' on the validation set. Evaluate both on the test set at the deployment-relevant threshold. If the latter performs better on the secondary metrics, the primary tuning metric was slightly misaligned.",
+        "flaw_category": "null"
+      }
+    ],
+    "summary": "The experiment design is methodologically sound, with robust temporal splitting, leakage prevention, and a clear, controlled comparison. The identified concerns are minor and context-dependent, unlikely to invalidate the core conclusion regarding the transformer's predictive performance.",
+    "no_material_findings": true
+  },
+  "defender_output": {
+    "pass_1_analysis": "For finding F1, the critic's claim about the 'prior customer SLA compliance rate' being a predictive and non-leaky signal raises a valid concern regarding leakage in the predictive ability of the model. However, the argument hinges on the assumption that the feature incorporates target leakage through historical breaches directly affecting future predictions. Given the design rationale, the model is set up to functionally utilize historical compliance rates, while being assessed on the ability to generalize prediction based on the context of current tickets. As such, while the feature may show predictive power, it does not invalidate the overall predictive validity of the model as it has been appropriately controlled through the evaluation metrics. For finding F2, there is a claim regarding the potential issues with TF-IDF representations with evolving language, which could indeed affect the quality of features used. However, the critic does not provide a strong rationale on how impactful this change could be. The strategic choice in utilizing transformer embeddings (BERT) is to safeguard the model against vocabulary evolution issues, given its ability to process new tokens dynamically. The evaluation design intends to account for such variations, allowing for adaptability against concept drift. While both critiques are not without merit, they do not rise to change the experimental design visibly, and thus shall be assigned lower severity due to their manageable nature.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "While the concern about the predictive nature of the 'prior customer SLA compliance rate' is valid, the feature has been included to leverage historical trends while the evaluation metrics will ensure the model's generalization. The assertion of leakage is not proven to significantly affect the model's utility when evaluated under real-world conditions."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The concerns over TF-IDF representations might introduce changes due to evolving language is recognized. Nevertheless, the main strength lies in the BERT embeddings which can inherently adjust to new language usage, thus minimizing the impact of TF-IDF limitations. This makes the observation less significant."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been rebutted effectively and adjusted to a level that underscores the soundness of the methodology, with no substantial flaws remaining that would affect the experimental outcomes."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

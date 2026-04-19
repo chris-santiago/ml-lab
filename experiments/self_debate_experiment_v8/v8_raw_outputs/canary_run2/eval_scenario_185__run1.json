@@ -1,0 +1,217 @@
+{
+  "case_id": "eval_scenario_185",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Ticket-history features (e.g., count/severity distribution of tickets linked to same entities in prior 14 days) capture only historical risk and do not leak future escalation outcomes.",
+        "failure_mechanism": "If the alert-to-ticket linkage process itself is correlated with the escalation label (i.e., tickets are often linked *after* escalation decisions), the ticket count for an entity could be a proxy for future escalation likelihood. The claim 'future labels are not encoded' may fail because the feature construction uses 'linked tickets,' which could be generated *as a result* of the escalation process being studied. This creates a causal inversion: the feature (ticket count) may be partially determined by the outcome (escalation), violating the temporal causality requirement.",
+        "evidence_test": "Audit the timestamp relationship between alert escalation/disposition and ticket creation/linkage. For alerts labeled high-relevance, determine the proportion where the linked ticket was created *after* the analyst disposition action. If a significant fraction of tickets are created post-escalation, the ticket-history feature is contaminated.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "nDCG@10 is a sufficient primary metric to measure improvement in SOC triage efficiency.",
+        "failure_mechanism": "nDCG@10 assumes a static review capacity of exactly 10 alerts and that analysts review alerts strictly in the order presented. In practice, SOC analysts may skip, cluster, or manually re-order alerts based on metadata not captured by the model (e.g., urgency flags, known incidents). The metric also does not account for the cost of missing a high-relevance alert buried below position 10. A model that improves nDCG@10 could still fail operationally if it degrades recall for critical alerts beyond the top 10.",
+        "evidence_test": "Conduct a simulation or A/B test using actual analyst review patterns to measure the true operational impact: time-to-escalation for high-relevance alerts, analyst workload, and missed detection rate. Compare against a simple baseline like random ordering or rule-based priority.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding alerts with no documented disposition within 30 days does not introduce bias and is preferable to speculative relevance judgments.",
+        "failure_mechanism": "This exclusion criterion creates a selection bias towards alerts that received prompt analyst attention. Alerts that are truly high-relevance but were missed, backlogged, or ignored (a common SOC scenario) are removed from the dataset. The resulting labeled set may over-represent alerts that are easier to triage, causing the model to learn patterns associated with 'attention-grabbing' alerts rather than true relevance. This could degrade performance on the long-tail of overlooked alerts.",
+        "evidence_test": "Analyze the characteristics of excluded alerts (metadata, text patterns) versus included alerts. If excluded alerts differ systematically (e.g., lower rule priority, more complex text), the bias is material. A sensitivity analysis could label excluded alerts via a separate, conservative method (e.g., retroactive incident linkage) to assess model performance on them.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The entity graph features derived from a static entity store (prior 30 days) are sufficient to capture contextual relationships without introducing future leakage.",
+        "failure_mechanism": "The 'static entity store' is built from data in the prior 30 days, which for training alerts may include data from after the alert timestamp if the store is updated continuously. This could leak post-alert relationship information into training features. Additionally, entity relationships may evolve within the 30-day window; using a snapshot may not reflect the true state at alert time.",
+        "evidence_test": "For each alert, verify that the entity subgraph is constructed using only relationships observed *before* the alert timestamp. If the store is a rolling window, ensure the window is correctly truncated for each alert.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratification by quarter within each fold ensures representative coverage of seasonal patterns.",
+        "failure_mechanism": "Stratification by quarter assumes that seasonal patterns are the primary source of variation and that quarters are homogeneous. However, SOC alert distributions can change abruptly due to new threat campaigns, rule updates, or infrastructure changes. Stratifying by quarter may not capture these abrupt shifts, and the validation/test sets may not represent the most challenging recent conditions.",
+        "evidence_test": "Compare alert volume, rule mix, and label distribution across months within the same quarter. If intra-quarter variance is high, quarter stratification is insufficient. Consider alternative stratification by major rule updates or threat campaign periods.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The frozen pre-trained transformer embedding isolates ranking architecture gains.",
+        "failure_mechanism": "Using a frozen embedding assumes that the semantic representation of alert text is static and optimal for the ranking task. If the embedding model is not domain-adapted to SOC alert text (which often contains technical jargon, codes, and truncated messages), it may fail to capture critical nuances, limiting the text-only baseline and unfairly advantaging the multimodal model which compensates via other features.",
+        "evidence_test": "Compare the frozen embedding's performance against a fine-tuned version on a small text-only ranking task. If fine-tuning significantly improves text-only ranking, the isolation claim is weakened.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The label definition (high-relevance if escalated/linked within 24 hours) keeps the outcome close to the triage decision point.",
+        "failure_mechanism": "This definition may mislabel alerts that are escalated after 24 hours due to backlog or shift changes, but are still high-relevance. It also may label alerts escalated quickly due to procedural reasons (e.g., mandatory escalation for certain rule types) as high-relevance, even if they are false positives.",
+        "evidence_test": "Audit a sample of alerts labeled high-relevance to determine the proportion that were later confirmed as false positives, and a sample of low-relevance alerts to determine the proportion that were later escalated. If mislabeling is non-trivial, label noise could affect model learning.",
+        "flaw_category": "context_dependent"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "Ablation study dropping ticket-history features confirms that the entity graph contributes independent signal.",
+        "failure_mechanism": "The ablation study as described does not isolate the entity graph contribution; it only tests ticket-history removal. To confirm entity graph's independent signal, a separate ablation dropping entity graph features (keeping ticket-history) is needed.",
+        "evidence_test": "Run an additional ablation study removing entity graph features while retaining ticket-history.",
+        "flaw_category": "below_threshold"
+      }
+    ],
+    "summary": "The PoC has strong temporal splitting and clear objectives, but contains a likely fatal flaw in ticket-history feature construction (potential label leakage) and a material flaw in metric alignment (nDCG@10 may not reflect operational efficiency). Several other material concerns involve label selection bias and feature timing.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "I have analyzed all seven critique findings against the methodology. F1 raises a FATAL concern about ticket-history feature leakage, but Section 3 explicitly constructs features from tickets in the 'prior 14 days' before each alert, and Section 6 includes a 'ticket-history features are validated to ensure they do not inadvertently correlate with the label due to label-data construction artifacts' control. This directly contradicts the critique's assumption that tickets might be created after escalation but before feature computation. F2 claims nDCG@10 is insufficient, but this is within PoC scope (Section 4 states the experiment is about ranking architecture, not operational deployment), with secondary metrics also reported. F3 raises exclusion bias concerns, but Section 1 explicitly acknowledges this trade-off to avoid speculative labeling, making it a deliberate design choice. F4 is similar to F1, with Section 3 and 6 controls explicitly addressing pre-alert feature construction. F5 questions quarterly stratification, but Section 5 shows stratified evaluation by quarter AND alert category, and the temporal split (months 18-24 for test) already tests temporal drift. F6's frozen embedding concern is a deliberate isolation choice per Section 3, not a flaw. F7's label definition concern is addressed by Section 6's 'label quality audit' control. All findings are either misunderstandings of explicit design controls or deliberate trade-offs documented in the methodology.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "Critique assumes tickets might be created after escalation but before feature computation. Methodology Section 3 explicitly constructs ticket-history features from tickets in the 'prior 14 days' before each alert timestamp, making the critique's leakage scenario temporally impossible. This is a factual error in the critique's premise, not a valid concern about the design."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "Critique requests operational A/B testing (analyst behavior, time-to-escalation) which is outside the PoC scope. Section 6 explicitly states 'It will not establish causality of individual features or generalize to other organizations without replication on their data.' The PoC tests ranking architecture gains, not operational deployment impact."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "Section 1 explicitly acknowledges the 30-day exclusion criterion as a trade-off to avoid speculative relevance judgments ('label bias'). This is a deliberate design choice documented in the methodology, not an unacknowledged bias."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "Section 3 states features are constructed using only pre-alert information, and Section 6 includes 'feature timing audit' control. The entity store is queried at alert timestamp, not continuously updated post-alert. The critique's assumption about continuous updates is incorrect."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "Quarterly stratification is a secondary control. The temporal split (months 1-14 training, 18-24 test) already tests temporal drift. Section 5 shows stratified evaluation by quarter AND alert category to detect distributional confounds. Quarter stratification is sufficient for a ranking PoC."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Section 3 explicitly states the frozen embedding 'isolates ranking architecture gains.' This is a deliberate experimental control, not a design flaw. Fine-tuning the embedding would confound the experiment's purpose of testing feature group contribution."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Section 1 states this definition keeps the outcome 'close to the triage decision point the ranker is intended to support.' Section 6 includes 'label quality audit' to track inconsistency. This is an acknowledged trade-off appropriate for a ranking PoC."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings are rebutted as either misunderstandings of explicit design controls or deliberate trade-offs documented in the methodology. F1's adjusted severity is 4 due to the rebuttal bounds, but the concern is based on a factual error about feature construction timing. The methodology is sound and defends the hypothesis correctly."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=9 \u2265 7, REBUT-EVIDENCE \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

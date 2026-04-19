@@ -1,0 +1,132 @@
+{
+  "case_id": "hyp_240",
+  "stratum": "mixed",
+  "flaw_category": "context_dependent",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The graph model's performance gain is due to relational structure (message passing) rather than simple connectivity features.",
+        "failure_mechanism": "The PoC compares a GNN against a feature-only GBT. However, it does not compare the GNN against a GBT that is given 'graph-informed' tabular features (e.g., PageRank, community IDs, or degree centrality of the user's neighbors). If a GBT with these features matches the GNN, the 'relational reasoning' of the GNN is unnecessary; the signal is actually in the topological summary, not the latent representation learning.",
+        "evidence_test": "Introduce a third baseline: the GBT provided with pre-computed graph metrics (degree, centrality, 1-hop neighbor aggregates) extracted from the same graph construction used by the GNN.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding unresolved cases and cases with delayed labels prevents label noise.",
+        "failure_mechanism": "This introduces 'selection bias' (survivorship bias). In real-world ATO detection, the hardest cases to detect often take the longest for analysts to investigate. By removing cases where labels are not available by the cutoff, the PoC may be training and testing on 'obvious' ATOs (fast-to-close), which creates an optimistic performance estimate that will collapse when the model encounters the subtle, slow-to-verify attacks typical of advanced persistent threats.",
+        "evidence_test": "Analyze the distribution of 'time-to-close' for the excluded cases versus the included cases; check if excluded cases correlate with specific attack vectors or higher complexity.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Using 'first-seen device/IP flags' in the baseline and GNN provides a fair comparison of relational value.",
+        "failure_mechanism": "The GNN naturally encodes 'first-seen' or 'novelty' through the existence/absence of edges to previously known nodes in the graph. If the baseline's strength comes primarily from these novelty flags, and the GNN also leverages this, the performance delta might be marginal. Conversely, if the GNN uses edges to nodes that were 'first-seen' in the training set but are now 'known' in the test set, it may be overfitting to specific entity identities rather than relational patterns.",
+        "evidence_test": "Run an ablation where 'first-seen' flags are removed from both the GBT and the GNN (via node attribute masking) to see if the GNN's relative advantage persists.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Bootstrapped confidence intervals on the test window provide sufficient statistical significance.",
+        "failure_mechanism": "Because ATO events are typically rare (heavy class imbalance), the number of positive cases in a 2-month window may be too small for bootstrapped intervals to be narrow enough to distinguish between two high-performing models without high variance.",
+        "evidence_test": "Report the absolute number of positive samples in the test window; if the count is <100, consider a longer test window or cross-validation within the test period.",
+        "flaw_category": "uncertain_significance"
+      }
+    ],
+    "summary": "The PoC is structurally sound regarding temporal leakage and data splitting, but it suffers from a critical baseline gap: it fails to distinguish between 'graph-informed tabular features' and 'GNN latent learning.' Additionally, the label filtering strategy likely introduces a selection bias that inflates performance by removing complex, slow-to-resolve cases.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 (Severity 8): The critic claims the experiment fails to prove the mechanism (message passing vs. topological summary) by omitting a GBT+GraphMetrics baseline. However, the methodology explicitly disclaims this capability in the 'To address confounds' section: 'it will not by itself prove that every observed gain comes from abstract graph reasoning'. The finding assumes the PoC claims to prove mechanistic attribution, which is factually incorrect. The PoC scope is limited to establishing whether relational modeling improves detection, not isolating the specific reasoning mechanism. This is a fundamental misrepresentation of the design claims. I will rebut this as `REBUT-EVIDENCE`, arguing the critic's premise regarding the PoC's claims is unsupported by the methodology text. Maximum adjustment of -5 applies because the premise is entirely wrong.\n\nF2 (Severity 6): The critic argues excluding delayed labels introduces selection bias that inflates performance. The methodology explicitly addresses this trade-off: 'Exclude unresolved cases... since delayed security investigations otherwise inject label noise.' In time-series security tasks, preventing label leakage (using future investigation outcomes to define training labels) is a stricter requirement than avoiding selection bias. This is a deliberate design control to ensure temporal validity. I will rebut as `REBUT-DESIGN`, noting the necessity of this choice for the defined scope. Adjustment -4.\n\nF3 (Severity 5): The critic argues 'first-seen' novelty flags confound the comparison between GNN and GBT. The methodology explicitly plans to 'report results separately for previously seen versus newly observed users and devices' as an ablation control. This directly tests the novelty signal's contribution in both models. Furthermore, the GNN's edge construction inherently captures novelty via the existence of nodes, which is the intended differentiator from the static flag. I will rebut as `REBUT-DESIGN`, pointing to the specific ablation control already in place. Adjustment -3.\n\nF4 (Severity 2): The critic questions statistical significance due to class imbalance in the test window. The methodology specifies using bootstrap confidence intervals, which is standard for rare-event ATO detection. The finding requests reporting absolute sample counts, which is a transparency measure, not a design flaw. No methodological change is required to address this. I will rebut as `REBUT-IMMATERIAL`. Adjustment -2.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic's claim assumes the methodology asserts it will prove the specific mechanism ('abstract graph reasoning'). The methodology text explicitly states: 'it will not by itself prove that every observed gain comes from abstract graph reasoning rather than specific recurrent entity patterns.' The finding is based on a factual error regarding the experiment's claims and scope."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The exclusion of unresolved cases is a deliberate design control to prevent label leakage from delayed investigations into training data. In time-respecting security tasks, this prevents a more critical failure mode (temporal contamination) in exchange for known selection bias, as stated in the methodology."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The methodology explicitly includes an ablation to 'report results separately for previously seen versus newly observed users and devices.' This directly addresses the concern that novelty signals drive the GNN's advantage, validating the design's control over this confound."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Requesting absolute sample counts for the confidence interval analysis is a reporting standard, not a methodological flaw. Bootstrap CIs are appropriate for the class distribution; transparency suffices to resolve the concern."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings were successfully rebutted with adjusted severities at or below 3, primarily by demonstrating that the critique's premises misidentified the experiment's scope and explicit design controls. The methodology remains sound for its stated purpose."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

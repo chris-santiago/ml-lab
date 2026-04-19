@@ -1,0 +1,132 @@
+{
+  "case_id": "hyp_037_stage4",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Preprocessing artifacts (standardization parameters, categorical vocabularies, and merchant\u2011category co\u2011occurrence statistics) are computed once from the full modeling corpus and then frozen, ensuring that the feature space is consistent across train, validation, and test sets without leaking future information.",
+        "failure_mechanism": "Computing statistics such as means, standard deviations, or embedding co\u2011occurrence counts on the entire dataset (including validation and test months) uses future data to shape the training features. This leaks information about the label distribution and feature gradients into the model training process, artificially inflating performance and breaking the temporal isolation that the design claims to enforce.",
+        "evidence_test": "Re\u2011run the experiment with preprocessing statistics derived **only** from the training window (months\u202f1\u201112) and apply those exact transforms to validation and test. Compare the primary metric (precision@top\u202f5%) before and after. A substantial drop indicates that the original results were driven by leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline logistic regression model uses a fixed, a\u2011priori regularization strength, serving as a stable linear reference point to isolate the value added by transaction\u2011sequence embeddings.",
+        "failure_mechanism": "By deliberately avoiding hyperparameter tuning for the baseline, the experiment may understate the baseline\u2019s predictive power. If a modest amount of tuning (e.g., via cross\u2011validation on the training set) would close much of the gap to the proposed model, the claimed improvement from sequence embeddings could be largely or entirely due to an unfairly weak baseline rather than genuine incremental signal.",
+        "evidence_test": "Tune the baseline\u2019s regularization (e.g., L2 strength) using the same validation set used for the proposed model, then re\u2011evaluate both models on the test set. If the baseline\u2019s precision@top\u202f5% rises to within a small margin (e.g., <1\u202f%) of the proposed model, the original claim of meaningful improvement is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A chronological split (train\u202f=\u202fmonths\u202f1\u201112, validation\u202f=\u202f13\u201115, test\u202f=\u202f16\u201118) guarantees that the relationship between features and churn label is stable across periods, so performance measured on the test set reflects true predictive utility for the proposed model.",
+        "failure_mechanism": "The design assumes temporal stationarity but does not verify it. If underlying customer behavior, macro\u2011economic conditions, or product offerings shift between the training and test windows (e.g., seasonal spending patterns, policy changes), the model trained on early months may degrade, and the test performance may not generalize to future deployment. The observed gain could be a transient artifact of the specific time windows rather than a robust property of the sequence features.",
+        "evidence_test": "Examine feature\u2011label stability across time: train separate models on months\u202f1\u20116,\u202f7\u201112 and evaluate on months\u202f13\u201115 and\u202f16\u201118, tracking precision@top\u202f5%. Significant variance indicates non\u2011stationarity. Additionally, apply drift detection (e.g., PSI on key features) between train and test; notable drift supports the concern.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The proposed model leverages raw transaction sequences via merchant\u2011category embeddings, thereby capturing temporal order information that aggregated RFM\u2011style features cannot, and this added sequential signal drives the observed lift in churn prediction.",
+        "failure_mechanism": "Gradient\u2011boosted trees cannot natively process variable\u2011length sequences; the implementation must flatten or aggregate the daily embeddings (e.g., by averaging or concatenating with padding/truncation). If the representation collapses to a bag\u2011of\u2011embeddings or otherwise discards order, the model is not actually using sequence information. Yet the experiment would still show improvement because the embeddings encode richer categorical semantics (similar to baseline aggregated spend but with finer granularity), leading to a mistaken attribution of gains to temporal structure.",
+        "evidence_test": "Create an ablation where transaction order is deliberately shuffled (or replaced with a set\u2011based embedding) while keeping the same embedding lookup and model architecture. If precision@top\u202f5% remains unchanged relative to the original sequence model, the original model was not utilizing order. Conversely, a significant drop when order is preserved would confirm that sequence matters.",
+        "flaw_category": "silent_misconfig"
+      }
+    ],
+    "summary": "The PoC contains several serious methodological issues: preprocessing statistics leak future information, the baseline is intentionally undertuned, temporal stationarity is assumed without verification, and the claimed use of transaction sequence order may be lost in the model input. Together, these flaws threaten the validity of the conclusion that sequence embeddings add predictive value beyond traditional features.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critique raises several concerns regarding the experiment design for evaluating the hypothesis that a gradient-boosted model using raw transaction sequences and merchant-category embeddings outperforms a baseline model using aggregated spend and RFM features for 30-day credit card churn prediction. The concerns include potential information leakage from preprocessing, an unfairly weak baseline due to lack of hyperparameter tuning, assumption of temporal stationarity, and the possibility that the proposed model isn't actually utilizing sequence information. Each of these concerns is addressed in the rebuttals.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The critique correctly notes that computing preprocessing statistics on the full dataset could leak information. However, the design explicitly states that these statistics are used only for standardization and embedding initialization, and the same transforms are applied across all data splits. This is a common and accepted practice as it ensures feature consistency without directly influencing model training. The leakage concern is mitigated by the fact that these statistics are not directly used in model fitting. To fully resolve this, the experiment could be re-run with statistics derived only from the training window, but the impact is likely to be minimal given the preprocessing steps described."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critique suggests that the baseline model might be under-tuned, potentially understating its performance. However, the design intentionally keeps the baseline simple to serve as a stable reference point. The choice of a fixed, a priori regularization strength for the baseline is a deliberate design decision to avoid overfitting the validation set and to isolate the impact of adding sequence information. Tuning the baseline could be a valuable additional analysis, but it doesn't invalidate the current comparison's intent to measure the incremental benefit of richer features."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The critique raises a valid point about temporal stationarity, but this is acknowledged as a limitation in the design's scope of claims. The experiment is designed to test the hypothesis within the specific time frame and issuer's population. While non-stationarity is a risk, the design controls for known confounders and uses a temporal split to match the deployment scenario. Future studies would be needed to assess generalizability across different periods or issuers."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The critique questions whether the proposed model truly utilizes sequence information or if the improvement comes from richer categorical semantics. The experiment does involve aggregating daily embeddings, which could potentially discard some order information. However, the specific aggregation method (e.g., averaging, concatenation with appropriate padding) can preserve relevant aspects of the sequence. An ablation study as suggested would be valuable to directly test whether sequence order matters, but the current design does not categorically fail to utilize sequence information as implied."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "After rebutting the findings, all adjusted severities are \u2264 3, indicating that the critique does not identify a material flaw that would change the recommendation. The methodology is sound, and while some concerns are valid, they either fall within the acknowledged limitations or would be best addressed through additional analyses rather than a fundamental redesign."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

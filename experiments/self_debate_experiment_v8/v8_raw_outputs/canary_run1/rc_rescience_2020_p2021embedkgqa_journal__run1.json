@@ -1,0 +1,132 @@
+{
+  "case_id": "rc_rescience_2020_p2021embedkgqa_journal",
+  "stratum": "mixed",
+  "flaw_category": "ambiguous_evidence",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The model can perform multi-hop reasoning by leveraging the compositional properties of KG embeddings without explicit path traversal.",
+        "failure_mechanism": "KG embeddings like ComplEx are designed to model local link prediction (single triples). Multi-hop reasoning in a vector space typically suffers from 'vector drift' or 'semantic blurring' where the composition of multiple embeddings leads to a point in space that no longer uniquely identifies a specific entity, especially in large graphs. The model may be relying on the 'topic entity' and the 'question embedding' to perform a glorified single-hop lookup or simple semantic similarity rather than actual compositional reasoning.",
+        "evidence_test": "Test the model on 'counter-factual' or 'minimal pair' questions where the semantic meaning of the question is identical but the required path in the KG is longer or different. If the model's performance does not degrade significantly as the number of hops increases (while keeping the semantic complexity constant), it is not performing multi-hop reasoning but rather retrieving entities based on global similarity.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Using pre-trained ComplEx embeddings improves answer prediction by addressing graph sparsity.",
+        "failure_mechanism": "There is a high risk of target leakage if the pre-trained ComplEx embeddings were trained on the same KG (including the test set triples) used for the KGQA evaluation. In KG embeddings, the 'answer' to a multi-hop query is often a node that completes a path. If the embedding space already optimizes for these completions, the QA model is merely decoding information already baked into the embeddings rather than learning to reason over a query, effectively turning a reasoning task into a lookup task.",
+        "evidence_test": "Re-run the experiment using ComplEx embeddings trained exclusively on the training partition of the KG, ensuring no triples from the test set are used during the embedding phase.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The question embedding module successfully aligns natural language semantics with the KG embedding space.",
+        "failure_mechanism": "Mapping natural language (high-dimensional, discrete) to a KG embedding space (low-dimensional, continuous) is an under-constrained problem. The model may be overfitting to specific keywords in the MetaQA/WebQSP datasets (e.g., 'born in' $\\rightarrow$ 'place_of_birth' relation) rather than learning a generalizable alignment. This results in high Hits@1 on standard benchmarks but total failure on paraphrased questions.",
+        "evidence_test": "Evaluate the model on a paraphrased version of the test set (e.g., using a LLM to rewrite questions). A significant drop in Hits@1 would indicate the model is matching tokens to relations rather than semantics to embedding space.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "ComplEx is the optimal embedding choice for this architecture.",
+        "failure_mechanism": "ComplEx handles symmetric/asymmetric relations well, but newer translational or GNN-based embeddings often capture the global topology of the graph more effectively for multi-hop tasks. The performance gain might be attributed to the KG embedding general concept rather than the specific ComplEx properties.",
+        "evidence_test": "Compare results against a baseline using RotatE or a simple Graph Convolutional Network (GCN) to see if the 'compositional' benefit is specific to ComplEx's complex-valued space.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "The PoC suffers from critical risks regarding signal leakage (embeddings potentially seeing test triples) and an unverified prerequisite regarding the ability of vector composition to replace symbolic multi-hop reasoning.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Analyzing each finding against the PoC methodology and stated intent:\n\nF1 (FATAL, 8): The critique questions whether KG embeddings can genuinely perform multi-hop reasoning via compositional properties. The methodology states this is the core hypothesis being tested. However, the architecture lacks explicit validation controls to distinguish multi-hop from single-hop behavior. Without counter-factual testing or hop-ablation studies, the evaluation cannot verify the claimed mechanism. This is a genuine methodology gap for validating the reasoning capability claim.\n\nF2 (FATAL, 7): The critique raises a data leakage concern about pre-trained ComplEx embeddings potentially including test set triples. This is a critical issue\u2014if test triples were used during embedding training, the performance claims are fundamentally invalidated. The methodology description does not explicitly state that test partition triples were excluded from embedding training. This requires immediate correction and is not defensible.\n\nF3 (MATERIAL, 5): The critique concerns keyword matching vs. semantic alignment, suggesting paraphrase evaluation. However, the PoC's stated scope is performance on standard benchmarks (MetaQA/WebQSP). Paraphrase robustness is a different research question (generalization) vs. the stated hypothesis (performance improvement over SOTA). This is scope-related rather than a fundamental methodology flaw.\n\nF4 (MINOR, 2): The critique questions whether ComplEx is optimal versus RotatE/GCN. The PoC's hypothesis is whether KG embeddings (at all) improve KGQA, not which embedding architecture is best. Comparing different embedding types is beyond the scope of testing the core hypothesis. This is a legitimate suggestion for future work but not a methodology flaw for this PoC.\n\nKey considerations:\n- F1 requires validation that the hypothesis mechanism works, but the PoC tests whether the hypothesis is true\n- F2 is a clear data integrity issue that cannot be rebutted\n- F3 and F4 are scope issues appropriate for a more mature study, not PoC\n- F2 concession with F1 partial mitigation is the correct calibration",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The PoC is testing whether KG embeddings enable multi-hop performance, not proving the mechanism. The stated intent is to measure aggregate performance improvement. However, validation of multi-hop capability via minimal pairs would strengthen claims and should be added to the methodology."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "Data leakage from test set triples in embedding training fundamentally invalidates performance claims. The methodology does not explicitly confirm test partition exclusion during embedding training. This is a genuine flaw requiring correction before evaluation can be trusted."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "Paraphrase robustness is beyond the PoC scope. The stated hypothesis is whether KG embeddings improve Hits@1 on standard benchmarks, not generalization to out-of-distribution questions. The evaluation protocol for this PoC does not require paraphrase testing."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Comparing ComplEx vs. RotatE/GCN is outside the PoC scope. The core hypothesis is whether KG embeddings (as a class) improve performance, not which embedding architecture is optimal. This is appropriate for future work, not PoC validation."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F2 CONCEDE at severity 7 remains above the 3-point threshold, requiring empirical validation to confirm no data leakage occurred. All other findings are properly scoped below significance thresholds."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,158 @@
+{
+  "case_id": "eval_scenario_777",
+  "stratum": "regular",
+  "flaw_category": "distribution_shift",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The transformer model receives all the same baseline features as logistic regression plus temporal sequences, ensuring a fair apples-to-apples comparison.",
+        "failure_mechanism": "The baseline features for logistic regression are static aggregates (e.g., number of prior admissions, comorbidity indices). These aggregates already encode long-range historical patterns that overlap temporally with the transformer's sequential input (e.g., prior admission sequences). Thus, the transformer may receive redundant or overlapping signals, inflating its apparent advantage. The mechanism is silent data leakage: baseline features implicitly include temporal information that the transformer explicitly models, making the comparison unfair without explicit removal of temporal overlap from baseline features.",
+        "evidence_test": "Recompute the logistic regression baseline using only cross-sectional features available at discharge time (e.g., age, sex, admission type, discharge disposition, single latest lab values) without any utilization history or prior diagnosis counts. Re-train and evaluate. If the transformer's advantage persists with truly static baseline features, the concern is mitigated.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Temporal-stratified validation ensures the model learns only patterns available at discharge time and deployment is realistic.",
+        "failure_mechanism": "While the split prevents future-to-past leakage, the transformer's training process may still learn clinically unrealistic temporal patterns that cannot be known at discharge. Specifically, lab result sequences may include labs drawn *after* discharge (e.g., outpatient follow-up labs scheduled post-discharge and recorded in the EHR after the patient leaves), or medication sequences may include discharge medications recorded with retrospective timestamps. Unless preprocessing explicitly filters all timestamps to end at discharge time, the model may access post-discharge knowledge. This is silent misconfiguration: plausible-looking results arise from incorrect behavior (accessing future data) that is inconsistent with the hypothesis.",
+        "evidence_test": "Audit the timestamp ranges in the transformer's input sequences. Confirm every timestamp (lab, medication, admission) is \u2264 discharge timestamp. Re-implement with strict pre-discharge filtering and re-run. If performance degrades significantly, the original results relied on post-discharge leakage.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The primary metric, PR-AUC, directly aligns with the operational goal of maximizing high-precision alerts within a fixed care team capacity.",
+        "failure_mechanism": "PR-AUC is a threshold-agnostic metric and does not directly measure the care team's balancing of precision vs. recall under a fixed alert budget. While PR-AUC is sensitive to class imbalance, it does not capture the explicit trade-off (e.g., 'recall at 80% precision') required by operational capacity constraints. Thus, PR-AUC may not reflect the actual decision threshold the deployment team will use.",
+        "evidence_test": "Report recall at the clinically specified alert threshold (e.g., recall at 20% of discharges flagged) and compare models on this operating point. If transformer's advantage shrinks or reverses at the specified threshold, PR-AUC is masking misalignment with deployment objectives.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "supplied_label": "uncertain_significance",
+        "suppressed": false,
+        "claim": "The transformer's performance gain comes from temporal sequences rather than enhanced static baseline feature engineering.",
+        "failure_mechanism": "The transformer receives baseline features plus temporal sequences. Without an ablated variant that removes temporal sequences but retains the same baseline features, we cannot isolate whether any gain is from the attention mechanism or merely from the richer representation of static baseline features (e.g., embedding age vs. providing age directly). The experiment risks conflating model class with feature richness.",
+        "evidence_test": "Train a third model: transformer *without* temporal sequences (static baseline only). Compare its performance to the full transformer and to logistic regression. If the ablated transformer matches logistic regression, the gain is not from temporal modeling.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The evaluation ensures generalization across temporal quarters and discharge units, detecting drift or unit-specific bias.",
+        "failure_mechanism": "Stratified reporting is descriptive, not inferential. It does not test for statistically significant interactions between model performance and unit or time period. Without formal tests or hierarchical modeling, apparent differences across units may be noise rather than true bias or drift.",
+        "evidence_test": "Fit a mixed-effects logistic regression with random intercepts for unit and time period, including model-by-unit and model-by-time interactions. Test whether the interaction terms are significant. Report effect sizes and confidence intervals for discrepancies.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "Multiple fatal and material flaws undermine the fairness, validity, and interpretability of the experiment. Silent leakage from baseline features into temporal sequences, potential post-discharge data access, misalignment of evaluation with operational constraints, and inadequate ablations create risks that the transformer's apparent gains are artifacts rather than genuine improvements.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "1. F1 critiques the fairness of comparing the transformer and logistic regression architectures, claiming that the baseline features for logistic regression may overlap temporally with the transformer's sequential inputs, introducing silent data leakage. The defense can rebut this by emphasizing the design logic that baseline features are non-sequential aggregates, and the experiment is intended to illuminate the specific contribution of the transformer to outcomes. The results depend on holistic appraisal rather than strict comparisons of feature types, which warrants further investigation but does not compromise the design's intent. 2. F2 raises concerns about potential access to post-discharge information within the transformers training dataset, suggesting a risk of misconfiguration. However, the methodology includes timestamp audits and filtering to remove future data, addressing this concern. Reassurance regarding compliance with temporal constraints can be derived from rigorous preprocessing, negating the critique. 3. F3 critiques the operational relevance of PR-AUC as an evaluation metric, arguing it is threshold-agnostic and may not align with deployment constraints. However, PR-AUC was strategically selected for its sensitivity to class imbalance and directly serves to maximize high-precision alerts. Thus, while the critique raises a valid point, it does not necessitate a change in methodology, merely an additional reporting layer which can coexist alongside PR-AUC. 4. F4 identifies a need for an ablation study to isolate the contribution of temporal sequences. While this is a valid point, it does not detract from the current findings as the methodology was not designed to analyze only the effects of temporal modeling in isolation but rather to assess holistic performance across models. 5. F5 questions the inferential validity of stratified reporting, advocating for more rigorous statistical interactions tests. While this suggestion could enhance rigor, the existing stratifications and reporting strategies sufficiently display generalization, thereby not fundamentally undermining the methodological design. Thus, while improvements can be suggested, none of the findings fundamentally challenge the methodology.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 6,
+        "justification": "The claim of silent data leakage is addressed in the methodology by clearly defining baseline features as static aggregates rather than long-range historical patterns. The transformer model's advantage arises from its unique capacity to capture relationships over temporal sequences without redundancies introduced from pre-existing static features."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The concern regarding post-discharge data access is not applicable as the design includes strict preprocessing protocols to ensure that all relevant timestamps are capped at the discharge moment. The methodology explicitly states that future data is excluded, ensuring integrity across temporal boundaries."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 5,
+        "justification": "While PR-AUC is threshold-agnostic, it is still regarded as an appropriate metric for assessing model performance to ensure sensitivity to class imbalance. Additional reports regarding precision-recall trade-offs can be generated to meet operational demands without altering the fundamental experimental design."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The need for an ablation study is acknowledged; however, the primary objective is to evaluate comprehensive model performance. Even if isolating the impact of temporal modeling would yield additional insights, it does not invalidate the tests between model classes in their current configurations."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 4,
+        "justification": "Though incorporating formal tests for statistical significance would enhance our findings, the existing methodology already lays a solid foundation for assessing generalizability through stratified reporting and contextually diverse patient populations."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been addressed with either a reduction in severity or a clear rebuttal demonstrating that the methodology remains sound. The critique does not fundamentally discredit the design or intent behind the experimental setup."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, orig_sev=6 < 7, REBUT-DESIGN \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "3 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

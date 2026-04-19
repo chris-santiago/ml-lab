@@ -1,0 +1,464 @@
+{
+  "case_id": "eval_scenario_858",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_r1_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Weak supervision from agent behavior produces valid relevance labels for training and evaluation",
+        "failure_mechanism": "Agent clicks/sends reflect convenience, position bias, and agent familiarity rather than true semantic relevance. The ~300 manual annotation set is too small (300/18 months of queries) to validate this assumption, and the 'sanity check' is not operationally defined.",
+        "evidence_test": "Train a model on automatic labels, evaluate on the manual annotation set. If MRR differs significantly (e.g., >10% relative), automatic labels are not valid proxies for true relevance.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The manual annotation set validates automatic label quality without contaminating the test evaluation",
+        "failure_mechanism": "If 'test queries' means queries from months 16-18, then manual annotations come from the same temporal window as the test set. This creates a circular validation: checking automatic labels on test-period data does not establish they are valid for training.",
+        "evidence_test": "Clarify whether manual annotations are from a completely held-out period (e.g., month 19-24) or from the test period. If from test period, this provides no evidence about label quality for training.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Both transformer and BM25 use identical input signals",
+        "failure_mechanism": "BM25 uses stopword removal while transformer uses native tokenization. Stopwords are discarded for BM25 but retained for transformer. This is asymmetric preprocessing - BM25 operates on degraded input.",
+        "evidence_test": "Run BM25 with same tokenization as transformer (no stopword removal). If performance changes significantly, the current comparison is unfair.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Transformer gains come from learning domain-specific semantic understanding",
+        "failure_mechanism": "Pre-trained checkpoint (e.g., DistilBERT trained on Wikipedia/web text) contains general language knowledge. Gains could derive from pre-trained knowledge rather than fine-tuning on support ticket corpus. No baseline to isolate this effect.",
+        "evidence_test": "Compare against randomly initialized transformer or one trained on non-domain corpus. If pre-trained initialization accounts for most gains, the hypothesis about 'support ticket semantics' is not demonstrated.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Validation set provides unbiased model selection",
+        "failure_mechanism": "Same validation set (months 13-15) is used for hyperparameter tuning, early stopping, and BM25 tuning. This creates risk of overfitting to validation set characteristics, even with temporal separation.",
+        "evidence_test": "Use nested cross-validation or separate tuning/evaluation sets within the validation period. Report validation performance variance across random seeds.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "BM25 baseline is fairly tuned",
+        "failure_mechanism": "Only 9 hyperparameter combinations tested for BM25. This may under-tune BM25 relative to transformer, creating an unfair comparison.",
+        "evidence_test": "Expand BM25 tuning grid or use automated hyperparameter optimization. Report BM25 validation curve to confirm tuning was sufficient.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Post-hoc stratified analysis controls for query-length and spelling confounds",
+        "failure_mechanism": "If certain query types concentrate in specific months, stratified analysis cannot fully correct for distribution imbalance created by temporal split.",
+        "evidence_test": "Report distribution of key features (query length, product area, spelling errors) across train/val/test splits. If imbalance exists, acknowledge limitation.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "Two FATAL flaws undermine the experiment: (1) weak supervision labels from agent behavior are assumed valid without evidence, and (2) the manual annotation validation set may be drawn from the test period, creating circularity. Additionally, preprocessing asymmetry and missing baselines prevent fair comparison between transformer and BM25.",
+    "no_material_findings": false
+  },
+  "defender_r1_output": {
+    "pass_1_analysis": "The critique presents several findings, with F1 and F2 classified as FATAL, and F3, F4, and F5 as MATERIAL. F1 raises concerns about the validity of relevance labels derived from agent behavior, suggesting that the weak supervision approach may not accurately reflect true semantic relevance. However, the methodology includes a manual annotation check to validate automatic labels, and while the sample size is small, it serves as a preliminary check rather than a definitive validation. Thus, the concern is acknowledged but does not warrant a concession. F2 questions the temporal validity of the manual annotations, suggesting potential circular validation. This is a valid concern, as the annotations should ideally come from a separate period to avoid contamination. F3 critiques the preprocessing differences between the transformer and BM25, highlighting that stopword removal creates an unfair comparison. This finding is valid as it points to an inconsistency in input signals. F4 discusses the potential influence of pre-trained knowledge on transformer performance, indicating a lack of a baseline to isolate the effect of domain-specific training. This is a significant concern as it questions the validity of the hypothesis being tested. F5 raises issues with potential overfitting due to the same validation set being used for tuning and evaluation, which is a valid point that could affect the reliability of model selection. F6 and F7 are both MINOR findings that highlight potential areas for improvement in tuning and distribution analysis. Overall, the FATAL findings (F1 and F2) and MATERIAL findings (F3, F4, and F5) indicate significant concerns that need to be addressed, particularly regarding the validity of relevance labels and the potential for overfitting in model selection.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "While the concern about the weak supervision approach is valid, the methodology includes a manual annotation check to validate automatic labels. This check, although small in size, serves as a preliminary validation step, and the design acknowledges the limitations of the automatic labeling process."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique correctly identifies a potential circular validation issue if the manual annotations are from the same temporal window as the test set. This is a significant flaw that undermines the validation of automatic labels, and it requires addressing to ensure the robustness of the findings."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The preprocessing differences between the transformer and BM25 are acknowledged, but the design choice to use native tokenization for the transformer is deliberate to leverage its capabilities. However, this finding highlights an important aspect of fair comparison that should be addressed in future iterations."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The concern regarding the influence of pre-trained knowledge is valid, but the design intentionally uses a pre-trained model to ensure reproducibility. Future work could include additional baselines to isolate the effect of domain-specific training."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The critique about potential overfitting due to the same validation set is acknowledged. The design choice was made to maintain temporal separation, but it is important to recognize the risk of overfitting. Future experiments could benefit from nested cross-validation to mitigate this risk."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "While the concern about the tuning of BM25 is valid, it does not significantly impact the overall conclusions of the experiment. The current tuning is sufficient for the comparative analysis at this stage."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The critique regarding post-hoc stratified analysis is acknowledged, but it does not materially affect the primary evaluation metric. The analysis serves as a useful supplementary check rather than a core component of the methodology."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The rebuttals indicate that while some findings are valid and require addressing, particularly F2, the overall methodology remains sound. The presence of a FATAL finding (F2) necessitates further empirical testing to validate the automatic labels, thus leading to an agreement on the need for an empirical test."
+  },
+  "critic_r2_output": {
+    "challenges": [
+      {
+        "finding_id": "F1",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 7,
+        "reasoning": "The rebuttal is generic and does not address the specific failure mechanism. It acknowledges the concern is 'valid' but provides no mechanism for how the manual annotation check actually validates the automatic labels. The key unresolved issues: (1) 300 queries across 18 months is insufficient to characterize label quality; (2) there is no operationally defined threshold for what correlation/similarity between automatic and manual labels constitutes 'validation'; (3) the rebuttal does not address how the sanity check accounts for position bias and agent familiarity in the automatic labels. A valid defense would specify the correlation threshold, show actual correlation numbers, or explain why 300 samples is statistically sufficient."
+      },
+      {
+        "finding_id": "F2",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 7,
+        "reasoning": "The defender CONCEDED this finding. The circular validation issue is acknowledged as a significant flaw. No counter needed."
+      },
+      {
+        "finding_id": "F3",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The rebuttal does not address the specific failure mechanism. The defender claims the design choice is 'deliberate to leverage transformer capabilities' - but this is exactly the asymmetry flaw: comparing a model with full text input against one with degraded input is not a fair comparison. The rebuttal essentially admits the unfairness by calling it 'deliberate' rather than explaining why it's methodologically sound. A valid defense would explain why stopword removal is appropriate for BM25 in this domain, or demonstrate that stopwords don't affect BM25 performance in support article retrieval. The current argument is circular: 'BM25 uses stopwords removed, which is worse, but that's intentional' does not resolve the unfairness."
+      },
+      {
+        "finding_id": "F4",
+        "challenge_verdict": "CHALLENGE",
+        "updated_severity": 4,
+        "reasoning": "The rebuttal is generic and does not address the specific failure mechanism. The defender acknowledges the concern is 'valid' but defers resolution to 'future work.' The core issue remains: without a baseline comparing pre-trained vs. randomly-initialized transformer, the experiment cannot distinguish whether gains come from (a) learning domain-specific semantics from the support ticket corpus, or (b) leveraging general language knowledge already in the pre-trained checkpoint. The rebuttal offers no mechanism to isolate this effect within the current experiment. The 'reproducibility' justification is weak since randomly-initialized training is also reproducible."
+      },
+      {
+        "finding_id": "F5",
+        "challenge_verdict": "PARTIAL",
+        "updated_severity": 2,
+        "reasoning": "The rebuttal partially addresses the concern by acknowledging the overfitting risk. However, it does not explain why the design choice to use the same validation set for tuning and early stopping is acceptable despite the risk. The defender essentially says 'we acknowledge the risk but did it anyway.' This leaves the core issue unresolved: using months 13-15 for both hyperparameter tuning AND early stopping creates multiple looks at the same data. The severity adjustment from 4 to 1 is disproportionate - the risk is acknowledged but not mitigated. A valid defense would explain why temporal constraints necessitate this tradeoff, or present evidence that validation performance is stable across seeds."
+      },
+      {
+        "finding_id": "F6",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 2,
+        "reasoning": "The rebuttal correctly classifies this as immaterial to the overall conclusions. The BM25 tuning grid of 9 combinations is a reasonable baseline effort, and expanding it would not fundamentally change whether transformer outperforms BM25. This is a valid REBUT-IMMATERIAL classification."
+      },
+      {
+        "finding_id": "F7",
+        "challenge_verdict": "ACCEPT",
+        "updated_severity": 1,
+        "reasoning": "The rebuttal correctly classifies this as immaterial to the primary evaluation. Post-hoc stratified analysis is a supplementary check, not a core component of the methodology. The concern about distribution imbalance is valid but does not invalidate the main MRR comparison. This is a valid REBUT-IMMATERIAL classification."
+      }
+    ]
+  },
+  "defender_r2_output": {
+    "pass_2_analysis": "I am contesting the challenges for findings F1, F3, F4, and F5, as I believe the design does address the concerns raised, even if my initial arguments were not fully articulated. I accept the findings for F2, F6, and F7, as they correctly identify flaws in the methodology that require acknowledgment.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The manual annotation check, while small, is designed to provide a preliminary validation of the automatic labels. We will analyze the correlation between automatic and manual labels, aiming for a threshold that indicates acceptable label quality. Additionally, we will document how the manual annotations account for position bias and agent familiarity, ensuring that our validation process is operationally defined and robust.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique correctly identifies a potential circular validation issue if the manual annotations are from the same temporal window as the test set. This is a significant flaw that undermines the validation of automatic labels, and it requires addressing to ensure the robustness of the findings."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The preprocessing differences are acknowledged, but the choice to use native tokenization for the transformer is based on its ability to capture semantic nuances that stopword removal might overlook. However, I will conduct an analysis to demonstrate that stopwords do not significantly affect BM25's performance in this specific domain, thereby addressing the fairness of the comparison more robustly.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "While the concern about pre-trained knowledge is valid, we will include a comparison against a randomly initialized transformer in future work to isolate the effects of domain-specific training. This will allow us to clarify whether gains are due to fine-tuning on the support ticket corpus or leveraging pre-trained knowledge.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The risk of overfitting due to using the same validation set for tuning and early stopping is acknowledged. However, this design choice was made to maintain temporal separation, which is critical for the experiment. We will provide evidence that validation performance remains stable across random seeds to mitigate concerns about overfitting.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "While the concern about the tuning of BM25 is valid, it does not significantly impact the overall conclusions of the experiment. The current tuning is sufficient for the comparative analysis at this stage."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The critique regarding post-hoc stratified analysis is acknowledged, but it does not materially affect the primary evaluation metric. The analysis serves as a useful supplementary check rather than a core component of the methodology."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The acknowledgment of circular validation in F2 and the strengthened defenses for F1, F3, F4, and F5 indicate that there are significant concerns that require empirical testing to resolve. The adjustments made reflect a commitment to addressing the critiques while recognizing the need for further validation."
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Weak supervision from agent behavior produces valid relevance labels for training and evaluation",
+        "failure_mechanism": "Agent clicks/sends reflect convenience, position bias, and agent familiarity rather than true semantic relevance. The ~300 manual annotation set is too small (300/18 months of queries) to validate this assumption, and the 'sanity check' is not operationally defined.",
+        "evidence_test": "Train a model on automatic labels, evaluate on the manual annotation set. If MRR differs significantly (e.g., >10% relative), automatic labels are not valid proxies for true relevance.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The manual annotation set validates automatic label quality without contaminating the test evaluation",
+        "failure_mechanism": "If 'test queries' means queries from months 16-18, then manual annotations come from the same temporal window as the test set. This creates a circular validation: checking automatic labels on test-period data does not establish they are valid for training.",
+        "evidence_test": "Clarify whether manual annotations are from a completely held-out period (e.g., month 19-24) or from the test period. If from test period, this provides no evidence about label quality for training.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Both transformer and BM25 use identical input signals",
+        "failure_mechanism": "BM25 uses stopword removal while transformer uses native tokenization. Stopwords are discarded for BM25 but retained for transformer. This is asymmetric preprocessing - BM25 operates on degraded input.",
+        "evidence_test": "Run BM25 with same tokenization as transformer (no stopword removal). If performance changes significantly, the current comparison is unfair.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Transformer gains come from learning domain-specific semantic understanding",
+        "failure_mechanism": "Pre-trained checkpoint (e.g., DistilBERT trained on Wikipedia/web text) contains general language knowledge. Gains could derive from pre-trained knowledge rather than fine-tuning on support ticket corpus. No baseline to isolate this effect.",
+        "evidence_test": "Compare against randomly initialized transformer or one trained on non-domain corpus. If pre-trained initialization accounts for most gains, the hypothesis about 'support ticket semantics' is not demonstrated.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Validation set provides unbiased model selection",
+        "failure_mechanism": "Same validation set (months 13-15) is used for hyperparameter tuning, early stopping, and BM25 tuning. This creates risk of overfitting to validation set characteristics, even with temporal separation.",
+        "evidence_test": "Use nested cross-validation or separate tuning/evaluation sets within the validation period. Report validation performance variance across random seeds.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "BM25 baseline is fairly tuned",
+        "failure_mechanism": "Only 9 hyperparameter combinations tested for BM25. This may under-tune BM25 relative to transformer, creating an unfair comparison.",
+        "evidence_test": "Expand BM25 tuning grid or use automated hyperparameter optimization. Report BM25 validation curve to confirm tuning was sufficient.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Post-hoc stratified analysis controls for query-length and spelling confounds",
+        "failure_mechanism": "If certain query types concentrate in specific months, stratified analysis cannot fully correct for distribution imbalance created by temporal split.",
+        "evidence_test": "Report distribution of key features (query length, product area, spelling errors) across train/val/test splits. If imbalance exists, acknowledge limitation.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "Two FATAL flaws undermine the experiment: (1) weak supervision labels from agent behavior are assumed valid without evidence, and (2) the manual annotation validation set may be drawn from the test period, creating circularity. Additionally, preprocessing asymmetry and missing baselines prevent fair comparison between transformer and BM25.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_2_analysis": "I am contesting the challenges for findings F1, F3, F4, and F5, as I believe the design does address the concerns raised, even if my initial arguments were not fully articulated. I accept the findings for F2, F6, and F7, as they correctly identify flaws in the methodology that require acknowledgment.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The manual annotation check, while small, is designed to provide a preliminary validation of the automatic labels. We will analyze the correlation between automatic and manual labels, aiming for a threshold that indicates acceptable label quality. Additionally, we will document how the manual annotations account for position bias and agent familiarity, ensuring that our validation process is operationally defined and robust.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique correctly identifies a potential circular validation issue if the manual annotations are from the same temporal window as the test set. This is a significant flaw that undermines the validation of automatic labels, and it requires addressing to ensure the robustness of the findings."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The preprocessing differences are acknowledged, but the choice to use native tokenization for the transformer is based on its ability to capture semantic nuances that stopword removal might overlook. However, I will conduct an analysis to demonstrate that stopwords do not significantly affect BM25's performance in this specific domain, thereby addressing the fairness of the comparison more robustly.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "While the concern about pre-trained knowledge is valid, we will include a comparison against a randomly initialized transformer in future work to isolate the effects of domain-specific training. This will allow us to clarify whether gains are due to fine-tuning on the support ticket corpus or leveraging pre-trained knowledge.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The risk of overfitting due to using the same validation set for tuning and early stopping is acknowledged. However, this design choice was made to maintain temporal separation, which is critical for the experiment. We will provide evidence that validation performance remains stable across random seeds to mitigate concerns about overfitting.",
+        "r2_challenge_response": "STRENGTHENED"
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "While the concern about the tuning of BM25 is valid, it does not significantly impact the overall conclusions of the experiment. The current tuning is sufficient for the comparative analysis at this stage."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The critique regarding post-hoc stratified analysis is acknowledged, but it does not materially affect the primary evaluation metric. The analysis serves as a useful supplementary check rather than a core component of the methodology."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The acknowledgment of circular validation in F2 and the strengthened defenses for F1, F3, F4, and F5 indicate that there are significant concerns that require empirical testing to resolve. The adjustments made reflect a commitment to addressing the critiques while recognizing the need for further validation."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "multiround": true
+}

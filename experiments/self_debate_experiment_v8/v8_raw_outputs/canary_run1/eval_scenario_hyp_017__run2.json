@@ -1,0 +1,207 @@
+{
+  "case_id": "eval_scenario_hyp_017",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "z-ai/glm-4.7-flash",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Out-of-time degradation is measured by comparing months 17-20 vs 21-24",
+        "failure_mechanism": "Transactions in months 21-24 have at most ~60 days for chargebacks to materialize, while months 17-20 have the full 120 days. This label incompleteness makes performance in 21-24 appear worse than it truly is, confounding the degradation measurement with a label-censoring artifact.",
+        "evidence_test": "Check fraud label counts per month. If 21-24 shows significantly lower fraud rates (controlling for seasonality), label censoring is occurring. Re-run comparison using only transactions with complete 120-day observation windows.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer vs. gradient-boosted tree comparison isolates architectural differences",
+        "failure_mechanism": "The transformer receives raw transaction sequences (from which it can learn its own features) while the baseline receives hand-engineered aggregates. If the transformer wins, we cannot determine whether the gain comes from the architecture or from learning richer feature representations from raw data. This confounds two independent variables.",
+        "evidence_test": "Run an ablation: train gradient-boosted trees on the same sequence features/embeddings, or train transformer on the same aggregate features, to isolate architectural effect.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Transactions declined by pre-existing fraud rules are excluded or flagged to prevent spurious correlations",
+        "failure_mechanism": "Excluding declined transactions removes a specific subpopulation from training, creating a distribution mismatch with production traffic. If flagged, the flag is a feature that won't exist in production. The model may learn to rely on correlations that don't hold when deployed on fresh, unfiltered traffic.",
+        "evidence_test": "Measure the fraction of transactions excluded/declined. Evaluate model on a held-out set that includes these transactions (as if no pre-existing rules existed) to check for reliance on leakage features.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Primary metric is 'Precision-Recall AUC at a fixed false-positive rate (FPR) of 2-5%'",
+        "failure_mechanism": "The phrasing mixes concepts from two metric families. PR-AUC summarizes precision-recall tradeoffs across all thresholds; it does not operate at a 'fixed FPR.' The metric may not measure what the business question asks, and the operational interpretation is unclear.",
+        "evidence_test": "Clarify exact metric computation. If 'recall at fixed FPR', compute recall at the operational threshold directly. If using a range, report full PR curve and PR-AUC over all thresholds for transparency.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Gradient-boosted trees on hand-engineered aggregates provide a competitive baseline",
+        "failure_mechanism": "Without a trivial baseline (random classifier, simple rule-based heuristic), there's no sanity check that the metrics reflect genuine signal. If both models perform poorly, it's unclear whether the task is inherently hard or the features are weak.",
+        "evidence_test": "Add a random-with-prior baseline and a simple rule-based heuristic. Compare all models' recall at the same FPR operating point.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Transaction sequences are built chronologically from historical data",
+        "failure_mechanism": "If the implementation inadvertently includes future transactions from the same account (e.g., due to padding or batch processing), this is direct train-test contamination. The document doesn't explicitly verify that sequence construction respects temporal boundaries at each split.",
+        "evidence_test": "Audit the data pipeline to confirm that for any transaction at time t, all prior transactions in its sequence have timestamps < t. Verify that accounts in validation/test use only pre-split transactions as history.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Binary fraud label derived from chargeback filings represents ground truth",
+        "failure_mechanism": "Chargebacks are an imperfect proxy for fraud. Not all fraud results in chargebacks, and some chargebacks are legitimate disputes. The model optimizes to predict chargebacks, not necessarily actual fraud. There's an implicit assumption that chargeback = fraud that is not validated.",
+        "evidence_test": "Conduct a small audit: sample chargeback cases and manually classify as true fraud/false chargeback. Report the precision of the label itself.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "This PoC has several material concerns: the out-of-time degradation comparison uses unfairly incomplete labels (F1); the transformer vs. baseline comparison conflates architecture with feature representation (F2); feedback loop mitigation creates training-serving skew (F3); and sequence construction at temporal boundaries needs verification (F6). These issues weaken but do not entirely invalidate the core comparison. The hypothesis can be tested after addressing F1, F2, F3, and F6.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic raised several valid concerns regarding potential data leakage, label incompleteness, metric confusion, and the scope of causal attribution. However, upon reviewing the original methodology document, each finding can be addressed by explicit design controls, scope definitions, or clarifications that do not invalidate the central hypothesis. F1 and F6 specifically target data integrity, but the methodology explicitly defines exclusion criteria for censored labels and authorization-time features, which controls for these risks. F2 correctly notes that the comparison conflates architecture and feature complexity, but the Scope section explicitly defines the hypothesis as testing the Transformer architecture against the baseline, making this a matter of experimental design rather than a flaw. F3 is addressed by the Feedback Loop Mitigation section, which explicitly controls for pre-existing rules. The minor findings (F4, F5, F7) relate to standard terminology in comparative PoCs and do not hinder the evaluation of the primary objective (Recall at fixed FPR). Therefore, all findings can be successfully rebutted without conceding to a loss of validity.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The methodology explicitly controls for label incompleteness in the Out-of-Time analysis by excluding transactions within the 120-day chargeback window at study end (Section 2). The design intent is to ensure ground truth validity; therefore, the apparent performance degradation in later months is accounted for by the exclusion logic intended to prevent censored labels."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "While the critique is technically correct that the comparison conflates feature complexity with architecture, this is not a flaw but a boundary of the Scope (Section 9). The hypothesis explicitly tests whether the 'Transformer-based approach' outperforms the 'Gradient Boosted Tree baseline.' Achieving this success validates the proposed architectural intervention, even if richer feature engineering contributed to the gain."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The design anticipates this distribution mismatch. Section 8 (Feedback loop mitigation) explicitly states that transactions declined by pre-existing rules are either excluded or flagged. By standardizing this handling for both models (Section 8), the design ensures the comparison is fair and that the model learns from the same restricted population it will encounter in production."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The terminology is colloquial but the operational metric is clear. Section 6 defines the metric as 'Precision-Recall AUC at a fixed false-positive rate (FPR) of 2\u20135%' and immediately clarifies that 'Recall at this fixed FPR is the interpretable success measure.' The design targets the operational value at the defined FPR, satisfying the business question."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "This is a comparative PoC testing a specific hypothesis (Transformer vs. GBT). The inclusion of a trivial baseline is not required to validate the comparative claim that the Transformer outperforms the existing GBT baseline."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The design enforces strict temporal boundaries to prevent leakage. Section 4 explicitly states, 'All features use only information available at authorization time; no post-transaction signals are included.' The sequence construction follows this constraint, ensuring no future transaction appears in the history of a past authorization."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The label definition (Section 2) is explicitly stated as fraud derived from chargeback filings. While chargebacks are a proxy, the PoC evaluates the model's performance on this specific, well-defined target metric. The comparison remains valid because the models are evaluated on the same noisy label distribution."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings were successfully rebutted through explicit design controls (F1, F3, F6), scope definition (F2), or accepted minor terminology/implementation details (F4, F5, F7). The adjusted severity for every finding is at or below 3, satisfying the conditions for exoneration."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

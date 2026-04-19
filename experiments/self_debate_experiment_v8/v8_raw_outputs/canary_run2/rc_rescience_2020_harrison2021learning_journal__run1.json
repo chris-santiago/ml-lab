@@ -1,0 +1,252 @@
+{
+  "case_id": "rc_rescience_2020_harrison2021learning_journal",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "If models retain performance despite low visible attention on impermissible tokens, then attention weights can be manipulated and may fail to faithfully explain which input information the model is using",
+        "failure_mechanism": "The experiment measures whether attention can be suppressed and performance preserved, but never measures whether the model is actually using the impermissible information. A model could ignore attention weights while still relying on impermissible tokens through embeddings, skip connections, or other pathways. Accuracy alone cannot distinguish between: (1) model truly ignores impermissible tokens via alternative mechanisms, or (2) model still uses impermissible tokens but attention weights are suppressed. The hypothesis conflates 'attention is manipulatable' with 'attention is unfaithful', which are distinct claims.",
+        "evidence_test": "Measure whether removing impermissible tokens causes accuracy drops in the penalized vs unpenalized setting. If both settings show no accuracy drop after token removal, the model was not using those tokens regardless of attention weights. If penalized setting shows no accuracy drop after removal but unpenalized does, attention is manipulatable. If both show accuracy drops, attention suppression doesn't prevent information usage. This would be the actual test of the hypothesis.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Comparing performance and attention distributions between penalized and unpenalized settings is sufficient to evaluate whether attention weights faithfully explain model decisions",
+        "failure_mechanism": "The design lacks an essential baseline: what is the accuracy when impermissible tokens are completely removed from the training process? Without knowing the cost of actual token removal versus attention suppression, you cannot attribute performance to 'attention manipulation' versus 'the model simply ignoring the tokens through normal means'. The unpenalized setting with tokens present conflates: (1) model using tokens, (2) model using tokens but attention suppressed by architecture, (3) model not using tokens at all. Only removal-based ablation can isolate #1 from #3.",
+        "evidence_test": "Add an ablation condition where impermissible tokens are removed at training time and measure accuracy impact. If penalized and removed conditions show similar performance, the penalty achieves what removal does, meaning tokens weren't used. If penalized but not removed conditions diverge, the model learned to use tokens despite low attention. This would validate or invalidate whether attention suppression equals information disuse.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Synthetic tasks (Bigram Flip, Sequence Copy, Sequence Reverse) appropriately test whether attention weights explain model decisions in NLP",
+        "failure_mechanism": "These tasks have trivial memorization mechanisms that attention may or may not be optimal for, independent of explanation fidelity. Sequence Copy, for example, can be solved with direct path copying mechanisms in transformers that don't require attention to match input-output positions. Attention suppression on these tasks tests architectural constraints, not explanation faithfulness. The generalization to real NLP tasks (occupation prediction, SST) is asserted without verifying attention behavior matches on the synthetic tasks.",
+        "evidence_test": "Measure attention weight correlation with actual feature importance (via ablation) on synthetic tasks. If attention correlates with importance despite the penalty, the mechanism is different than claimed. If the penalty artificially breaks attention without changing actual information usage pathways, the synthetic tasks don't test what the hypothesis claims.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The penalty term that discourages attention to impermissible tokens produces measurable, intentional behavior changes in attention weights",
+        "failure_mechanism": "Attention penalties have been shown to sometimes cause the model to redistribute attention elsewhere (e.g., to [CLS], [EOS], or other tokens) rather than actually reducing token attention. The PoC does not verify that attention was suppressed on the target tokens versus merely redistributed. A model could penalize attention on impermissible tokens but increase attention elsewhere on the same tokens through multiple heads or layers, creating an illusion of compliance.",
+        "evidence_test": "Inspect attention distribution across all heads and layers, not just aggregated attention weights. Measure whether the sum of attention to impermissible tokens across all heads decreases, or whether attention merely shifts position (e.g., from early to late tokens in the sequence). Report attention histograms pre/post penalty to verify actual suppression.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Performance preservation in penalized settings proves that attention weights are unreliable explanations",
+        "failure_mechanism": "Attention weights are known proxies with limited correlation to actual feature importance in the literature. The hypothesis treats attention suppression as evidence of unfaithfulness, but the more fundamental claim is whether attention reflects information usage. If a model learns to suppress attention while using embeddings to encode impermissible tokens, that proves attention is manipulatable\u2014not that attention fails as an explanation. These are different claims: one tests if attention can be controlled, the other tests if attention explains.",
+        "evidence_test": "Use established attention faithfulness metrics (e.g., insertion/deletion curves, gradient-based importance) alongside attention weights to verify whether attention actually correlates with information contribution. If both correlation metrics and attention weights diverge after the penalty, the claim is supported.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The same experimental design applies equally to classification (BERT-style, BiLSTM) and sequence-to-sequence tasks",
+        "failure_mechanism": "Attention mechanisms differ fundamentally between encoder-only and encoder-decoder architectures. BERT-style models have bidirectional self-attention, while translation models have cross-attention that attends across sequences. A penalty that works on one architecture may not translate to another. The PoC asserts unified conclusions across architectures without verifying that attention suppression is comparable or that impermissible token behavior transfers between task types.",
+        "evidence_test": "Compare attention suppression patterns across architectures. Measure whether impermissible tokens are treated equivalently in encoder-only vs encoder-decoder models. If attention behavior differs significantly between architectures, the unified conclusions are not justified.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Accuracy is the appropriate metric for evaluating whether attention weights explain model decisions",
+        "failure_mechanism": "Accuracy only measures whether the model makes correct predictions, not whether it uses the 'right' features. A model could be accurate while using impermissible tokens. The hypothesis is about explanation faithfulness, which requires measuring feature-importance correlation, not just predictive accuracy. This is a secondary flaw because the PoC does measure attention distributions, but accuracy alone cannot establish the claim.",
+        "evidence_test": "Include feature attribution correlation metrics (e.g., attention vs. integrated gradients, attention vs. perturbation-based importance) alongside accuracy to directly measure explanation fidelity, not just performance.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Impermissible tokens introduced via wiki-based augmentation reflect realistic bias scenarios",
+        "failure_mechanism": "Wiki-based impermissible tokens may have different statistical properties than real-world protected attributes. The correlation between impermissible tokens and class labels in the augmented data may not match how bias manifests in production. This could affect whether attention suppression learned on these tokens generalizes to real-world bias scenarios.",
+        "evidence_test": "Test attention suppression on real bias datasets with known protected attribute correlations, not just synthetically augmented tasks. Measure whether the penalty term transfers to real-world sensitive attribute handling.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 2,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The PoC could benefit from measuring attention stability across multiple random seeds",
+        "failure_mechanism": "Attention weights can vary significantly with initialization and training stochasticity. Without multiple seeds, observed attention patterns might be artifacts of specific training runs rather than systematic model behavior.",
+        "evidence_test": "Run experiments with 5+ random seeds and report variance in attention weights and performance across seeds.",
+        "flaw_category": null
+      },
+      {
+        "finding_id": "F10",
+        "severity": 1,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The PoC does not report confidence intervals or statistical significance testing",
+        "failure_mechanism": "Without confidence intervals, it's impossible to determine whether observed attention or performance differences are statistically meaningful or noise.",
+        "evidence_test": "Report 95% confidence intervals for all reported metrics and perform hypothesis tests on attention and accuracy differences.",
+        "flaw_category": null
+      }
+    ],
+    "summary": "The PoC contains multiple FATAL flaws that fundamentally undermine its core claims. The primary issue is that the experiment never verifies whether impermissible information is actually being used by the model\u2014accuracy preservation after attention suppression does not prove attention weights are unfaithful explanations. Additionally, missing ablation baselines (token removal) and the conflation of 'attention manipulation' with 'attention unfaithfulness' invalidate the central hypothesis. While the synthetic task design and metric limitations are also problematic, these are secondary to the fundamental failure to measure what the hypothesis claims.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Analyzing each finding against the stated methodology:\n\nF1 (FATAL): The critic claims the experiment never measures whether the model is actually using impermissible information. However, the methodology explicitly states: \"The methodology first measures performance when impermissible tokens are removed from the input, using any resulting drop in accuracy as evidence that the model had been relying on those tokens.\" This is precisely the evidence_test the critic proposes. The critic's empirical claim that this measurement is missing is incorrect - it is present in the design.\n\nF2 (FATAL): Similarly, the critic asks for an ablation condition where tokens are removed. The methodology already includes this. The critic's claimed missing baseline is present in the design.\n\nF3 (FATAL): The critic questions whether synthetic tasks (Bigram Flip, Sequence Copy) test explanation faithfulness. However, the methodology applies these to test whether attention can be manipulated at all, then separately tests on real NLP tasks (occupation prediction, SST). The synthetic tasks test the mechanism; real tasks validate the phenomenon. This is a valid scope choice - testing principles on controlled tasks before applying to real domains.\n\nF4 (MATERIAL): The concern about attention redistribution (e.g., to [CLS] token) is a legitimate verification need. However, the design tests whether performance is preserved when attention is suppressed - if the model simply redistributed attention, task performance would likely degrade. The performance preservation metric acts as an indirect control against pure redistribution.\n\nF5 (MATERIAL): The critic distinguishes between \"attention is manipulatable\" vs \"attention is unfaithful.\" But the hypothesis explicitly links these: if attention can be manipulated while performance is preserved, then attention does not faithfully reflect information usage. This is the core claim being tested.\n\nF6 (MATERIAL): The concern about encoder-only vs encoder-decoder architectures is noted, but the methodology intentionally tests multiple architectures precisely to verify the phenomenon generalizes. This is a deliberate design choice.\n\nF7 (MINOR): While accuracy alone is insufficient, the methodology explicitly measures attention distributions in addition to accuracy. The design goes beyond just accuracy.\n\nF8 (MINOR): Wiki-based augmentation is acknowledged as a simplification, but the methodology also tests on real classification tasks (occupation prediction, gender identity). The design includes both synthetic and real data.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 3,
+        "justification": "The critic claims the experiment never measures whether the model uses impermissible information. However, the methodology explicitly measures performance when impermissible tokens are removed: 'using any resulting drop in accuracy as evidence that the model had been relying on those tokens.' The evidence_test proposed by the critic is already implemented in the design. The critic's empirical premise is incorrect."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The critic claims a baseline is missing where tokens are removed at training time. The methodology already includes token removal as a measurement: 'The methodology first measures performance when impermissible tokens are removed from the input.' The claimed missing control is present in the design."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The synthetic tasks test whether attention manipulation is possible in principle. The methodology separately tests on real NLP tasks (occupation prediction, gender identity, SST) to validate practical relevance. The scope is testing mechanism on synthetic data, verifying on real data. This is a deliberate experimental progression, not a flaw."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The concern about attention redistribution is noted, but the design uses performance preservation as an indirect control - if attention merely redistributed to [CLS] or other tokens without using impermissible information, task accuracy would degrade. The design tests at the hypothesis level: can attention be suppressed while performance is maintained? This tests the core claim without requiring granular head-by-head verification."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic distinguishes 'manipulatable' from 'unfaithful' as separate claims, but the hypothesis explicitly links them: if attention can be manipulated while preserving performance, then attention weights do not faithfully reflect what information the model uses. This is the exact mechanism being tested - manipulation demonstrates unfaithfulness."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The design intentionally tests multiple architectures (BERT-style, BiLSTM, encoder-decoder) to verify the phenomenon generalizes across attention mechanisms. This is a deliberate choice to strengthen the conclusion, not a flaw. If anything, testing across architectures strengthens the claim."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "While accuracy alone is insufficient for some claims, the methodology explicitly measures attention distributions alongside accuracy. The design goes beyond simple accuracy to examine the attention behavior itself. This is a MINOR concern about metric completeness, not a fundamental flaw."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The wiki-based augmentation is a simplification acknowledged in the design, but the methodology also tests on real classification tasks (occupation prediction, gender identity). The external validity concern is noted but does not invalidate the core mechanism test. This is a MINOR concern about generalization, below the threshold for design change."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All eight findings have adjusted severity \u2264 3 after rebuttal. The two FATAL findings (F1, F2) were based on incorrect empirical premises - the methodology already includes the token removal measurements the critic claimed were missing. The remaining findings are either valid design choices, scope-appropriate simplifications, or MINOR concerns that do not affect the experiment's validity. EXONERATE applies: all advancing findings have been successfully rebutted to adjusted severity \u2264 3."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

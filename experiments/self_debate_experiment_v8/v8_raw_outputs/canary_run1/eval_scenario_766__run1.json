@@ -1,0 +1,182 @@
+{
+  "case_id": "eval_scenario_766",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Users with \u22657 days prior activity are included; this population is representative of deployment",
+        "failure_mechanism": "Filtering for 7+ days of prior activity excludes new users and declining users\u2014precisely the populations most at risk of churn. The model trains on a biased subset and will be deployed on all users, including those it has never seen similar patterns from.",
+        "evidence_test": "Run the experiment on the full user population (including those with <7 days activity) and compare performance. Alternatively, compute what fraction of eventual churners are excluded by this filter.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Higher AUPRC than logistic regression indicates meaningful improvement",
+        "failure_mechanism": "Without a random or trivial baseline, 'higher than logistic regression' could still represent poor absolute performance. A model with AUPRC=0.15 on a 5% churn base could beat logistic regression while being useless in practice.",
+        "evidence_test": "Compute AUPRC for a random predictor (expected AUPRC \u2248 churn rate) and a rule-based predictor (e.g., predict all non-churn). Establish that the gradient-boosted model substantially exceeds these floors.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratified churn rates control for distribution shift across temporal splits",
+        "failure_mechanism": "Stratifying by outcome rate only balances the label distribution, not the feature distributions. User behavior patterns, session characteristics, and engagement metrics can shift substantially over 18 months (seasonal patterns, platform changes, competitive pressure) without affecting the overall churn rate.",
+        "evidence_test": "Compare feature distributions (means, variances) between training and test periods. If significant shifts exist, report performance degradation and consider domain adaptation techniques.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Enforcing precision \u226580% produces a operationally relevant model selection criterion",
+        "failure_mechanism": "The 80% precision threshold is an operational constraint (budget limitation), not an evidentiary one. A model that barely clears this threshold (80.1% precision, 3% recall) could be selected over a model with 79.9% precision and 40% recall\u2014despite the latter identifying 13x more true churners. This could mask inferior models.",
+        "evidence_test": "Report AUPRC as the primary selection metric without precision constraints, and report precision/recall curves. Show that results are robust across different precision thresholds.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Churn defined as cancellation within exactly 30 days correctly identifies at-risk users",
+        "failure_mechanism": "The 30-day cutoff is arbitrary. Users who cancel at day 31 or 60 are labeled as non-churned, yet they represent early signals of disengagement. The hypothesis does not validate that 30 days is the optimal window for the business objective.",
+        "evidence_test": "Experiment with alternative labeling windows (14, 45, 60, 90 days) and show that results are robust, or demonstrate that 30 days optimizes some business-relevant metric.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "7-day aggregation produces stable, reliable features",
+        "failure_mechanism": "Features like entropy of session timing and skip-rate percentiles require sufficient data. Users with only 1-2 sessions in the 7-day window may have features that are noisy or undefined. The hypothesis does not check feature reliability across different activity levels.",
+        "evidence_test": "Compute feature stability metrics (e.g., coefficient of variation across adjacent windows) for users with varying session counts. Report performance breakdown by activity level.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The experiment has two FATAL flaws: (1) filtering users for \u22657 days prior activity creates selection bias that excludes the highest-risk populations the model will need to predict in deployment, and (2) without a random baseline, superior AUPRC over logistic regression provides no evidence the model is practically useful. The MATERIAL findings concern distribution shift handling, the precision-threshold selection criterion, and the arbitrary 30-day labeling window.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Pass 1: Analysis of Critique Findings.\n\nF1 (FATAL, 7): The critic claims the \u22657 days activity filter biases the population by excluding new/high-churn users. My design intent in Section 1 and 8 is to evaluate the efficacy of 'raw event-level viewing... over 7 days'. Event-level features (entropy, hourly segmentation) cannot be computed without 7 days of data. Therefore, the filter is a prerequisite for the feature set, not a sampling bias. The PoC scope is defined as 'users with sufficient history for event-level analysis'. The critique conflates the PoC's feature-experiment scope with the platform's full population scope. This is a scope mismatch.\n\nF2 (FATAL, 7): The critic claims higher AUPRC than logistic regression does not prove utility without trivial baselines. The PoC's primary claim (Section 8) is 'achieve higher AUPRC', which is a relative improvement claim, not an absolute utility claim. AUPRC measures ranking quality. If Event-Level GBM beats Aggregate LR, the hypothesis is supported regardless of the absolute floor. The critique asks for an absolute utility baseline, which is beyond the comparative scope of this PoC.\n\nF3 (MATERIAL, 6): The critic claims stratified splits don't control feature distribution shifts. Section 7 'Confound Controls' explicitly addresses temporal drift by reporting AUPRC 'separately for each calendar quarter' and 'by user cohort'. If performance drops in a quarter, the confounding is detected and caveated. While the PoC does not report feature drift statistics, it reports the *impact* of drift (performance delta) on the test period, which is the relevant validation for a forward-looking deployment model. This is a design choice to report downstream impact rather than upstream statistics.\n\nF4 (MATERIAL, 5): The critic claims the 80% precision constraint masks inferior models (high recall vs. high precision tradeoff). The methodology clarifies in Section 4 that hyperparameter tuning is 'optimizing for AUPRC'. The precision constraint is an 'operationalized constraint' for deployment (Section 5) to filter the threshold, not the model selection metric. The claim is about AUPRC superiority. The precision constraint is a business rule for *action*, not an evaluation metric for *prediction quality*. The critique confuses operational thresholds with model evaluation.\n\nF5 (MATERIAL, 5): The critic claims the 30-day churn window is arbitrary. Section 1 defines the label as 'cancellation within exactly 30 days'. This is the business definition for the experiment. The PoC hypothesis is to predict *this specific outcome* (30-day cancellation), not 'true churn' (an undefined ground truth). Changing the label definition changes the target variable entirely. This is a design parameter of the business problem, not a methodological flaw.\n\nF6 (MINOR, 3): The critic claims 7-day aggregation may be noisy for low-activity users. The \u22657 day activity filter (Section 1) mitigates the time-dimension. The PoC claims 'achieve higher AUPRC' on the held-out set. Unless the feature noise is so high it dominates the signal, it does not invalidate the relative comparison. This is a data quality detail below the threshold for validity of the comparative hypothesis. It does not threaten the core finding that event-level features outperform aggregate ones within the feasible population.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -7,
+        "adjusted_severity": 0,
+        "justification": "The \u22657 days activity filter is a design prerequisite for calculating event-level features (entropy, hourly patterns) which require data volume to be meaningful. The PoC scope is explicitly testing 'Event-Level Gradient-Boosted Churn Prediction' on users capable of generating these features, not universal churn prediction for cold-start users. This is a scope boundary, not a bias flaw."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -7,
+        "adjusted_severity": 0,
+        "justification": "The hypothesis claims 'higher AUPRC than logistic regression', a relative improvement metric. AUPRC evaluates ranking quality. Even if absolute performance is low, a delta indicates the feature set adds value. Adding trivial baselines is best practice but does not invalidate the comparative finding between GBM and LR."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "Section 7 'Confound Controls' explicitly addresses temporal shifts by computing AUPRC 'separately for each calendar quarter'. This detects performance degradation caused by distribution shifts. The design prioritizes measuring the downstream impact on prediction quality (AUPRC) rather than upstream feature statistics, which aligns with the deployment goal."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Section 4 specifies model selection optimizes 'AUPRC'. The 80% precision constraint (Section 5) is an operational deployment threshold, not a model selection criterion. The PoC claims predictive superiority (AUPRC); the precision constraint validates business feasibility *after* model selection. The critique conflates evaluation metrics with operational constraints."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Section 1 defines churn as cancellation 'within exactly 30 days'. This is the business-defined target variable for the experiment. Changing the window would change the target variable entirely. The PoC tests prediction on the specified business definition, not the 'true' churn definition."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The \u22657 days filter ensures minimum temporal data. Feature stability at low activity is a data quality detail. Since the PoC compares GBM vs. LR on the *same* filtered population, the relative superiority of event-level features is not invalidated by noise in edge cases. This is immaterial to the core comparative hypothesis."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All critique findings were rebutted as either scope limitations, design choices aligned with the business problem, or immaterial concerns. No FATAL or MATERIAL flaws remained after adjustment, confirming the methodology is sound for its intended PoC scope."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "case_id": "hyp_003_regular",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "x-ai/grok-4.1-fast",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The logistic regression baseline is trained on the same binary churn labels (churn=1 if churn within 90 days, else 0) as the survival model, and censored accounts are correctly handled as non-events.",
+        "failure_mechanism": "Survival model uses censoring via partial likelihood, which correctly accounts for unknown outcomes beyond the observation window. Logistic regression cannot incorporate censoring; if censored accounts are incorrectly labeled as churn=0 (non-churn), the baseline learns from mislabeled data, degrading its performance and artificially inflating the apparent benefit of the GBM. If censored accounts are omitted, the baseline is trained on a non-representative subset, also biasing results.",
+        "evidence_test": "Compare baseline performance under three label treatments: (a) censored as 0 (current), (b) censored excluded, (c) censored weighted via inverse probability of censoring weighting (IPCW) or using a survival\u2011appropriate baseline (e.g., discrete\u2011time survival logistic regression). A significant drop in baseline concordance when censored are properly handled would indicate the original comparison is biased.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The gradient\u2011boosted tree model is trained with a Cox partial\u2011likelihood loss objective, ensuring it optimizes for survival ranking.",
+        "failure_mechanism": "Many GBM libraries default to a regression (e.g., squared error) objective unless explicitly overridden. If the code relies on framework defaults or omits the objective parameter, the model will be fit to a pseudo\u2011target (e.g., log\u2011transformed time or binary label) using an inappropriate loss, yet still produce risk scores that can be evaluated with concordance. This yields plausible\u2011looking numbers but does not reflect the intended survival modeling mechanism.",
+        "evidence_test": "Inspect the training script or logs to verify the objective argument (e.g., `objective='survival:cox'` for XGBoost or `objective='coxph'` for LightGBM). Alternatively, retrain the model with an incorrect objective (e.g., regression) and observe whether concordance on the test set drops substantially; a large drop would confirm that the reported results depend on the correct loss being used.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The Cox proportional\u2011hazards assumption underlying the partial\u2011likelihood loss holds for the data, so the survival model is correctly specified and its advantage over logistic regression is due to richer features and temporal modeling.",
+        "failure_mechanism": "If hazards are non\u2011proportional (e.g., the effect of a feature changes over the 90\u2011day window), the Cox loss is misspecified. The GBM may still learn a useful ranking, but the hypothesized benefit of the \u201csurvival formulation\u201d is no longer valid; any improvement could be attributed solely to the richer feature set or the GBM\u2019s flexibility, not to the survival\u2011specific loss.",
+        "evidence_test": "Test the proportional\u2011hazards assumption on the training data (e.g., Schoenfeld residuals test or time\u2011varying coefficient plots). If the assumption is rejected, re\u2011fit a model that relaxes PH (e.g., a GBM with time\u2011dependent interactions or a discrete\u2011time survival model) and compare its performance to the original Cox\u2011GBM. A significant performance gap would indicate that the original claim rests on an unverified prerequisite.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "All features used for prediction are computed solely from information available at or before the snapshot date, guaranteeing no temporal leakage.",
+        "failure_mechanism": "Feature engineering steps (e.g., computing sentiment trajectories, payment\u2011velocity trends, or seat\u2011utilization volatility) might inadvertently incorporate data that occurs after the snapshot due to off\u2011by\u2011one errors, inclusive window definitions, or using future\u2011looking aggregations (e.g., \"mean over the past 12 months\" that includes the current month\u2019s future payments if the snapshot is not aligned to month boundaries). Such leakage would inflate performance, especially in the temporal validation splits where future data should be unseen.",
+        "evidence_test": "Perform a leakage audit: for a random sample of snapshots, record the latest timestamp used in each feature and assert it is \u2264 snapshot date. Alternatively, train a model with the same pipeline but shuffle the feature timestamps relative to snapshots (destroying any real signal) and verify that performance collapses to chance; if performance remains high, leakage is likely present.",
+        "flaw_category": "silent_misconfig"
+      }
+    ],
+    "summary": "The PoC presents a strong experimental design but contains several critical flaws: the baseline logistic regression likely mishandles censored data, the survival model may be trained with an incorrect objective, the proportional\u2011hazards assumption is unverified, and there is a risk of temporal leakage in feature construction. Together, these issues threaten the validity of the claimed superiority of the gradient\u2011boosted survival model.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 (FATAL 9): The critic correctly identifies a potential issue with how the logistic regression baseline handles censored observations in the binary 90-day churn labels. The methodology defines outcomes as 'churn=1 if cancels within 90 days; churn=0 or censored if remains active beyond 90 days,' with right-censoring for accounts active at data end. This phrasing distinguishes censored cases, and the survival model (Cox partial likelihood) handles them correctly by incorporating event times and censor flags. However, the static logistic regression, being binary classification, likely treats censored snapshots (where follow-up <90 days due to data end) as churn=0, introducing label bias: censored cases are a mix of true churners and non-churners, but labeled non-churn, underestimating risk and degrading baseline performance relative to the survival model. Censoring primarily affects later test snapshots (months 34-36), but rates are verified balanced across splits (Control 8.6), mitigating shift but not eliminating bias. No explicit handling like IPCW, exclusion of incomplete cases, or discrete-time logistic is described for the baseline, making this a valid methodological gap for fair comparison. The sensitivity analysis (Control 8.3) isolates features but not censoring handling. While common in PoCs and bias small if censoring rates low (~few % based on 90d/36mo), it risks inflating survival advantage, aligning with silent_misconfig. Uncertain: exact censoring % and label code for logistic; design ambiguity on 'churn=0 or censored' for binary model.\n\nF2 (FATAL 8): Critic assumes library defaults to non-survival objective (e.g., regression), producing invalid risk scores despite concordance evaluation. However, Section 5 explicitly states 'configured for survival analysis using Cox partial likelihood loss' (e.g., XGBoost 'survival:cox' or LightGBM equivalent), with no ambiguity on intent. This is a named design choice matching library capabilities (both support Cox natively). No evidence in methodology suggests omission or default reliance; training logs/code inspection (evidence test) would confirm, but presumption is sound implementation per design. Common failure in wild code, but not here\u2014critique projects generic error onto specified config.\n\nF3 (MATERIAL 5): Critic requires verification of Cox PH assumption, claiming violation invalidates 'survival formulation' benefit attribution. Methodology adopts Cox as 'theoretically sound approach' for time-to-event with censoring (Section 5), but does not explicitly claim/test PH holds; hypothesis tests empirical outperformance in concordance (ranking), not hazard inference. Tree-boosted Cox (GBM) is flexible, capturing interactions/non-linearities that mitigate mild PH violations common in prediction tasks; concordance emphasizes ranking pairs, robust to proportionality issues. No PH test in controls (e.g., Schoenfeld residuals), but scope is prediction utility (top-k recall, etc.), not causal inference. Sensitivity analysis (8.3) isolates formulation vs. features. Uncertain: true PH status without test, but unverified prereq not fatal for ranking metric; many production survival models proceed without strict PH.\n\nF4 (MATERIAL 5): Possible off-by-one leakage in lookbacks (90d ending at snapshot, 12mo billing). Section 4 specifies 'aggregated over the 90-day lookback window ending at the prediction snapshot' and 'billing-history features ... over the preceding 12 months,' with chronological splits (Section 3) and 'information available at or before snapshot date' (claim). Controls include temporal ordering, feature window parity (8.1), and information timing documentation (8.2). Monthly snapshot alignment minimizes boundary errors; preprocessing fit on train only. Shuffle test (evidence) would collapse signal if leaky, but design precludes via timestamp-respecting aggregation. Valid generic risk, but addressed by controls; uncertain only if code bugs, not design.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "Valid concern on logistic baseline censoring handling ambiguity (likely treats censored as 0, biasing labels low), not explicitly controlled beyond balanced rates (8.6); empirical test needed to confirm label logic, censoring %, and baseline re-runs with IPCW/exclusion to quantify bias impact."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "Design explicitly configures GBM for Cox partial likelihood (Section 5: 'configured ... using Cox partial likelihood loss'), overriding defaults; matches library support (XGBoost/LightGBM survival objectives), confirming intended survival mechanism independent of generic misconfig risks."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "PH assumption verification outside experiment scope (prediction/ranking via concordance/top-k, robust to violations); hypothesis tests empirical outperformance, not theoretical inference, with GBM flexibility mitigating issues (Section 5, Metrics 7)."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Lookbacks explicitly end at snapshot ('90-day ... ending at the prediction snapshot,' 'preceding 12 months'; Section 4), enforced by chronological splits (3), window parity (8.1), and timing control (8.2); design precludes leakage via snapshot alignment."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 requires deferral for empirical confirmation of baseline censoring handling and bias quantification, while others are rebutted with adjusted severity \u22644; no concessions \u22657, enabling targeted test without design overhaul."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=9, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

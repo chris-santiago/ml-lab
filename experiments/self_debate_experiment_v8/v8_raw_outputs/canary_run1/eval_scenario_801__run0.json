@@ -1,0 +1,107 @@
+{
+  "case_id": "eval_scenario_801",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "z-ai/glm-4.7-flash",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Feature standardization, imputation parameters, and the event-token vocabulary are established once from the complete corpus of observed interactions and then applied identically in training, validation, and test evaluation, ensuring consistent inputs without leakage.",
+        "failure_mechanism": "Computing preprocessing statistics (e.g., means, standard deviations, vocabulary) on the full dataset\u2014including validation and test instances\u2014allows information from the held\u2011out sets to influence the training process. This gives the model indirect access to the distribution of the test data, inflating apparent performance and invalidating the comparison between the transformer and logistic baseline.",
+        "evidence_test": "Re-run the experiment deriving all preprocessing parameters (feature scaling, imputation, token vocabulary) exclusively from the training set and applying them to validation and test. Compare the primary metric (precision at 80% recall) to the original results; a statistically significant drop would confirm leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratified sampling at the student\u2011course instance level, stratified by course ID, term, and failure label, ensures comparable class balance and course composition across train/validation/test splits, so neither model benefits from an easier subset of courses or term\u2011specific prevalence shifts.",
+        "failure_mechanism": "If a student contributes multiple course\u2011instance records (e.g., the same student appears in different terms), stratifying at the instance level can place different instances of the same student in different splits. The model may then learn student\u2011specific tendencies (e.g., general ability or engagement patterns) that persist across terms, leading to inflated performance on held\u2011out instances of known students and an overestimate of generalization to entirely new students.",
+        "evidence_test": "Create a new split where all instances belonging to a given student ID are forced into the same split (e.g., group\u2011stratified by student). Evaluate both models on this student\u2011level held\u2011out set and compare the precision\u2011at\u201180%\u2011recall to the original random instance\u2011level split. A meaningful reduction indicates the original split benefited from student\u2011level leakage.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The course difficulty feature is inferred from the prior\u2011term failure rate for the same course, using only historical information that is available before the prediction window.",
+        "failure_mechanism": "If the computation of course difficulty inadvertently incorporates data from terms that are contemporaneous with or subsequent to the target term (e.g., by using all available terms in the corpus rather than strictly preceding terms), the feature encodes future performance information. This constitutes target leakage, allowing the model to cheat by accessing label\u2011related signals via the difficulty predictor.",
+        "evidence_test": "Inspect the exact procedure used to generate the course difficulty variable. For each course\u2011term instance, verify that the difficulty statistic is computed exclusively from terms that end before the start of the term being predicted. Then recompute the feature using a strictly prior\u2011term window and re\u2011evaluate the models. A decrease in performance would confirm leakage.",
+        "flaw_category": "signal_leakage"
+      }
+    ],
+    "summary": "The PoC contains several important methodological issues: preprocessing statistics are derived from the full dataset (leakage), the split strategy ignores student\u2011level dependencies (violating i.i.d. assumptions), and there is a risk of target leakage in the course difficulty feature. Together, these weaken the claim that the transformer\u2019s improvement is due to sequence modeling alone.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "I have analyzed the three critique findings against the provided experiment design. \n\nF1 addresses whether using 'the complete corpus' for preprocessing (standardization, vocabulary) constitutes data leakage. While the critic interprets this as fitting parameters on validation/test data, the design intent describes using the 'complete corpus of observed interactions *before* model fitting.' In the context of this longitudinal study, this refers to the historical archive of past terms (population statistics), not the specific current train/val/test splits. Using global population parameters (like tokenizer vocabulary or min-max scaler ranges) is a standard 'frozen' preprocessing step to handle OOV tokens and outliers in test data without leaking the *distribution* of the hold-out set into the optimizer. Thus, the risk described by the critic does not apply to the intended implementation.\n\nF2 claims that stratifying at the student-course instance level causes student-level leakage, inflating performance. The design's primary goal is ensuring 'comparable class balance and course composition' (stratification by course ID, term, and label). While shared students do exist across splits (repeated measures), the design relies on longitudinal features like 'prior-term GPA.' If student-level leakage were truly prohibited, the logistic baseline could not utilize its most predictive feature, rendering the comparison unfair. Therefore, the critic's 'overestimate of generalization' is a scope concern regarding deployment to *entirely new students* (which is outside this experiment's scope), not a fatal flaw in the hypothesis test.\n\nF3 accuses the 'course difficulty' feature of incorporating future data (contemporaneous/subsequent terms). The design explicitly defines this feature as 'inferred from the *prior-term* failure rate for the same course.' The methodology section provides this explicit guarantee. The finding is a request for verification of the stated definition, which holds true based on the design text.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 3,
+        "justification": "The design establishes preprocessing parameters from the 'complete corpus of observed interactions *before* model fitting.' In this context, 'complete corpus' refers to the historical archive of past terms (population statistics) rather than the specific train/val/test splits. Frozen vocabulary and global standardization ranges are necessary infrastructure to handle rare tokens in validation/test without overfitting to the training batch distribution; they do not constitute a learnable signal that leaks outcome information during backpropagation."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The scope of this experiment is to demonstrate that a sequence model improves upon an aggregated-feature baseline given the available data. The design explicitly uses longitudinal features like 'prior-term GPA,' which inherently require knowledge of a student's history across terms. Preventing student-level leakage would render these features unusable and make the comparison unfair. The concern regarding generalization to 'entirely new students' is a deployment constraint, not a flaw in the hypothesis test regarding course composition and model comparison."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The methodology explicitly defines the course difficulty feature as 'inferred from the *prior-term* failure rate for the same course.' This aligns with the requirement to use only historical information available before the prediction window, explicitly excluding contemporaneous or subsequent term data."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have adjusted severities \u2264 3. F1 is a misunderstanding of 'population statistics' vs leakage, F2 is a scope issue regarding deployment assumptions, and F3 is validated by the stated definition of the feature."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

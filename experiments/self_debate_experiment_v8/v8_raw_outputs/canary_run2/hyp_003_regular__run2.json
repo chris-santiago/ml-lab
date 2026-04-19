@@ -1,0 +1,132 @@
+{
+  "case_id": "hyp_003_regular",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The comparison between the GBM survival model and the Logistic Regression baseline isolates the effect of the 'survival formulation' and 'richer features'.",
+        "failure_mechanism": "The experiment introduces a massive confounding variable: the feature sets are not aligned. The GBM receives longitudinal trends (trajectories, velocity, 12-month history), while the Logistic Regression receives only a static snapshot (last month). Any performance gain can be attributed entirely to the information content of the features rather than the model architecture or the survival loss function. It is impossible to tell if a simple Logistic Regression with the rich features would have performed just as well as the GBM survival model.",
+        "evidence_test": "Train a Logistic Regression model using the exact same feature set as the GBM (longitudinal trends and billing history) and compare its concordance index to the GBM survival model.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The use of a 90-day follow-up horizon for binary outcomes in the baseline and survival formulation is consistent and fair.",
+        "failure_mechanism": "The PoC describes the outcome for the baseline as binary (churn=1 if cancels within 90 days). However, in survival analysis, 'censoring' occurs when an event hasn't happened *yet*. If an account is active at day 91, it is a 'non-event' for a 90-day binary classifier, but 'censored' for a survival model. By forcing a 90-day window on both, the researcher may be inadvertently converting a survival problem into a classification problem, potentially neutralizing the theoretical advantage of the Cox partial likelihood loss (which leverages the exact timing of events) and making the Brier score or Concordance index calculations inconsistent between the two model types.",
+        "evidence_test": "Compare the performance of the GBM survival model using the full time-to-event data versus a version of the GBM trained as a binary classifier on the 90-day window.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split prevents label leakage.",
+        "failure_mechanism": "In B2B SaaS, accounts often have multi-year contracts. If the 'Training set' contains a snapshot of Account A in Month 20 and the 'Test set' contains a snapshot of the same Account A in Month 32, the model may learn account-specific identities (ID leakage) rather than generalizable churn signals. If the model overfits to the 'identity' of high-churn-risk accounts that appear in both sets, test performance will be inflated.",
+        "evidence_test": "Perform a 'leave-one-account-out' validation or ensure that no account appearing in the test set ever appeared in the training set, regardless of the snapshot date.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Log-transforming skewed features is sufficient preprocessing for GBMs.",
+        "failure_mechanism": "While not fatal, GBMs (tree-based models) are invariant to monotonic transformations of features. Log-transforming them provides no mathematical benefit to the tree splitting process, though it may assist the Logistic Regression baseline. This is a minor misalignment in preprocessing logic.",
+        "evidence_test": "Compare GBM performance with and without log-transformations; the results should be nearly identical.",
+        "flaw_category": "defensible_unconventional"
+      }
+    ],
+    "summary": "The PoC suffers from a critical baseline flaw: it compares a high-capacity model with rich longitudinal features against a low-capacity model with minimal static features, making it impossible to attribute success to the survival methodology. Additionally, potential account-level leakage across the temporal split could inflate results.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1: The critic claims the feature set misalignment invalidates the comparison, asserting it is 'impossible to tell' if features or model drive the gain. However, Section 8 Control #3 explicitly mandates a 'Sensitivity analysis: a GBM variant trained on only baseline features' to isolate feature contribution. This evidence directly contradicts the critic's claim of impossibility. The primary experiment tests the *system* (Model+Features) vs Baseline, which is valid for the stated objective (Section 1). F2: The critic argues the 90-day binary conversion neutralizes the survival advantage. However, the survival model (GBM) is trained on time-to-event and censoring info (Section 5), leveraging more granular signal than the binary baseline. The 90-day horizon is the prediction window, not the limit of data usage. The survival formulation provides a distinct information advantage during training, justifying the comparison. F3: The critic fears account ID leakage across temporal splits. However, Section 4 lists usage-based features with no Account ID features. Temporal splitting (months) is the standard approach for predicting future churn behavior of existing accounts. Leakage requires ID features, which are absent. F4: Log-transforms for GBMs are indeed less impactful than for linear models, but they aid the LR baseline and data normalization. This is an implementation detail with no bearing on the hypothesis test.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The finding claims it is 'impossible to tell' if features or model drive performance, but Section 8 Control #3 explicitly designates a GBM variant with baseline features to isolate the feature contribution. This empirical control exists within the design, making the claim of impossibility factually incorrect."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The GBM survival model is trained on exact time-to-event and censoring data, capturing more information than the binary baseline. This information asymmetry is a deliberate design choice to test the value of the survival formulation's ability to leverage temporal signals, not a methodological flaw."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The experiment scope is temporal forecasting of churn for existing accounts, not generalization to new accounts (which would require leave-one-account-out). Since Section 4 excludes Account IDs from the feature set, ID leakage is not possible; the temporal split correctly simulates the deployment pipeline."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "While log-transforms are less critical for tree splits, they support the LR baseline and ensure data consistency across models. This is a minor implementation detail that does not affect the validity of the core hypothesis comparison."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All critique findings have been reduced to adjusted severity \u2264 3. The F1 finding's claim of impossibility is contradicted by documented sensitivity controls, and the other critiques misunderstand the temporal scope or design intent."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

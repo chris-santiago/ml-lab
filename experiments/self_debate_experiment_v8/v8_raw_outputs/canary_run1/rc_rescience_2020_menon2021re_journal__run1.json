@@ -1,0 +1,107 @@
+{
+  "case_id": "rc_rescience_2020_menon2021re_journal",
+  "stratum": "mixed",
+  "flaw_category": "ambiguous_evidence",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "z-ai/glm-4.7-flash",
+    "defender": "mistralai/mistral-small-2603",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The hybrid anomaly score, which relies on PSNR for reconstruction quality, accurately correlates semantic anomalies with high error.",
+        "failure_mechanism": "PSNR (Peak Signal-to-Noise Ratio) is a pixel-intensity-based metric sensitive to global luminance, noise, and lighting shifts but largely insensitive to semantic content errors. An event can be fundamentally abnormal (e.g., a fight, a collision) while maintaining high pixel similarity to surrounding normal frames, resulting in a falsely low anomaly score. Using PSNR ties the performance to texture fidelity rather than conceptual deviation.",
+        "evidence_test": "Verify the correlation between ground-truth anomaly masks and the reconstruction error/PSNR distribution. Findings should show that a non-trivial subset of anomalies has reconstruction errors (or PSNR) statistically indistinguishable from the normal distribution.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Test-time memory updating successfully adapts to normal patterns without hallucinating anomalies as normality.",
+        "failure_mechanism": "During inference, the system lacks a hard boundary defining 'normality' aside from reconstruction quality. If an anomalous feature vector can be reconstructed with sufficient accuracy, the 'compactness' objective will encourage the memory module to incorporate this feature to minimize the feature-reconstruction loss. By adding the anomaly to the memory bank, the distance metric between the anomaly and its nearest neighbor (itself) decreases, artificially lowering the anomaly score and failing to flag the anomaly.",
+        "evidence_test": "Analyze the trajectory of memory updates during inference. Check whether unique feature vectors (e.g., corresponding to anomalous frames) are being added to the memory bank over time.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Performance improvements over the 'non-memory' baseline are attributable to the memory module itself.",
+        "failure_mechanism": "The 'non-memory' baseline likely consists of a standard encoder-decoder trained only on reconstruction. The 'memory' variant includes auxiliary losses (compactness/separateness) and feature-matching constraints. Comparing these two models is invalid because the feature learning dynamics are fundamentally different; the auxiliary losses alone shape the representation, not just the memory module. Therefore, observed performance gains could be due to the auxiliary losses rather than the memory storage/search mechanism.",
+        "evidence_test": "Run a controlled experiment where a model is trained with the Memory architecture but has the memory module frozen or disabled at inference. Compare this to the trained Memory model to isolate the contribution of the memory module to the scoring mechanism.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "The hypothesis fails to isolate the causal impact of the memory module due to confounding training objectives and relies on a metric (PSNR) empirically proven to correlate poorly with semantic anomaly, while the test-time adaptation protocol risks absorbing anomalies into the memory bank.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Starting with F1: The critique argues PSNR is insensitive to semantic anomalies. This is correct in general, but the design intent in MNAD is not to rely solely on PSNR. The hybrid score explicitly includes L2 distance between query features and retrieved memory items. The semantic anomaly is meant to be captured by the memory matching term rather than reconstruction quality. The feature L2 term is designed to fail on anomalous features because normal features match stored items closely, while anomalous features do not. Therefore, PSNR alone does not drive the semantic detection. The evidence_test proposed by the critic (correlation between PSNR and ground-truth masks) is irrelevant to the hybrid measure actually used. The methodology defends against this critique by construction \u2014 PSNR plays a minor role in the hybrid score and is complemented by feature-memory distance.\n\nFor F2: The critique correctly identifies a potential failure mode: anomalous features being absorbed into the memory during test-time updating. This is a genuine risk. The design intent is to deploy test-time memory updating to better approximate the normal data manifold at test time, but the implementation lacks safeguards against absorbing anomalies. There is no explicit mechanism to reject or gate the incorporation of anomalous features into the memory bank. This is a real and material flaw \u2014 it changes the recommendation because the system\u2019s anomaly detection could degrade pseudorandomly as it sees novel anomalies. The PoC does not validate whether this happens. The evidence_test is reasonable.\n\nFor F3: The critique argues that the gains from the memory model may come from auxiliary losses rather than memory itself. This is valid \u2014 the memory variant trains with separateness/compactness, has feature-matching constraints, and uses memory retrieval during inference. The non-memory variant lacks these. Therefore, the comparison is confounded. The design intent of the memory module cannot be isolated via the existing experiments. The evidence_test proposed is sound and necessary.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -8,
+        "adjusted_severity": 0,
+        "justification": "Hybrid anomaly score fuses PSNR with L2 distance between query features and their nearest memory items. Semantic anomalies are intended to manifest in high L2 feature-memory distance. PSNR component alone is not decision-critical. PSNR is included as it is a standard reconstruction metric, but the memory-distance term is the semantic discriminator. Therefore, the metric limitation critique misses the design intent: PSNR is not relied on for semantic detection."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critique correctly identifies a real failure mode: anomalous frames could be absorbed into the memory during test-time updating, reducing anomaly scores. There is no mechanism in the PoC to prevent such absorption, and the failure risks invalidating the inference-time procedure. This is a genuine material flaw requiring correction."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critique is correct. The memory variant and non-memory variant differ in auxiliary objectives and feature constraints. This makes the ablation invalid for attributing gains to the memory module. A controlled experiment isolating memory contribution is required."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "Two FATAL findings (F2 and F3) are CONCEDEd and remain above adjusted severity 3 after rebuttal, meeting the threshold for critique_wins. F1 was rebutted and reduced to adjusted severity 0, but the presence of materially conceded flaws determines the overall outcome."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=6, CONCEDE \u2192 critique_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "2 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

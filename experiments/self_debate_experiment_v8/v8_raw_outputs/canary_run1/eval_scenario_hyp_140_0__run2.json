@@ -1,0 +1,107 @@
+{
+  "case_id": "eval_scenario_hyp_140_0",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Analyst disposition decisions recorded within 7 days serve as accurate ground truth labels for alert maliciousness.",
+        "failure_mechanism": "Analysts may inconsistently classify ambiguous alerts due to fatigue, varying expertise, or evolving threat definitions, imprinting noise into labels that the model learns as signal, degrading generalization even if stratified checks show average stability.",
+        "evidence_test": "Compute Cohen's kappa or Fleiss' kappa inter-analyst agreement on a double-annotated subset of alerts; compare model calibration and PR-AUC across subsets stratified by individual analyst or shift time.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding alerts without a disposition within 7 days minimizes label noise without biasing the label distribution or prevalence of hard cases.",
+        "failure_mechanism": "Unresolved alerts may systematically skew toward one class (e.g., low-severity benign alerts deprioritized or persistent malicious ones requiring >7 days investigation), altering class imbalance or enriching the dataset with easier cases, causing inflated PR-AUC on test that vanishes if policy changed.",
+        "evidence_test": "Compare label proportions, alert severity distributions, and entity types between included and excluded alerts; retrain/evaluate models using proxy labels (e.g., eventual disposition if available later) or imputation for unresolved cases and check PR-AUC delta.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A fixed 30-day lookback window provides sufficient historical context for all alerts regardless of entity age or novelty.",
+        "failure_mechanism": "Newly observed entities (e.g., first-time users or hosts) yield sparse graphs and zero/incomplete tabular aggregates, forcing the model to fall back on the current alert's features alone; novel attacks often target such entities, causing performance collapse in deployment where new entities are common.",
+        "evidence_test": "Stratify test set performance (PR-AUC, P@R=0.9) by entity age (days since first event in full dataset); compare to overall and check if graph model advantage holds or reverses on youngest bin (<30 days history).",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The design is methodologically strong with temporal isolation, matched baselines, and planned stratifications addressing key confounds, but relies on unverified assumptions about label quality and uniform entity history that could undermine the claim of tGNN superiority if violated.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Analysis of each finding:\n\n**F1 (Label noise from analyst disposition):** The critic raises a legitimate concern about inter-analyst reliability in SOC triage labels. However, the core hypothesis tests whether tGNN outperforms baselines (XGBoost/LightGBM/Transformer) - and ALL models use identical labels from the same analyst dispositions. Any label noise from analyst inconsistency would affect all models equally, preserving the validity of the comparative experiment. The methodology already includes post-hoc stratification by analyst in Section 7 to check for performance drift. The critic's suggested evidence test (Cohen's kappa) would be valuable for production deployment but is not required to validate the comparative hypothesis. The concern is real but does not invalidate the relative comparison between models.\n\n**F2 (Selection bias from 7-day exclusion):** This is a valid concern about potential selection bias. However, the methodology explicitly states this is an operational realism choice - SOC analysts already perform this triage, and alerts without 7-day disposition are excluded to minimize noise (Section 1). The critic's concern about systematic skew is speculative and would affect ALL models equally if present. The evidence test requires counterfactual evaluation (retraining with proxy labels) that is not feasible in the PoC scope. This is a known trade-off, not an unidentified flaw.\n\n**F3 (Entity age/performance on new entities):** This is the strongest finding. The methodology uses a 30-day lookback window but does not stratify test performance by entity age. New entities will have sparse graphs, and the critic correctly notes this could cause performance degradation. However, the design intent (Section 3) specifies the experiment tests whether graph structure adds value over tabular/sequential baselines - not whether the model handles cold-start equally well. The experiment is methodologically sound for its stated purpose. If tGNN outperforms baselines specifically on established entities, that remains a valid finding. The critic's evidence test is reasonable but would require post-hoc analysis beyond the PoC scope.\n\nAll three findings are legitimate concerns, but none individually or collectively invalidate the comparative hypothesis. The experiment tests whether graph structure provides additional predictive value over matched baselines - and this comparison remains valid regardless of label noise or entity age effects that apply equally to all models.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The concern about analyst label noise is legitimate but applies equally to all models in the comparison. Section 7 explicitly includes 'stratified post-hoc analysis on test subsets (by month, incident type, or analyst)' to check for performance stability. The comparative hypothesis (tGNN vs baselines) remains valid because all models train on identical labels. Inter-analyst reliability testing (Cohen's kappa) would be valuable for production trust but is not required to validate the comparative experiment design."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The 7-day exclusion is an explicit design choice (Section 1) justified by operational realism - SOC analysts already operate with this triage workflow. While selection bias is theoretically possible, the critic's evidence test (comparing included vs excluded distributions) would not change the comparative result between models since both receive identical training data. The exclusion policy is a known constraint acknowledged in the methodology, not an unidentified flaw."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "Performance on new entities is a valid concern, but the experiment's core hypothesis tests whether graph structure adds value over baselines - not whether the model handles cold-start entities equally. The 30-day lookback window is a design parameter (Section 3), not an unverified assumption. Even if tGNN performs worse on entities with <30 days history, if it outperforms baselines on the primary metric, the hypothesis is supported. The critic's suggested stratification is a valuable post-hoc analysis but not required to validate the methodology for its stated scope."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All three findings have been rebutted with severity adjustments that bring adjusted scores to \u22642 (well below the threshold of 3). EXONERATE applies: the comparative experiment design is sound - all models use identical labels and data splits, and the core hypothesis (tGNN vs baselines) remains valid regardless of label noise or entity age effects that apply equally across models. No finding rises to a level that changes the recommendation."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

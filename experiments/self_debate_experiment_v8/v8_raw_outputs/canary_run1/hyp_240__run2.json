@@ -1,0 +1,117 @@
+{
+  "case_id": "hyp_240",
+  "stratum": "mixed",
+  "flaw_category": "context_dependent",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "z-ai/glm-4.7-flash",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Excluding unresolved cases via a supervision cutoff removes label noise and yields a representative sample of true attacks.",
+        "failure_mechanism": "In enterprise ATO detection, the 'unresolved' bucket often contains the most severe and complex cases that persist for long periods (e.g., latent credential stuffing campaigns). By excluding these, the training set is biased towards 'low-hanging fruit'\u2014attacks detected and recovered from rapidly. The resulting 'clean' dataset represents a different, easier sub-problem than the general ATO detection task, inflating apparent performance.",
+        "evidence_test": "Analyze the temporal characteristics of the excluded cases versus the included cases. If possible, utilize partial labels or case metadata to attempt inference on the excluded subset. If the model's performance on the 'hard' cases (slow recovery) is significantly lower than the stated metrics, this flaw is confirmed.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The graph construction strictly limits data leakage across temporal splits by using only information available up to the boundary.",
+        "failure_mechanism": "While the design mentions temporal slicing, it does not explicitly preclude 'static' structural leakage. If nodes (e.g., a global email provider or a frequent IP range) or edge topologies (e.g., historical clustering based on time-independent features like shared domain or ASN) span the train/test split, information from the future can flow backwards into the model's learned representations. Even if edges are constructed dynamically, pre-aggregated properties (like 'number of previous interactions with this type of sender') might leak if not frozen strictly to the training window.",
+        "evidence_test": "Perform a rigorous audit of node IDs and edge weights used in the training graph. Verify that no node or pre-computed aggregation exists in the training split that has any future interaction (or potential for interaction) with the validation/test split before the split point. Examine whether any 'historical risk' features used as node attributes could serve as proxies for future behavior.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The graph topology is sufficiently dense to allow the Heterogeneous Graph Neural Network (HGNN) to discover relational value beyond simple aggregation.",
+        "failure_mechanism": "Account takeovers are often characterized by low-connectivity events (e.g., a single compromised device or a specific anomalous email sender). If the resulting graphs are highly sparse (e.g., average degree < 2), the HGNN is likely to act as an expressive feature aggregator (summing neighbor weights) rather than a structural learner. In such a topology, the graph model might add negligible value over the tabular baseline, invalidating the primary hypothesis that 'relational structure adds predictive value.'",
+        "evidence_test": "Calculate the average degree, clustering coefficients, and total number of edges for the graph constructed in the training split. If the average node degree is very low (indicative of a fragmented graph) or the connected components are mostly isolated, the graph model's advantage is structurally unlikely to appear.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "N1",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The definition of the prediction unit (user/session vs 24h) aligns with the label granularity.",
+        "failure_mechanism": "Ideally, the label (ATO/Not ATO) should map deterministically to the prediction unit to avoid multi-label ambiguity. If a 24-hour window contains multiple ATO sessions or conversely, a single session represents a series of attacks over a week, the binary classification metric may be noisy.",
+        "evidence_test": "Check the distribution of sessions per 24-hour window and ATO outcomes per session. If the mapping is highly non-deterministic, the metric interpretation becomes ambiguous.",
+        "flaw_category": null
+      }
+    ],
+    "summary": "The PoC contains critical temporal leakage risks regarding graph topology and a severe labeling bias in the data exclusion strategy that artificially inflates performance.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic raises concerns about dataset bias due to excluding unresolved cases, potential data leakage through static graph structures, and the sparsity of the graph topology. The methodology is designed to ensure label quality and prevent leakage through temporal splitting and freezing preprocessing parameters. Empirical tests are needed to verify graph density and potential leakage.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "Excluding unresolved cases is a deliberate design choice to ensure label quality. The comparison between models remains valid within the scope of confirmed cases."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "An empirical audit is needed to verify that there's no leakage through static node properties or pre-aggregations."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "Empirical calculation of graph density metrics is required to assess whether the graph is sufficiently dense for the HGNN to derive relational value."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Findings F2 and F3 require empirical verification to resolve concerns about data leakage and graph sparsity, respectively. Thus, an empirical test is agreed upon."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-SCOPE \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 9,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=9, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

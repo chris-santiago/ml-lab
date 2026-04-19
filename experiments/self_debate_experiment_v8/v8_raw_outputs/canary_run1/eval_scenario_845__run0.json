@@ -1,0 +1,157 @@
+{
+  "case_id": "eval_scenario_845",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The model's performance on the hold-out validation set is a reliable indicator of its performance on future, unseen production data, and the 90/10 split by time is sufficient to prevent temporal leakage.",
+        "failure_mechanism": "The narrative states the dataset includes sequences of transactions for each entity over a year, with positive labels assigned to suspicious entities based on SAR filings at the *end* of the observation period. A simple 90/10 time split does not guarantee that all transactions for a validation entity occur *after* all transactions for its corresponding training entity. If an entity has transactions spanning the split date, its data could be partitioned between train and validation sets. This introduces signal leakage, as the model could learn patterns from the early (train) part of a sequence that culminates in a SAR label assigned later, which is then evaluated on the later (validation) part of the same entity's sequence.",
+        "evidence_test": "Inspect the data split to verify the strictest condition: for every entity in the validation set, the timestamp of its *last* transaction must be greater than the timestamp of the *last* transaction of *every* entity in the training set. Alternatively, implement entity-level time splitting, ensuring all sequences for a given entity are entirely in either the train or validation set based on the timestamp of the entity's last transaction.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The evaluation metrics (AUC-ROC, Precision-Recall) computed on the validation set provide sufficient evidence that the sequence model's improvement over the baseline is meaningful and not an artifact of metric sensitivity or class imbalance.",
+        "failure_mechanism": "For highly imbalanced problems (e.g., 0.1% SAR rate), AUC-ROC can be overly optimistic and is insensitive to actual performance at low false positive rates, which is the operational constraint in AML. Precision-Recall AUC is better but still an aggregate. The claimed 'improvement' may not translate to a practically useful increase in true positive detection at a fixed, low FPR/volume threshold that a compliance team can handle. The model could be optimizing the wrong operational objective.",
+        "evidence_test": "Report performance at specific, realistic decision thresholds. For example, plot recall (true positive rate) as a function of the top-N alerts (or a fixed FPR like 0.001%) and compare the sequence model to the baseline at those points. Calculate the lift in true positives captured for the same alert volume.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The engineered features for the baseline (e.g., monthly aggregates) are a sufficient and fair representation of a 'traditional' AML system, making the comparison valid.",
+        "failure_mechanism": "The baseline model's performance is highly dependent on the quality and comprehensiveness of the handcrafted aggregate features. If these features are poorly chosen or incomplete, the sequence model's superiority is trivial (beating a weak baseline). A true 'traditional' system might use more sophisticated rules, ensembles, or different feature sets. The PoC does not establish that the chosen baseline is a competitive or realistic representation of current practice.",
+        "evidence_test": "Implement a stronger baseline, such as a tree-based model (XGBoost, LightGBM) trained on a richer set of features including rolling window statistics, peer-group comparisons, or features derived from domain expertise. Alternatively, compare against a simple but hard-to-beat heuristic baseline (e.g., flagging entities with total transaction volume > $X).",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The learned sequence representations (embeddings) capture temporally evolving 'behavioral fingerprints' that are robust and generalizable.",
+        "failure_mechanism": "The hypothesis rests on the model learning useful temporal dynamics. However, without explicit validation, the model may be achieving performance by attending to simple, non-sequential signals (e.g., presence of a single large transaction) that are equally capturable by aggregate features. The claimed mechanism (modeling sequences) is not verified; correlation is mistaken for causation.",
+        "evidence_test": "Perform an ablation or diagnostic test: 1) Shuffle the transaction order within each entity's sequence and retrain. If performance does not drop significantly, sequence order is not critical. 2) Train a model on only the *last* transaction in each sequence. Compare its performance to the full-sequence model. A small gap suggests the model is mostly using recent state, not history.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The underlying transaction data distribution (patterns of legitimate and illicit activity) is stationary over the one-year observation and validation period.",
+        "failure_mechanism": "AML patterns are non-stationary; fraudsters adapt tactics. The model is trained and validated on data from a single contiguous year. If there is a concept drift within that year (e.g., a new fraud scheme emerges in the last quarter), the time-based validation may not reflect future performance. The model's learned patterns could become obsolete quickly.",
+        "evidence_test": "Use a more rigorous time-series cross-validation scheme (e.g., rolling-origin validation) to estimate performance decay over time. Test the model trained on months 1-9 on month 10, then on months 2-10 on month 11, etc., and observe the trend in performance.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC has a likely fatal flaw due to potential temporal signal leakage from improper entity-level splitting. Material concerns exist regarding the evaluation's relevance to operational constraints, the strength of the baseline, and the unverified mechanism of sequence learning.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Let me analyze each finding:\n\nF1 (Temporal Leakage): The critic claims that because SAR labels are assigned at END of the observation period, but transactions span the temporal split, there could be entity-level leakage where the model trains on early transactions from entities that will be labeled positive, then tests on later transactions from the same entities. This is a valid data splitting concern IF the split was done at transaction level rather than entity level. The critical question is whether the design handles entities that span the split date. The critic's evidence test is reasonable but assumes the problem exists without confirming. This is a legitimate concern that needs design clarification.\n\nF2 (Metric Limitations): The critic correctly notes that AUC-ROC can be overly optimistic for highly imbalanced problems (0.1% SAR rate) and doesn't reflect operational constraints at low FPR. This is a well-known limitation in AML. The critic wants performance at specific decision thresholds. This is a valid operational concern but not a fundamental flaw in the evaluation\u2014it's asking for additional reporting, not saying the current metrics are wrong.\n\nF3 (Weak Baseline): The critic argues the baseline features (monthly aggregates) may be too weak, making the sequence model's superiority trivial. This is a fair concern about comparative validity. However, the purpose of a PoC is often to establish proof-of-concept advantage against a simple baseline, not to beat state-of-the-art. The question is whether the methodology claims to outperform 'all' traditional systems or just establishes a baseline comparison.\n\nF4 (Unverified Mechanism): The critic wants to verify the model actually uses sequence order rather than simple signals. This is a reasonable scientific concern about mechanism verification. Ablation tests would strengthen the claim but aren't required for a PoC to be valid.\n\nF5 (Non-stationarity): The critic raises concern about concept drift within the one-year period. This is a theoretical concern about future performance, but for a PoC within a defined time period, this is speculative. The validation period is within the same year, so the comparison is fair for that scope.\n\nAfter analysis: F1 has merit but needs evidence the problem actually exists. F2-F5 are valid concerns but either represent scope limitations, request for additional analysis, or theoretical edge cases that don't invalidate the PoC results.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "The critic raises a legitimate concern about entity-level temporal leakage: if an entity has transactions spanning the split date, training on early transactions and testing on later transactions of the same entity (which led to a SAR) could inflate performance. However, this requires empirical verification of how the data split was actually implemented. The critic's evidence test is sound\u2014checking whether validation entities have timestamps entirely after training entities. Without access to the actual data split to confirm whether this leakage exists, this question cannot be resolved by argument alone. An empirical test of the data split is needed."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic correctly notes AUC-ROC limitations for imbalanced AML data. However, this is a request for additional operational metrics at specific thresholds\u2014not a flaw in the current evaluation. The PoC establishes relative improvement between models using standard metrics; operational threshold analysis can be done in subsequent validation phases. The metric choice does not invalidate the comparative conclusion that sequence models outperform aggregate baselines on these metrics. This is a valuable extension but not a material flaw."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic argues the baseline may be too weak. However, the PoC scope is to demonstrate that sequence models capture temporal patterns that aggregate features miss\u2014not to outperform all possible traditional systems. A simple baseline comparison is valid for proof-of-concept. The methodology does not claim to beat production AML systems, only to establish that sequence modeling provides additional signal over basic aggregates. The comparison is valid within its stated scope."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The critic wants to verify the model actually uses sequence order rather than simple signals. This is a reasonable mechanism check, but for a PoC demonstrating that sequence models can capture temporal dynamics, it's not required. The comparative result (sequence vs. aggregate) already shows that temporal information adds value\u2014if aggregates capture the same signal, the sequence model would not outperform them. The mechanism is indirectly validated by the performance gap. Ablation tests strengthen the claim but are not necessary for the PoC's validity."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The critic raises a theoretical concern about non-stationarity within the one-year period. However, this is a future generalization concern, not a flaw in the current experiment. The experiment compares models on the same validation period, so the relative comparison is fair. Concept drift testing is appropriate for production deployment but not required for a PoC that establishes feasibility within a defined time window."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 was deferred because it requires empirical verification of the actual data split to determine whether entity-level temporal leakage exists\u2014this cannot be resolved by argument alone. All other findings (F2-F5) were rebutted as immaterial or scope limitations, with adjusted severities at or below 1. Since one finding has a DEFER rebuttal (requiring empirical test) and no finding with adjusted severity \u22657 was conceded, the appropriate verdict is empirical_test_agreed."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 7,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

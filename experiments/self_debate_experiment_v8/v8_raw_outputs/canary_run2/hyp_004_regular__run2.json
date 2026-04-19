@@ -1,0 +1,157 @@
+{
+  "case_id": "hyp_004_regular",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "mistralai/mistral-small-2603",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Temporal splitting on index discharge date ensures no information leakage from the training window into the training set.",
+        "failure_mechanism": "The claim assumes patient-level chronological leakage is prevented by splitting on index dates. However, if a patient has multiple index discharges during the study period (i.e., multiple qualifying hospitalizations), an earlier discharge could be in the training set and a later discharge for the same patient could be in the test set. Features from the 12-month lookback window for the later test discharge would then include the training discharge event and its associated outcomes, leaking future information about that patient's hospitalization history into the training feature construction process for the test set.",
+        "evidence_test": "Inspect the cohort for patients with multiple index discharges. If any patient appears in both train and test splits, the feature engineering for their test discharge(s) should be examined to see if it incorporates events (e.g., prior admissions) that occurred during the training period for that patient. Evidence would be a non-zero count of such patients.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Handling death as a censoring event correctly prevents bias in model training for the readmission outcome.",
+        "failure_mechanism": "The claim assumes that death is an independent censoring mechanism. In practice, mortality risk and readmission risk are often strongly correlated (e.g., very sick patients may die before being readmitted). Treating death as a simple censoring event can lead to informative censoring, biasing the Cox model's estimates. The model may underestimate risk for high-mortality patients because their competing event (death) removes them from the risk set for readmission, potentially distorting the learned relationship between features and readmission hazard.",
+        "evidence_test": "Perform a sensitivity analysis using a competing risks model (e.g., Fine-Gray subdistribution hazard) for the readmission outcome and compare the estimated coefficients and patient risk rankings to the standard Cox model with censoring. A material difference would indicate the presence of informative censoring.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The proposed evaluation using Harrell's C-index and time-dependent AUC on a temporally split test set provides a sufficient and unbiased estimate of model performance for future deployment.",
+        "failure_mechanism": "The claim assumes the temporal split creates a test set that is representative of future operational data. However, the health system, coding practices, patient population, or standard of care may change over the 36-month period. A model trained on the first 21.6 months and tested on the last 7.2 months may suffer from non-stationarity (distribution shift). Performance metrics calculated on this final period may not reflect performance on truly future data (e.g., month 37+), especially if there was a policy or procedural change during the study window.",
+        "evidence_test": "Analyze trends in key variables (e.g., admission rates, average length of stay, prevalence of key diagnoses) across the three temporal splits. Significant shifts, particularly between the validation and test periods, would indicate non-stationarity. A stronger test would be to evaluate the final model on a truly held-out future period (e.g., months 37-42) if data is available.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratification by hospital site and admission type during the temporal split ensures the test set reflects operational diversity and that improvements generalize.",
+        "failure_mechanism": "Stratification is applied *within* each temporal split. If the distribution of sites or admission types changes over time (e.g., a new hospital opens, or the proportion of emergency admissions increases), stratified sampling within the later time period will preserve that changed distribution for testing. While this correctly assesses generalization to the *test period's* operational mix, it does not guarantee the model has learned features that are invariant to these temporal distribution shifts. The model's performance could degrade if the relationship between features and outcome differs by site or admission type, and those relationships change in the future.",
+        "evidence_test": "Calculate the site- and admission-type-specific C-index on the test set. If performance varies widely across strata, it indicates the model's generalization is not uniform, and the overall C-index may be misleading about deployment readiness for specific sub-populations that could grow or shrink in the future.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The sensitivity analysis adding 'prior utilization frequency' to the baseline model isolates the marginal contribution of more complex trajectory features.",
+        "failure_mechanism": "The claim assumes that frequency counts (e.g., ED count, admission count) capture the same underlying 'utilization' signal as the more complex longitudinal features (e.g., hospitalization intensity, diagnosis trajectory). However, if the predictive power of the longitudinal model comes from non-linear interactions or temporal patterns *within* those frequency counts (e.g., increasing trend vs. sporadic visits), then adding simple counts to the baseline may not be a sufficient control. The observed marginal gain could be underestimated, as the baseline + counts model still lacks the capacity to model trajectories.",
+        "evidence_test": "Compare the performance of three models: (1) Baseline, (2) Baseline + utilization frequency counts, (3) Full longitudinal model. Then, also fit a model with baseline + frequency counts + simple trend statistics (e.g., slope of visit count over the 12 months). If the performance of this enriched baseline approaches the full model, it suggests the key signal is in simple aggregates/trends, not complex trajectories.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "The PoC has a strong design but contains a likely fatal flaw concerning patient-level temporal leakage across splits and material assumptions about independent censoring and temporal stationarity.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "=== Analysis of Critique Findings ===\n\n**F1 (FATAL - F7, signal_leakage):**\nCritic correctly identifies a potential patient-level leakage risk: patients with multiple index discharges may have features for a later discharge derived from events occurring during an earlier discharge (in training set). This is a valid concern in principle. However, the design explicitly excludes patients with <180 days of post-discharge follow-up for *each* index discharge. Critically, the 12-month lookback for a later discharge (e.g., in test set) *cannot* include a prior discharge that occurred within 180 days of the later discharge, because that earlier discharge\u2019s follow-up period would encroach on the 180-day exclusion window for the later discharge. For example, if a patient is discharged on 2022-01-01 (training, excluded if follow-up <180d to 2022-07-01), their next discharge on 2022-07-15 is *not* excluded unless follow-up from 2022-01-01 exceeds 180d, which it would if the patient survived to 2022-07-15. The later discharge\u2019s lookback (12 months prior = 2021-07-15 onward) does *not* include the 2022-01-01 discharge for feature engineering, because that discharge occurs *after* the lookback start date (2021-07-15). Thus, leakage is structurally prevented by the combination of: (a) \u2265180-day follow-up requirement per discharge (to define the cohort), and (b) the temporal split operating on discharge dates while feature construction uses pre-index lookback only. The evidence test (non-zero patients in train/test) is valid but is implicitly prohibited by design constraints. The PoC should explicitly document this exclusion rule to make the constraint visible.\n\n**F2 (MATERIAL - F5, implicit_dist_assump):**\nCritic correctly identifies a significant risk: death is not independent of readmission. Using death as censoring may bias estimates (e.g., model misses risk for high-mortality patients). This is a well-recognized problem in survival analysis for readmission. However, the defense was designed *anticipating* this critique via *explicit confound control*: the sensitivity analysis using Fine-Gray model (and the stratified analysis by high utilizer) is listed in Section 7. The critique does not acknowledge these planned analyses. The empirical test proposed (Fine-Gray vs. Cox) is already part of the planned validation suite. Therefore, this concern is explicitly anticipated and will be resolved empirically, not by argument.\n\n**F3 (MATERIAL - F5, distribution_shift):**\nCritic claims temporal split may not represent future data due to potential non-stationarity. This is a valid domain concern but *deliberately* outside the experiment\u2019s scope. The design states (\u00a72): \u2018months 1\u201321.6 form the training set... months 28.9\u201336 form the test set\u2019 and \u00a75: \u2018test set is touched once at the end\u2019. This is the *correct protocol for a 36-month EHR window*: the test set is the latest 20% of available data. Future data from month 37+ is not available at design time; hence, the PoC\u2019s scope is bounded by data availability. The critique is valid *if* the goal were to forecast into unobserved future, but the stated hypothesis tests: \u2018Can longitudinal features improve 6-month readmission prediction using 36 months of EHR?\u2019 The test set must be the latest within-sample period. The defense is justified by *scope control*.\n\n**F4 (MATERIAL - F3, eval_inflation):**\nCritic claims stratification by site/admission type within temporal splits may not guarantee invariance to temporal distribution shifts. This is a nuanced point but ultimately targets *generalizability*, which is out of scope for the PoC. The PoC reports stratum-specific C-index as secondary metric (\u00a76), which directly tests the concern: if performance varies widely, the evaluator is warned. The critique misframes this as a flaw in methodology; it is a *strength* of the evaluation protocol (the PoC anticipated the need for stratification and reports stratum-wise metrics). The claim that \u2018it does not guarantee invariance\u2019 is true but irrelevant: the PoC does not claim invariance\u2014it claims *evaluated performance* on the test period. Hence, this is a *scope-driven* concern.\n\n**F5 (MINOR - F2, missing_baselines):**\nCritic claims the sensitivity analysis adding \u2018prior utilization frequency\u2019 to the baseline may not isolate marginal contribution of trajectory features if trajectory power comes from non-linear increments or trends within frequency counts. This is a valid theoretical critique but does not identify a flaw in the PoC\u2019s *intent*. The PoC\u2019s sensitivity analysis is explicitly defined as Baseline + frequency counts\u2014this is a *conservative* baseline for isolating trajectory effects, not a comprehensive one. The critique is essentially recommending an *alternative* baseline (e.g., baseline + trend features), which is out of scope for the *stated* confound control. The PoC could extend the analysis in future work, but the design intent is satisfied by the planned comparison. The critique is immaterial to the current PoC\u2019s conclusions.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The critique is correct that patient-level leakage is a serious risk. However, the PoC\u2019s design *prevents* this leakage via three interlocking controls: (1) \u2265180-day post-discharge follow-up requirement per index discharge (embedded in cohort construction), (2) temporal split on discharge date with 12-month lookback only, and (3) explicit construction rules ensuring lookback period precedes each index admission. The proposed evidence test (non-zero patients across splits excluded by design under this rule) is thus structurally infeasible. Leakage cannot occur given the stated exclusion criteria and feature construction method. This rebuttal cites design controls explicitly articulated in \u00a71 and \u00a74."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critique correctly identifies a real risk of informative censoring with death treated as simple censoring. However, the experiment design (\u00a77) explicitly includes a competing risks sensitivity analysis (Fine-Gray model) as a planned validation. This is precisely the empirical test proposed by the critic. Therefore, the question cannot be resolved by argument; the defense defers to the empirical outcome of the Fine-Gray versus Cox comparison on validation data."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critique is valid in a different context (prediction into truly future unobserved months) but *not* within the stated hypothesis scope. The PoC\u2019s hypothesis (\u00a71, \u00a75) is bounded by a 36-month EHR window; the test set must be the latest in-sample period. Future data beyond month 36 is not available at design time; thus, the critique targets a question outside the experiment\u2019s stated scope. Section 3 explicitly defines the temporal split realizing the protocol\u2019s requirement."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The critique voices a concern about generalizability across sites and admission types in future deployment. However, the PoC\u2019s evaluation protocol (\u00a73, \u00a76) already implements site/admission-type stratification and reports stratum-specific C-index as a secondary metric\u2014exactly the diagnostic the critic requests. This is a theoretical edge case; the PoC anticipated it and provides the necessary evidence in its validation suite. Hence, it is immaterial to the core conclusion."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The critique raises a valid theoretical alternative to the sensitivity analysis, recommending inclusion of trend features. However, the PoC\u2019s *stated* confound control is conservative: Baseline + utilization frequency counts is sufficient to isolate marginal trajectory gains for the hypothesis under test. The critique does not demonstrate the current sensitivity analysis is insufficient for the *stated* conclusion (that longitudinal features provide marginal predictive value beyond baseline). It proposes an alternative that is out of scope for the current PoC."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have adjusted severity \u22643 after rebuttal. No FATAL/MATERIAL findings were conceded; critiques were addressed via design, scope, or accepted as immaterial/theoretical. The methodology\u2019s integrity holds under scrutiny."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

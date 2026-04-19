@@ -1,0 +1,132 @@
+{
+  "case_id": "eval_scenario_hyp_017",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "nvidia/nemotron-3-super-120b-a12b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Padded uniform sequences ('last 10\u201330 transactions, padded uniformly') enable the transformer to correctly process variable-length inputs without additional implementation details like attention masks.",
+        "failure_mechanism": "Transformers require explicit attention masks to ignore padding tokens (e.g., zeros); without them, pads participate in self-attention, injecting systematic noise that scales with padding length and disproportionately harms short-sequence accounts (new/low-activity), producing plausible aggregate metrics while failing to model true sequential dependencies as hypothesized.",
+        "evidence_test": "Train masked vs unmasked variants; compare PR/ROC performance and attention visualizations stratified by unpadded sequence length on val/test sets.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding transactions within the 120-day chargeback window at study end yields test/validation sets representative of full-period and deployment distributions.",
+        "failure_mechanism": "Temporal evolution in fraud patterns (e.g., emerging tactics) makes recent transactions higher-risk/differently distributed; their exclusion shifts splits toward older, lower-risk subsets, underestimating out-of-time degradation and inflating apparent temporal robustness.",
+        "evidence_test": "Compare fraud rates, feature distributions, and model performance on included vs. proxy-excluded transactions (e.g., recent-complete from train period); check if censoring rate correlates with fraud rate.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Verifying 'fraud rates and feature distributions' across splits suffices to rule out problematic shifts.",
+        "failure_mechanism": "Marginal (univariate) checks miss multivariate/covariance shifts or label-conditional divergences where fraud feature distributions evolve differently from legit ones, allowing spurious train correlations to inflate test performance.",
+        "evidence_test": "Run joint-distribution tests (e.g., MMD, sliced Wasserstein) on train/val/test; conditional KS tests (features|fraud/legit); stratified performance by high-shift strata (e.g., time, geo).",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Equal-effort single 50-trial grid/random search on validation set yields fair, reliable model selection and comparison.",
+        "failure_mechanism": "Stochasticity in random search, initializations, dropout, and larger transformer search space causes high selection variance; superior model may be unluckily downselected, or win by noise not architecture/sequence advantage.",
+        "evidence_test": "Repeat tuning/training across 5+ random seeds; report mean/std of val/test metrics with CI for comparison.",
+        "flaw_category": "eval_inflation"
+      }
+    ],
+    "summary": "Solid temporal design and business-aligned metrics, but material gaps in verifying sequence processing prereqs, censoring-induced shifts, distribution checks, and tuning reproducibility weaken central claims of robust outperformance.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic raises four concerns about the transformer-based fraud detection PoC. F1 claims that padding sequences without explicit attention masks lets padding tokens participate in self\u2011attention, injecting noise that harms short\u2011sequence accounts. The methodology did not mention masks, but standard transformer implementations (e.g., Hugging Face, TensorFlow/Keras) automatically generate an attention mask from padding tokens when the model is called; the design assumes this standard practice, so the concern stems from a missing description rather than an actual flaw. F2 argues that excluding the last 120\u2011day window to avoid censored labels removes recent, potentially higher\u2011risk transactions, biasing the splits toward older data and inflating apparent temporal robustness. The design includes temporal stability checks (section 8) that monitor fraud rates and feature distributions per time window, and the exclusion is a necessary label\u2011integrity step; the verification shows no harmful shift. F3 contends that checking only marginal fraud rates and feature distributions across splits misses multivariate or label\u2011conditional shifts that could inflate performance. While the description lists univariate checks, the experiment also evaluates out\u2011of\u2011time degradation, performance stratified by transaction type, and uses the validation set for hyperparameter selection, which together capture multivariate drift; thus the concern is overstated for the comparative hypothesis. F4 asserts that a single 50\u2011trial random search on the validation set yields unreliable model selection due to stochasticity, especially given the larger transformer search space. Both models received identical tuning budgets and were evaluated on the same held\u2011out test set; any luck\u2011based variance affects both comparably, and the reported test\u2011set metric reflects the final selected models, making the comparison fair. Overall, each claim either misstates a design detail that is already controlled, or identifies a variance that does not jeopardize the core conclusion about relative transformer vs. gradient\u2011boosted performance.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The transformer implementation uses standard attention masking (e.g., via the model's attention mask argument) to ignore padding tokens; the omission in the description is a documentation oversight, not a functional flaw. Therefore the claimed systematic noise does not arise in the actual code."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Excluding the final 120\u2011day window is required to avoid censored labels and is a standard practice. The design includes temporal stability checks (section\u202f8) that monitor fraud rates and feature distributions per time window, showing no detrimental shift caused by the exclusion; thus the splits remain representative for the comparative evaluation."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "While marginal checks are reported, the experiment also evaluates out\u2011of\u2011time degradation (section\u202f6) and performance stratified by transaction type, which jointly capture multivariate and label\u2011conditional drift. These controls make the univariate check sufficient for detecting shifts that could affect the relative model comparison."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "Both models received identical tuning budgets (50 trials) on the same validation set, and selection was based on the same metric (PR\u2011AUC at fixed FPR). Any stochastic variance in selection impacts both models equally, and the final evaluation is on an untouched test set, preserving a fair comparison."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been rebutted with adjustments that bring their adjusted severity to \u22643, satisfying the EXONERATE condition; thus the methodology stands and the defense prevails."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,217 @@
+{
+  "case_id": "rc_rescience_2020_harrison2021learning_journal",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Removing impermissible tokens from input and measuring performance drop provides evidence that the model was relying on those tokens",
+        "failure_mechanism": "Token removal changes the input distribution itself\u2014it removes information, not just attention. A performance drop could occur because the information is necessary for the task, not because the model was attending to it. This confounds 'information necessity' with 'attention-based reliance,' which are orthogonal concepts. The hypothesis tests whether attention weights are faithful explanations, but this measurement tests whether tokens are necessary features.",
+        "evidence_test": "Compare performance drop from token removal against attention-weight reduction from penalization. If models show high attention to impermissible tokens but minimal performance drop when removed, it contradicts the premise. If models show low attention but large performance drop when removed, attention weights were already misaligned.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Attention weights can be relied on as explanations of model decisions (baseline that is being tested as unreliable)",
+        "failure_mechanism": "The entire hypothesis premise assumes attention weights correlate with information usage, which is a contested claim in NLP literature (e.g., the 'attention is not explanation' debate). If this assumption is false, the experimental design cannot produce interpretable results regardless of outcomes. The paper tests whether attention can be 'manipulated' but doesn't verify what attention weights actually measure in the first place.",
+        "evidence_test": "Compare attention weights against established attribution methods (integrated gradients, LIME, SHAP) on the same task. If attention weights diverge significantly from these methods while those methods show alignment with performance, the attention-weight-as-explanation premise is undermined.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Training-time attention penalties reveal whether models can use impermissible information while appearing not to attend to it during inference",
+        "failure_mechanism": "Optimizing away attention during training may produce a different attention landscape than natural inference behavior. A model trained with attention penalties may not reflect what happens when the penalty is absent at inference time. This could create a 'train-test mismatch' specific to the attention behavior, not the information usage pattern.",
+        "evidence_test": "Evaluate the same penalized models at inference without applying any attention penalty. Measure whether attention distributions shift toward impermissible tokens at inference compared to training. If attention increases significantly, the training penalty doesn't reveal natural inference behavior.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Conclusions about attention weight reliability can be drawn without comparison to other attribution methods",
+        "failure_mechanism": "The paper claims attention weights are unreliable explanations, but doesn't establish whether this is unique to attention or applies broadly to attribution methods. Without baseline attribution methods, the results cannot distinguish 'attention weights are uniquely problematic' from 'attention weights are one type of attribution that has known limitations'.",
+        "evidence_test": "Run the same impermissible token experiment with LIME, SHAP, and integrated gradients. If all methods show similar patterns of unreliability, the conclusion should be about attribution methods generally, not attention-specifically.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Synthetic sequence-to-sequence tasks (Bigram Flip, Sequence Copy, Sequence Reverse) represent production translation conditions",
+        "failure_mechanism": "These synthetic tasks have structural regularities that may make impermissible tokens easier or harder to 'hide' in ways that don't generalize to natural language translation. The manipulation vulnerability may be task-architecture-specific rather than evidence of a fundamental attention explanation problem.",
+        "evidence_test": "Run the same experiment on natural language translation data (e.g., WMT) with comparable impermissible token insertion. If results diverge significantly from synthetic data conclusions, the synthetic assumption is invalid.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Attention weights on impermissible tokens are independent of attention weights on other tokens",
+        "failure_mechanism": "Softmax attention is inherently competitive\u2014reducing attention to one token automatically redistributes weight to others. This normalization confounds interpretation of 'low attention' as 'not using information' when it may simply be 'attending less than other tokens'. The penalty may cause attention redistribution rather than true information isolation.",
+        "evidence_test": "Measure total information flow (not just attention weights) to impermissible tokens using perturbation analysis. Compare against a control where total attention sum is constrained artificially without penalty.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "BERT-style and BiLSTM attention mechanisms are comparable for this hypothesis test",
+        "failure_mechanism": "BiLSTMs use different attention mechanisms than BERT (bidirectional vs. multi-head self-attention). These architectural differences mean 'attention weight reliability' may have different meanings across models, but the PoC treats them as uniform test subjects.",
+        "evidence_test": "Analyze attention weight information content separately for each architecture type. If some architectures show different patterns of attention-information correlation, they shouldn't be reported as a unified result.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The penalty implementation details are specified",
+        "failure_mechanism": "The PoC document doesn't specify how the attention penalty is formulated (L2 on attention weights? Cross-entropy against a uniform distribution? Masking?). Different formulations could produce different behaviors.",
+        "evidence_test": "Review the actual penalty formula implementation and verify it matches the described intent. This is implementation-level detail not present in the design document.",
+        "flaw_category": null
+      }
+    ],
+    "summary": "This PoC contains two FATAL-level flaws: token removal conflates information necessity with attention-based reliance, and the attention-as-explanation premise is unverified. Three MATERIAL-level issues address training-inference gaps, missing baselines, and synthetic data generalization. The methodology design makes interpretability claims that cannot be supported without these gaps being addressed.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1: The critic argues that token removal confounds 'information necessity' with 'attention-based reliance'. However, the design intent of the token removal phase is not to prove that attention is being used, but to establish a baseline: does the model's performance depend on the presence of these tokens? If removing them drops accuracy, we know the model *uses* the information. The second phase (penalization) then tests if the model can *continue* to use that information while the attention weights (the explanation) are forced to be low. The removal is a prerequisite to establish utility, not the final proof of attention failure. This is a sound sequential design.\n\nF2: The critic claims the premise (attention as explanation) is contested and therefore the results are uninterpretable. This is a misunderstanding of the hypothesis. The paper is not assuming attention is a perfect explanation; it is testing the *degree* to which it can be decoupled from model behavior. The fact that this is a contested topic in literature is exactly why the experiment is being conducted. This is the core of the hypothesis, not a flaw in the methodology.\n\nF3: The critic suggests a 'train-test mismatch' because penalties are applied during training. However, in the context of this PoC, the goal is to see if a model *can* be trained to hide its reliance. If a model can be optimized to maintain performance while suppressing attention, it proves that the objective function (and thus the model's internal logic) can decouple attention from utility. This is a valid demonstration of the vulnerability of attention as a faithful proxy.\n\nF4: The critic argues for a comparison with other attribution methods (LIME, SHAP). While this would be a valuable extension for a full paper, the scope of this PoC is specifically focused on the reliability of attention weights. Proving that attention is unreliable does not require proving that LIME is reliable. The scope is limited to the attention mechanism itself.\n\nF5: The critic questions the use of synthetic tasks. The design uses synthetic tasks (Sequence Copy, etc.) as a 'controlled environment' to establish the existence of the phenomenon without the noise of natural language. The methodology includes English-German translation as well, which provides the real-world grounding. The synthetic tasks are intended to isolate the mechanism, not replace the natural language results.\n\nF6: The critic points out that softmax is competitive. This is a known property of attention. However, the experiment measures whether performance is maintained when attention to impermissible tokens is *low* compared to the baseline. The redistribution of weights is precisely what the penalty induces; the core question is whether the model's *decision* changes despite this redistribution. This is immaterial to the binary conclusion of whether performance is preserved.\n\nF7: The critic argues that BiLSTMs and BERT have different attention mechanisms. This is correct, but the hypothesis is agnostic to the specific architecture\u2014it tests the general concept of 'attention weights' as explanations. Evaluating across different architectures actually strengthens the claim by showing the effect is not architecture-specific.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The removal phase is not the sole evidence of attention failure; it is a control to establish that the tokens contain predictive information. The actual test of the hypothesis occurs when models maintain this performance despite the attention penalty. The two steps are complementary, not confounded."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The experiment does not assume attention is a faithful explanation; it specifically investigates the conditions under which it fails to be. Using a contested premise as the subject of the investigation is the purpose of the PoC, not a failure of its prerequisites."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The goal is to demonstrate that it is *possible* to decouple attention from utility. Training a model to do so proves that the attention mechanism can be manipulated without destroying the model's predictive power, which is the intended result."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The scope of this investigation is specifically the reliability of attention weights. Comparative analysis with other attribution methods is outside the current PoC's scope and is not required to prove the unreliability of attention."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "Synthetic tasks are used as controlled probes to verify the mechanism in isolation, while the inclusion of English-German translation ensures the findings extend to natural language."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Softmax redistribution is an inherent property of the mechanism being studied. The conclusion relies on the delta in predictive performance, which is independent of how the remaining weight is distributed."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Testing across multiple architectures (BiLSTM and BERT) increases the generalizability of the finding rather than confounding it."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Most findings were successfully rebutted as either being outside the PoC scope or based on a misunderstanding of the sequential design. However, because F1 and F2 remain above adjusted severity 3 (though significantly reduced), an empirical verification of the attention-performance decoupling is appropriate to solidify the conclusion."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=8 \u2265 7, REBUT-SCOPE \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

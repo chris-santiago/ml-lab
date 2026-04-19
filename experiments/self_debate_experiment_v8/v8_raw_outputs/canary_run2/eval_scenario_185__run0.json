@@ -1,0 +1,82 @@
+{
+  "case_id": "eval_scenario_185",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Learning-to-rank models (e.g., LambdaMART, neural listwise) with nDCG@10, MRR, and P@K metrics validly measure SOC alert triage performance as intended.",
+        "failure_mechanism": "LTR losses (pairwise/listwise like LambdaMART or softmax cross-entropy) and metrics (nDCG@10, MRR, P@1/5/10) fundamentally require grouping alerts into multiple independent lists/queries (e.g., per analyst shift, per day, per queue batch); without this, losses degenerate to pointwise classification, and global/single-list evaluation produces misleadingly high top-K metrics insensitive to ranking quality (e.g., nDCG@10 over millions of alerts credits random top positives regardless of model).",
+        "evidence_test": "Explicitly define list/query grouping (e.g., alerts per analyst shift/hour/day), report per-split stats (avg/median list size, # lists, % lists with >=10 alerts), aggregate metrics as mean over lists (not global), and verify loss/metrics implementation handles lists correctly (e.g., no fallback to pointwise).",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Train/validation/test performance on alerts with dispositions within label windows (high-relevance <=24h escalation/ticket, low-relevance <=10 business days close, exclude >30 days no action) reflects ranking quality over the full production SOC alert stream.",
+        "failure_mechanism": "Excluding ~undisclosed% of alerts lacking 30-day dispositions conditions the train/eval distributions on 'quickly actionable' alerts, omitting likely hard negatives (ignored benign alerts) from optimization and measurement; in deployment on full stream, model may over-rank these feature-similar-to-positives ignored alerts, degrading operational top-K quality despite strong labeled-subset metrics.",
+        "evidence_test": "Report exclusion rates (% total alerts) per split/quarter; compare feature distributions (e.g., KS-test on embeddings/ticket counts) between excluded and included; augment test lists with excluded alerts as relevance=0 for partial nDCG@10 or score them separately to check rank assignment; sensitivity analysis dropping exclusion window.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC is thoughtfully designed with strong temporal splits, leak audits, and baselines, but fatally undermined by unspecified listwise grouping essential for LTR validity, and materially weakened by unaddressed selection bias from excluding unlabeled alerts core to production ranking.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The first finding (F1) claims that the learning-to-rank models do not appropriately measure SOC alert triage performance without grouping alerts into independent lists/queries. However, the design employs nDCG@10 specifically tailored for prioritizing alerts that SOC analysts review, which corresponds to a limited capacity. While the critique suggests the need for grouping alerts, the design is already focused on a 'top-K' evaluation based on potential alert triage decisions without requiring explicit separate lists to be formed, as the target is to maximize high-relevance alerts' ranking in their operational context. Furthermore, the training and evaluation approach ensures that the model is assessed in line with real-world application and operational priorities. Thus, while grouping could add further granularity, it is not a prerequisite for evaluating ranking quality in the proposed methodology.\n\nThe second finding (F2) raises a concern about the potential bias introduced by excluding alerts lacking adequate dispositions, which might yield a model that misrepresents performance when generalized to the full stream of production alerts. However, the justification for excluding alerts without disposition data is to ensure clean training data, preserving label integrity while recognizing the trade-offs. While measuring performance on quickly actionable alerts could limit the dataset's breadth, it aims at representing the critical operational need for actionable alerts accurately. Moreover, thorough stratification and performance metrics (including confidence intervals) serve to highlight potential model weaknesses. Overall, while the critique points to a valid consideration regarding distribution and inclusion, it does not reflect a flaw in the overall design approach, given the operational constraints and the defined scope of the evaluation.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The methodology is designed with nDCG@10 as the primary metric targeting the operational context of SOC analysts. While grouping could provide additional insights, the method is tailored for ranking alerts in a way that reflects realistic deployment scenarios without necessitating explicit independent lists."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 4,
+        "justification": "The exclusion of alerts lacking adequate dispositions serves to maintain label quality and operational relevance. The defined training scope prioritizes actionable alerts that assist in real-world SOC workflows, acknowledging a realistic expectation of alert handling that may not require the inclusion of all alerts."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The rebuttals address concerns from the critique by clarifying the intentional design choices in methodology, even though some findings remain above adjusted severity 3. Therefore, further empirical testing is warranted to fully understand their impact."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, orig_sev=6 < 7, REBUT-SCOPE \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

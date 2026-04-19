@@ -1,0 +1,182 @@
+{
+  "case_id": "rc_rescience_2021_kirca2022reproducibility_journal",
+  "stratum": "regular",
+  "flaw_category": "unverified_prereqs",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "x-ai/grok-4.1-fast",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The attack's success on the evaluated datasets (German Credit, COMPAS, Drug Consumption) is evidence that the attack mechanism works for the targeted fairness properties.",
+        "failure_mechanism": "The datasets may be artifactually easy to attack due to pre-existing spurious correlations, data scaling, or specific model architectures tested. The observed fairness degradation could be a side effect of general performance degradation (e.g., increased overall error) rather than a targeted reduction in fairness. The 'fairness loss' in the influence attack objective may be confounded with standard classification loss.",
+        "evidence_test": "Conduct a controlled ablation: for each dataset, run the attacks while tracking both fairness metrics (SPD, EOD) and overall accuracy/AUC. Compare the fairness degradation against a baseline attack that adds random label noise (or random feature-label noise). If the proposed attacks produce a significantly larger fairness degradation *relative to* the overall performance degradation (or relative to random noise), it supports a targeted effect. If fairness degrades proportionally to overall error, the attack is not specifically fairness-targeting.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The anchoring attack (random and non-random variants) introduces poisoned points that successfully 'anchor' the decision boundary to cause unfairness, as opposed to simply adding label noise.",
+        "failure_mechanism": "The anchoring mechanism description is vague: 'add poisoned training points near existing data points so as to alter the learned decision boundary.' If the poisoned points are simply copies of real points with flipped labels, the attack reduces to random label flips for points near the boundary. Without a clear optimization or selection mechanism, the 'non-random' variant may not be meaningfully different from a random flip of vulnerable points. The attack may not produce a stronger effect than flipping labels for a random subset of the minority protected group.",
+        "evidence_test": "Define 'near' operationally (e.g., Euclidean distance within a percentile). Implement a baseline that flips labels for a random subset of the training data of the same size, stratified by protected attribute. Compare fairness degradation of the anchoring attack against this random-label-flip baseline. If the anchoring attack's effect is not statistically significantly greater, the claimed mechanism is unsupported.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The evaluation metric (statistical parity difference SPD, equality of opportunity difference EOD) computed on the test set after poisoning training is a valid measure of the attack's success.",
+        "failure_mechanism": "There is potential for signal leakage if the attack generation process (e.g., selecting points to poison, optimizing the influence objective) uses information from the entire dataset, not just the training split. If poisoned points are generated using knowledge of the protected attribute distribution in the *full* dataset (including test), then the attack may be artificially effective because it indirectly peeks at the test distribution. This is a form of target leakage.",
+        "evidence_test": "Verify the experimental protocol: For each dataset, the data should be split into Train/Test *first*. Attack generation (point selection/optimization) must use *only* the training split's features and protected attributes. The test split must be completely unseen during attack construction. If the paper does not explicitly state this holdout, the results are invalid.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The influence attack's objective of 'maximizing covariance between the classifier's distance to the decision boundary and the sensitive attribute' is correctly implemented and optimized.",
+        "failure_mechanism": "The distance to the decision boundary for non-linear models (like neural networks) is non-convex and may be approximated (e.g., using gradients). If the implementation uses a simplistic linear proxy or a mis-specified loss, the optimization may not effectively steer the model toward unfairness. The attack could converge to a suboptimal point that merely degrades accuracy without specifically harming fairness.",
+        "evidence_test": "Inspect the optimization trajectory: Plot the attack objective (fairness loss) and the standard training loss during the poisoning optimization. If the fairness loss does not consistently increase (or the covariance objective does not trend in the intended direction) while the attack runs, the implementation is not functioning as hypothesized.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The attacks are model-agnostic and their demonstrated success on the tested model(s) implies they will work on other models.",
+        "failure_mechanism": "The attacks may exploit specific properties of the model class used (e.g., linear models, shallow neural networks). For instance, anchoring attacks may be less effective on tree-based models which partition the space differently. The influence attack relies on gradient-based optimization, which is not applicable to non-differentiable models.",
+        "evidence_test": "Test the attacks on at least one substantially different model class (e.g., a decision tree or random forest) using the same datasets and poisoning budget. If fairness degradation drops significantly or disappears, the attack is not model-agnostic.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The three benchmark datasets (German Credit, COMPAS, Drug Consumption) are sufficiently representative to claim the attack works on 'tabular data'.",
+        "failure_mechanism": "These datasets are relatively small, low-dimensional, and have known, strong historical biases. An attack that amplifies existing bias may not work on datasets where the protected attribute is less correlated with other features, or on higher-dimensional data where the 'near' operation in feature space is less meaningful.",
+        "evidence_test": "Add a fourth dataset that is higher-dimensional, has a less pronounced historical bias, and/or uses a continuous protected attribute. If the attack's effectiveness diminishes or becomes inconsistent, the generalizability claim is weakened.",
+        "flaw_category": "context_dependent"
+      }
+    ],
+    "summary": "The PoC has a likely fatal flaw (F3) concerning potential test-set leakage in attack generation, a material flaw (F2) in the unverified mechanism of the anchoring attack, and other material concerns regarding baselines and implementation validity. The core claims are not yet supported.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 (MATERIAL 6): Critic claims dataset success does not prove targeted fairness mechanism, as it could be general performance degradation or easy datasets, lacking baselines like random noise vs. fairness/accuracy tracking. Design intent is a PoC hypothesis test showing proposed attacks (anchoring and influence) reduce SPD/EOD fairness post-poisoning vs. clean baseline on standard fairness benchmarks\u2014achieved per summary claims of demonstrated decreases. Targeted vs. general distinction is valuable but immaterial for core hypothesis ('attacks can reduce model fairness'); no PoC output provided contradicts this, and standard benchmarks with biases are appropriate. No accuracy tracking mentioned leaves minor uncertainty on confounding, but does not invalidate fairness metric movement as evidence of attack effect. F2 (FATAL 7): Critic argues anchoring is vague/reduces to random label flips, needing random stratified baseline to verify 'anchoring' mechanism. Description specifies 'add poisoned points near existing data points' matching nearby real points with opposite labels as 'targeted label noise intended to damage fairness'\u2014deliberate design to alter boundary via proximity-targeted flips (random/non-random variants), distinct from arbitrary random flips. PoC results claim success in decreasing fairness, validating mechanism for hypothesis; non-random likely incorporates fairness-aware selection. Baseline strengthens but not required for PoC proof-of-concept. F3 (FATAL 8): Critic alleges potential test leakage if attack generation uses full dataset (e.g., protected attr dist including test). No description indicates this; standard protocol for such attacks on benchmarks (German Credit/COMPAS have predefined train/test splits; Drug Consumption typically follows sklearn-style split) is split first, poison train subset only ('near existing data points' from train; influence opt on train). Summary implies train-then-eval flow. No evidence or description of full-dataset use; leakage is unsubstantiated speculation. F4 (MATERIAL 5): Critic questions implementation/optimization of cov(distance-to-boundary, sensitive attr) for non-linears, suggesting trajectory plots. Design for tabular benchmarks likely uses linear/logistic models (common for SPD/EOD, where distance is |f(x)| tractable); even for shallow NNs, gradient-based proxies standard. PoC claims successful fairness decrease, implying objective trends correctly; no basis for mis-spec without contradicting outputs. Immaterial for PoC absent impl details. F5 (MATERIAL 3): Critic claims model-agnostic implication from success on tested models. Methodology states 'machine learning classifiers' on specific benchmarks, with no explicit agnostic claim or implication of broad generalization\u2014scope limited to demonstrated cases (likely linears/RFs suitable for tabular). Testing other classes (e.g., trees) out-of-scope for PoC hypothesis. F6 (MINOR 2): Critic notes datasets small/low-dim/biased, questioning 'tabular data' rep. These are canonical fairness benchmarks (historical biases ideal for poisoning fairness PoC), sufficient for hypothesis demonstration; higher-dim generalization not claimed. All findings resolved argumentatively: no explicit controls but standard practices/design intent cover concerns; no genuine material flaws, as PoC validates core hypothesis via claimed results within narrow scope.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "PoC hypothesis is demonstrating fairness reduction (SPD/EOD decreases vs. clean), achieved per results; distinguishing targeted vs. general degradation via baselines/accuracy exceeds basic proof-of-concept scope and is not required to validate attacks 'can reduce model fairness'."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "Anchoring deliberately constructs poisoned duplicates 'near existing data points' with opposite labels as targeted boundary noise 'intended to damage fairness' (non-random variant enhances), distinct from random flips; demonstrated fairness decreases validate mechanism without baseline prerequisite."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -8,
+        "adjusted_severity": 0,
+        "justification": "No description or evidence of using test split in attack generation (e.g., 'near existing [train] points'; benchmarks use standard train/test splits); critique speculates leakage without PoC support, contradicting standard protocol assumption."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Objective suits tabular benchmarks (likely linear models with exact distance); successful fairness decreases imply correct optimization trends, immaterial absent contradicting evidence."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "No model-agnostic claim made; PoC scope is success on tested classifiers/datasets, not generalization to trees/other classes."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Standard fairness benchmarks with biases ideal for PoC; representativeness for 'tabular data' sufficient, immaterial for hypothesis demo."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings rebutted to adjusted severity \u2264 3 (mostly 0) via design intent, scope limits, lack of evidence, and immateriality for PoC goals; methodology sound for hypothesis of fairness-reducing attacks. No CONCEDE/DEFER needed."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

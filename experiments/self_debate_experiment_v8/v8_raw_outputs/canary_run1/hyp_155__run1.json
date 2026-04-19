@@ -1,0 +1,267 @@
+{
+  "case_id": "hyp_155",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "anthropic/claude-3-haiku",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The experiment claims to isolate graph-augmentation by comparing a hypothesis model (text+graph+historical sender signals+non-text signals) against a text-only baseline. Any performance difference is attributed to graph structure.",
+        "failure_mechanism": "The comparison is not controlled. The hypothesis model receives FOUR distinct information sources: (1) text, (2) graph structure, (3) historical sender signals (prior message counts, malicious fraction), and (4) non-text signals (attachments, URL blocklist, sender reputation). The baseline receives only text. A performance gap could be driven entirely by non-graph signals (e.g., the URL blocklist matching known malicious domains) rather than by the communication graph itself. The experiment cannot attribute any improvement to graph augmentation specifically.",
+        "evidence_test": "Create an ablated comparison: text+graph-features-only (without historical sender signals and without URL blocklist) vs text-only. Only by isolating graph structure as the sole difference can the hypothesis be tested.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Historical sender signals (count of prior messages, fraction of prior malicious messages) are computed from the training window and frozen. These capture attacker behavior history.",
+        "failure_mechanism": "If a sender appears in the training window and sends malicious messages, their 'fraction of prior malicious messages' will be high. When that same sender appears again in validation/test, the model has access to this high malicious-fraction signal \u2014 but this signal was derived from labels that may have arrived AFTER the training period ended. The 30-day label cutoff applies to training labels, but the historical sender features retroactively incorporate those delayed labels into sender reputation. This is a subtle form of target leakage: the model advantages senders who were confirmed attackers during training, using evidence that would not have been available in real-time detection.",
+        "evidence_test": "Audit the label timing: for each sender with non-zero 'prior malicious fraction', verify that the confirming label arrived BEFORE the training window ended. Alternatively, recompute historical sender signals using only labels that were confirmed within the training window's real-time horizon (not the 30-day delayed labels).",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The primary metric is 'precision at 80% recall' with a fallback to 'recall at 2% FPR' if 80% recall is unattainable.",
+        "failure_mechanism": "With 0.5-2% class prevalence, the number of positive samples in validation and test sets is extremely small (e.g., ~5 positives per 1000 messages at 0.5% prevalence). Precision at a fixed high-recall operating point on such sparse data has very high variance \u2014 a single true positive or false positive can swing precision by 10-20 percentage points. The metric choice 'fallback' creates an evaluation design that could systematically select whichever metric happens to yield favorable results on a particular split, rather than testing a fixed hypothesis.",
+        "evidence_test": "Report confidence intervals (e.g., bootstrap or Bayesian) on the primary metric. If intervals are too wide to draw conclusions, acknowledge the metric is underpowered. Consider aggregating across multiple temporal cross-validation folds to reduce variance.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The URL blocklist is frozen at training time and never updated during validation/test, simulating realistic deployment where blocklists have latency.",
+        "failure_mechanism": "In spear-phishing detection, attackers frequently register new domains. A frozen blocklist will have near-zero recall for novel malicious domains in the test period. The hypothesis model's access to a stale blocklist provides no advantage over the baseline (which also doesn't have blocklist access), but more critically, the blocklist feature becomes meaningless in the test period \u2014 it cannot contribute to detection of new attacks. The experiment tests whether graph features help when the obvious signal (fresh blocklist) is deliberately disabled, which may not reflect a realistic deployment where blocklists are updated.",
+        "evidence_test": "Report blocklist hit rates on validation and test sets. If hit rates are near zero, the feature is not contributing and the comparison is unfair (the hypothesis model carries dead weight). Alternatively, allow controlled blocklist updates at validation boundaries to test incremental value.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The graph is frozen at the training boundary; validation/test use only historical statistics computed from the training window.",
+        "failure_mechanism": "In a real enterprise, communication graphs evolve. New senders appear, internal users change roles, new external partners are added. The frozen graph treats the training-period communication structure as a static proxy for all future communication. This creates a distribution-shift problem: the hypothesis model's graph features assume the communication topology of months 0-12 remains valid for months 15-18. If the organization grew, restructured, or acquired new partners, the graph features degrade. The experiment does not test robustness to graph evolution.",
+        "evidence_test": "Analyze sender overlap between training and test windows. Report what fraction of test senders were unseen (zero-degree) in the training graph. If a substantial fraction are new senders, graph features provide no signal for them \u2014 the test is effectively evaluating a different problem for those cases.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The sender reputation score is computed 'at message-time, not post-hoc', preventing leakage.",
+        "failure_mechanism": "The document states sender reputation is computed at message-time but provides no detail on what inputs feed into this score. If the reputation score incorporates any label information (e.g., past confirmed malicious messages from that sender), it is subject to the same temporal leakage concern as the historical sender signals. Without visibility into the reputation score's computation, the 'no leakage' claim is unverified.",
+        "evidence_test": "Disclose the exact formula for sender reputation score. Verify it depends only on features available at message-time (e.g., sender domain age, DNS records, prior message volume) and does not incorporate any labels from the training or evaluation periods.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Stratification by sender domain (internal vs external) within each temporal window ensures realistic operational sender distribution.",
+        "failure_mechanism": "Stratification preserves the marginal distribution of internal vs external senders, but does not preserve the joint distribution of sender identities and their behavioral patterns over time. An attacker who compromised an internal account in training would appear as 'internal' in test, but the model may have learned to associate internal origin withbenign (since most internal mail is benign). This interaction between stratification and attacker behavior is not analyzed.",
+        "evidence_test": "Report attacker distribution by internal/external origin in test set. If attackers predominantly use compromised internal accounts (a common BEC/ spear-phishing tactic), the test set may systematically underrepresent the hardest cases.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Messages older than 30 days without subsequent report are labeled as benign.",
+        "failure_mechanism": "This label assumption treats 'no report' as evidence of non-maliciousness. In practice, user reporting rates for phishing are low (many users don't recognize or report attempts). This creates label noise: some actual spear-phishing messages are mislabeled as benign, contaminating the training set with false negatives. The 30-day window is a heuristic trade-off, but its impact on label quality is not quantified.",
+        "evidence_test": "Analyze the 30-day label cutoff's effect: compare model performance when training on all labels (including delayed ones) vs the 30-day cutoff. If performance changes substantially, the cutoff is introducing bias.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The baseline uses only email body and headers; the hypothesis model uses body+headers+graph+historical+non-text.",
+        "failure_mechanism": "The subject line is part of headers, but the baseline excludes it from the 'text-only' feature set while the hypothesis model implicitly has access to it via the full text pipeline. This is a minor asymmetry \u2014 the baseline should receive identical text preprocessing to ensure a fair text-feature comparison.",
+        "evidence_test": "Verify both models receive identical text tokenization and encoding. Confirm the baseline has access to subject line.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The experiment uses a transformer (DistilBERT) architecture.",
+        "failure_mechanism": "DistilBERT is a general-purpose language model. In enterprise email security, models are often constrained by inference latency requirements (must process\u90ae\u4ef6 in milliseconds). The computational cost of transformer inference is not discussed. This is an engineering consideration, not a methodology flaw.",
+        "evidence_test": "N/A \u2014 engineering concern outside hypothesis scope.",
+        "flaw_category": null
+      }
+    ],
+    "summary": "Two FATAL flaws undermine this PoC: (1) The comparison between hypothesis and baseline is not controlled \u2014 the hypothesis model receives multiple additional signal sources (historical sender signals, URL blocklist, attachments) beyond graph structure, so any performance gap cannot be attributed to graph augmentation; (2) Historical sender features (prior malicious fraction) incorporate delayed labels from the training period, creating subtle target leakage where the model advantages senders who were confirmed attackers using evidence that would not have been available in real-time detection. These flaws must be addressed before the hypothesis can be meaningfully evaluated.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critique findings raise several valid concerns about the experimental design, particularly around the potential for information leakage and confounding factors. However, many of the issues can be addressed or mitigated through additional analysis and clarification. The key is to ensure the comparison between the hypothesis model and baseline is as clean and isolated as possible, focusing the evaluation on the specific contribution of the graph-augmented features.\n\nThe most concerning finding is F1, which identifies a lack of true isolation between the hypothesis model and baseline. Providing the full set of non-text signals to the hypothesis model, while withholding them from the baseline, means the performance gap could be driven by these other signals rather than the graph structure itself. This needs to be addressed through an ablated comparison that isolates the graph as the sole difference.\n\nFindings F2 and F6 also raise valid concerns about potential label leakage in the historical sender signals and sender reputation score. These will require further auditing and validation to ensure no future information is incorporated.\n\nThe other findings, while identifying some minor issues or areas for additional analysis, do not appear to fundamentally undermine the overall methodology. With appropriate responses and controls, the experiment design can still provide meaningful insights into the value of graph-augmented features for spear-phishing detection.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critique correctly identifies a lack of true isolation between the hypothesis model and baseline. Providing the full set of non-text signals to the hypothesis model, while withholding them from the baseline, means the performance gap could be driven by these other signals rather than the graph structure itself. This needs to be addressed through an ablated comparison that isolates the graph as the sole difference."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 1,
+        "justification": "The concern about label leakage in the historical sender signals is valid, but can be addressed through further auditing. By verifying that the labels used to compute the 'fraction of prior malicious messages' feature arrived before the end of the training window, the potential for leakage can be eliminated. This is a technical issue that can be resolved without fundamentally changing the experimental design."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -7,
+        "adjusted_severity": 0,
+        "justification": "The critique of the primary metric's high variance due to the low positive class prevalence is valid. However, this is a common challenge in anomaly detection tasks, and the proposed solutions (confidence intervals, cross-validation) are reasonable mitigations. While the metric choice is not ideal, it does not fundamentally undermine the ability to draw conclusions from the experiment, especially if the performance gap between the hypothesis model and baseline is large."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The critique correctly points out that the frozen URL blocklist may not reflect a realistic deployment scenario, where blocklists are regularly updated. However, the stated scope of the experiment is to isolate the contribution of graph-augmented features, not to test the full operational spear-phishing detection system. The frozen blocklist is a deliberate design choice to ensure the comparison focuses on the graph features rather than other signals."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The concern about the graph's distribution shift over time is valid, but the experiment's stated scope is to evaluate the graph-augmented model's performance on the most recent threat landscape (months 15-18), using only the historical context available during the training window (months 0-12). While the model may degrade over longer time horizons, this evaluation design is appropriate for the stated goal of the experiment."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The critique's request for more details on the sender reputation score computation is reasonable. Providing a clear explanation of the inputs and the assurance that no label information is incorporated will address the potential leakage concern."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -7,
+        "adjusted_severity": 0,
+        "justification": "The critique's point about the potential interaction between sender stratification and attacker behavior is valid, but is likely a minor effect. The primary goal is to ensure the train, validation, and test sets reflect the organization's realistic sender distribution, which the stratification approach achieves. Further analysis of attacker origins can provide additional insights, but is not critical to the core experimental design."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -7,
+        "adjusted_severity": 0,
+        "justification": "The critique's concern about label noise due to low user reporting rates is reasonable, but the 30-day cutoff is a standard approach to balance label quality and sample size. The suggested analysis of the cutoff's impact is a good idea, but is unlikely to fundamentally change the experimental conclusions unless the noise is extreme."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -7,
+        "adjusted_severity": 0,
+        "justification": "The minor asymmetry in text feature access between the hypothesis model and baseline is a valid point. Ensuring identical text preprocessing, including the subject line, for both models will eliminate this potential confound."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "The most critical finding (F1) identifies a lack of true isolation between the hypothesis model and baseline, which needs to be addressed through an ablated comparison. Additionally, the concerns raised around potential label leakage in the historical sender signals and sender reputation score require further auditing and validation. While many of the other findings are minor or can be mitigated, these core issues mean the methodology cannot be fully defended without additional empirical testing to confirm the isolated contribution of the graph features."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=8 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

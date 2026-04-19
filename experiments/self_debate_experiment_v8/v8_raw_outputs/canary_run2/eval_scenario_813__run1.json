@@ -1,0 +1,107 @@
+{
+  "case_id": "eval_scenario_813",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Token-level BIO labels and span boundaries align consistently across the Transformer (subword tokenizer) and BiLSTM (likely word-level tokenizer) models for exact-match span-level F1 evaluation.",
+        "failure_mechanism": "BERT-style subword tokenization splits words into multiple tokens not matching the original annotation tokens (e.g., whitespace or spaCy splits), requiring label propagation (e.g., first-subword-only BIO scheme) and prediction collapse to original token indices; without explicit handling, predicted spans will have mismatched start/end indices, artificially deflating span F1 for both models but especially the Transformer on long entities, while producing plausible token-level metrics.",
+        "evidence_test": "Tokenize 10 sample annotated reports identically for both models, propagate gold BIO labels to model-specific tokens following standard subword NER conventions (e.g., B/I only on first subword, CLS/X on continuations), generate dummy predictions, collapse to original token spans, and verify 100% gold span recovery accuracy before model training/evaluation.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Test set of 200 reports provides sufficient statistical power for reliable superiority claims on subgroups (rare findings, negated mentions, per-modality, per-section) with 95% bootstrap CIs.",
+        "failure_mechanism": "Subgroups comprise few reports/entities (e.g., MRI ~30 reports at 15%, rare entities bottom 20% frequency ~dozens across test set), yielding wide CIs and low power to detect meaningful F1 differences (e.g., 5-10% gaps), allowing noise to masquerade as transformer superiority on targeted hard cases while aggregate metrics pass.",
+        "evidence_test": "Compute per-subgroup entity counts in test set and perform power analysis (e.g., for F1 difference of 0.05 at alpha=0.05, power=0.8 under binomial model); report if any subgroup has <50 entities.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "BiLSTM-CRF baseline features, including a curated 'is_negation_keyword' binary flag, provide a fair comparison without undue advantage on the 'negation_indicator' entity.",
+        "failure_mechanism": "The hand-crafted negation lexicon flag directly cues the negation_indicator entity during BiLSTM inference (via CRF transitions), enabling shortcut performance without contextual learning, while the Transformer must infer negation scopes from pretraining/fine-tuning alone; this boosts baseline F1 on negated mentions (a key hypothesis target), weakening evidence of transformer advantage there.",
+        "evidence_test": "Retrain/evaluate BiLSTM ablation without the 'is_negation_keyword' feature (keeping other features) and compare negation F1 deltas to full baseline on val/test.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The design is rigorous overall with strong confound controls and no leakage, but a potentially fatal silent misconfiguration in cross-model tokenization/span alignment undermines the core span F1 comparison; material concerns around subgroup power and baseline feature fairness weaken subgroup claims.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1: The critic correctly identifies that subword tokenization (Transformer) vs. word-level tokenization (BiLSTM) creates a potential misalignment for span-level F1 evaluation. The methodology specifies 'token-level BIO tags' and 'span-level F1' requiring exact start/end index match, but does not describe how label propagation from words to subwords is handled. This is a valid configuration question that cannot be resolved from the methodology alone - the critic's evidence test would verify whether proper handling exists. F2: The critic correctly notes that 200-test-set subgroup power is limited for rare findings and modality-specific analysis. However, the methodology explicitly scopes its primary claim to aggregate span-level F1, with subgroup metrics listed under secondary diagnostics ('to detect modality-specific overfitting'). The experiment explicitly states what it 'does not establish' about subgroup performance. Within the stated scope (aggregate F1), 200 reports is adequate. F3: The 'is_negation_keyword' feature directly encodes negation tokens, which could advantage the baseline on negation_indicator entity - a key hypothesis target. However, the baseline uses 'established prior art (pretrained static embeddings + engineered features)' which historically includes such lexicons. This is a deliberate design choice representing standard NLP baseline practice, not an accidental unfair advantage.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The methodology does not describe label propagation from word-level annotations to BERT subwords, nor the mapping from subword predictions back to original token indices. The critic's concern is valid - this is a silent misconfiguration risk for span-level F1. The evidence test (verify gold span recovery on sample tokenization) would resolve this definitively. Since the question cannot be settled by argument alone (the methodology lacks the detail, and we cannot assume either correct or incorrect implementation), deferral to empirical verification is appropriate."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic correctly identifies limited subgroup power (30 MRI reports, rare entity counts). However, the experiment's primary claim is aggregate span-level F1 on 200 test reports, not superiority on subgroups. The methodology explicitly lists 'Performance stratified by report section' and 'F1 per modality' as secondary metrics with diagnostic purpose ('to detect modality-specific overfitting'), and explicitly states the experiment 'does not establish' performance on out-of-distribution data. The finding is valid for a different context (power analysis for subgroup claims) but not within the stated experimental scope (aggregate primary metric)."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The 'is_negation_keyword' feature is a curated lexicon directly predictive of the negation_indicator entity - a key hypothesis target. This is a legitimate concern. However, the baseline represents 'established prior art (pretrained static embeddings + engineered features)' which historically includes hand-crafted negation lexicons. The design intent is to compare domain-adapted transformer pretraining against traditional feature engineering. Using standard prior-art features is a deliberate, justified choice for this comparison. The concern is real but reflects design intent, not oversight."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Finding F1 (tokenization alignment for span-level F1) requires empirical verification - the methodology does not describe label propagation handling, and the critic's concern cannot be resolved by argument alone. Findings F2 and F3 are successfully rebutted: F2 concerns subgroups but the primary claim is aggregate F1; F3 is a deliberate baseline design choice. Since F1 has a DEFER rebuttal and no finding was CONCEDEd with adjusted severity \u2265 7, the appropriate verdict is empirical_test_agreed."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=9, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

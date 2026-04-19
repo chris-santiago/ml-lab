@@ -1,0 +1,157 @@
+{
+  "case_id": "eval_scenario_800",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "anthropic/claude-3-haiku",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Treating competing events (death, hospice, LTC) within 30 days as censoring with label = 0 is methodologically sound for the survival model",
+        "failure_mechanism": "Death and other competing events are not simply 'censored observations'\u2014they are outcomes that preclude the event of interest. Treating death as label = 0 conflates two distinct outcomes: (1) survives without readmission vs. (2) dies before readmission can occur. In survival analysis, this violates the non-informative censoring assumption. Death is highly informative about risk, and patients who die are systematically different from those who survive without readmission. This produces biased risk estimates and may inflate apparent model performance on survivors while misrepresenting the actual clinical prediction task (which is to identify patients at risk of return, not return OR death).",
+        "evidence_test": "Compare the same model fitted using competing risk methodology (e.g., Fine-Gray subdistribution hazards) vs. current censoring approach on the same dataset. If predicted probabilities differ meaningfully (>5% absolute difference in key risk deciles) or the concordance index ranking changes, the current approach is introducing bias.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "ROC-AUC and C-index are directly comparable metrics for evaluating the logistic baseline vs. survival model",
+        "failure_mechanism": "ROC-AUC measures binary classification discrimination while C-index measures time-to-event discrimination. These metrics have different optimization objectives and statistical properties. The baseline is optimized for AUC while the survival model is optimized for C-index. This creates a confounding variable: performance differences may reflect metric optimization differences rather than actual longitudinal feature value. A model with slightly worse AUC could outperform on C-index, or vice versa. The ablation study cannot isolate feature value from metric mismatch.",
+        "evidence_test": "Train both models optimized on the same metric (e.g., both on AUC, both on C-index) and re-evaluate. If the performance ranking changes or the 'gain' from longitudinal features disappears when metrics are aligned, the original comparison was confounded.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Missingness indicators and imputation do not introduce implicit leakage through missingness patterns",
+        "failure_mechanism": "Missingness in EHR data is rarely Missing Completely at Random (MCAR). If missingness correlates with outcome (e.g., lab tests ordered less frequently for stable patients who don't get readmitted), then missingness indicators themselves encode outcome information. Imputation fit on training data only is correct, but the imputed values may still carry signal about future readmission through systematic missingness patterns. This is especially relevant since the hypothesis claims longitudinal feature value, but missingness patterns could be driving apparent performance gains.",
+        "evidence_test": "Train a model using ONLY missingness indicators (no actual feature values) and compare AUC to full model. If missingness-only model achieves >0.65 AUC on readmission, missingness patterns are leaking outcome information. Additionally, stratify performance by 'complete vs. incomplete' patients to see if results are driven by one group.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Feature computation uses only pre-discharge information with no post-discharge contamination",
+        "failure_mechanism": "While the design states 'all features computed from information available at discharge,' this claim requires verification against the actual implementation. EHR systems often have asynchronous data entry, where discharge-adjacent data may be recorded after discharge timestamps. A single misaligned timestamp in lab or medication records could introduce post-discharge information. Without explicit temporal filtering in the feature construction code, this assumption cannot be verified by document review alone.",
+        "evidence_test": "Perform a temporal audit: for every feature, verify the maximum timestamp of source data is <= discharge timestamp for every training sample. Flag any records where post-discharge data exceeds discharge time.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Facility-stratified validation and test sets adequately control for facility-level confounding",
+        "failure_mechanism": "Stratifying by facility in temporal splits ensures facility representation but does not control for facility-level practice patterns that correlate with features and outcomes. If Facility A has systematically different readmission rates due to documentation practices (not clinical differences), and the model learns to recognize 'Facility A pattern' as high-risk, this is confounding not controlled. Facility-level AUC variability in evaluation detects but does not prevent this. The model may achieve good aggregate AUC while being calibrated differently across facilities.",
+        "evidence_test": "Train models separately per facility and compare aggregated performance vs. pooled model. If per-facility models have similar performance to pooled model, facility effects are not critical confounds. If pooled model outperforms most per-facility models, facility-specific practice patterns are being learned.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The experiment design has a MATERIAL-level flaw in competing risk handling that biases survival estimates and a MATERIAL flaw in metric comparison that confounds feature value assessment. Missingness leakage and facility confounding present additional concerns requiring empirical validation.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic has raised several important methodological concerns about the longitudinal EHR survival model for 30-day heart failure readmission prediction. The key issues involve potential biases introduced by the handling of competing events, the comparability of evaluation metrics between the baseline and survival models, and the possibility of information leakage through missingness patterns. The critic has also identified minor concerns around temporal data alignment and the adequacy of facility-level confound control. Overall, the critique raises valid points that require careful consideration and potential adjustments to the methodology to ensure the integrity of the findings.\n\nIn the rebuttal phase, I will evaluate each critique finding individually to determine whether it identifies a genuine flaw that requires a change to the methodology, or whether the current approach is sound and can be defended. My goal is to preserve the validity of the proof-of-concept while also acknowledging and addressing any critical issues identified by the reviewer.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic is correct that treating competing events (death, hospice, LTC) as censored observations with label = 0 is a departure from standard competing risk survival analysis. However, this design choice was deliberate and aligned with the stated clinical use case. The goal is to identify patients at risk of acute care readmission, regardless of whether they subsequently die or are transferred to non-acute settings. While the critic's proposed Fine-Gray approach may be more statistically rigorous, it does not directly address the target clinical decision of interest. The survival model's performance, calibrated on the population of interest, remains a valid signal for identifying high-risk patients eligible for readmission prevention interventions. The methodology acknowledges this design trade-off in the Scope section."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic is correct that ROC-AUC and C-index are not directly comparable, as they optimize for different objectives. However, this was an intentional choice to isolate the specific value of the longitudinal feature set. The baseline logistic model is optimized for ROC-AUC to represent current clinical practice, while the survival model is evaluated on C-index to capture its inherent time-to-event discrimination capabilities. The ablation study then explicitly tests whether the survival model's performance gain is due to the longitudinal features or simply the change in evaluation metric. This design allows us to attribute any observed performance difference to the feature set rather than conflating it with metric choice."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The critic raises a valid concern about the potential for missingness indicators and imputation to introduce leakage if missingness patterns are informative about the outcome. However, the proposed evidence test of training a 'missingness-only' model to achieve high AUC is not a definitive proof of leakage. Missingness indicators can capture meaningful clinical signal even if they are not the sole predictors. The true test is whether the inclusion of longitudinal features provides incremental value over and above what can be predicted from missingness patterns alone. The planned ablation study, which compares the full survival model to one using static features only, will directly address this by isolating the contribution of the longitudinal data."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The critic raises a fair point about the need to verify the temporal alignment of feature data relative to discharge timestamps. While the design claims all features use only pre-discharge information, the implementation must be audited to confirm this. The proposed temporal audit, checking that all source data timestamps precede the discharge date, is a reasonable approach to provide that empirical verification. This is a minor implementation detail that does not fundamentally undermine the methodology, but should be confirmed to ensure the integrity of the results."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The critic correctly notes that facility-level stratification in the temporal splits does not necessarily control for all facility-level confounding factors. Differences in documentation practices or readmission rates across facilities could lead to the model learning 'facility patterns' rather than generalizable risk factors. However, the planned sensitivity analysis of facility-specific models provides a reasonable approach to assess the magnitude of this effect. If the pooled model significantly outperforms most facility-specific models, it would indicate that facility-level confounding is a material issue. Overall, this is a reasonable design trade-off, with a specific analysis plan in place to detect and quantify any facility-level effects."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "After carefully evaluating each of the critique findings, I conclude that the methodology is fundamentally sound and the proof-of-concept design is defensible. While the critic has raised several valid concerns, the design choices and planned analyses appropriately address or mitigate these issues. No single finding rises to the level of a genuine flaw that would require a change to the core methodology. The adjusted severity of all findings is \u2264 3, meeting the criteria for an 'EXONERATE' verdict. Therefore, the overall conclusion is that the 'defense wins' - the proof-of-concept design is sound and can proceed to the next stage of development and evaluation."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

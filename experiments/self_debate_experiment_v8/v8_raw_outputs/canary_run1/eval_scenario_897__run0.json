@@ -1,0 +1,132 @@
+{
+  "case_id": "eval_scenario_897",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The learning-to-rank model is trained with pairwise/listwise loss on batches of alerts, which yields a ranking function that improves Recall@10 relative to a classification baseline.",
+        "failure_mechanism": "If the training procedure does not define proper query/groups (e.g., per time window or per incident) for the ranking loss, the loss does not constrain the relative ordering of alerts across different groups. The model may then learn pointwise scores that are functionally equivalent to a classifier, meaning the experiment does not actually test a ranking approach.",
+        "evidence_test": "Inspect the training code to verify that each batch includes a query identifier (such as time\u2011window ID or incident ID) that is passed to the ranking loss function. Alternatively, train an otherwise identical model with a pointwise loss (e.g., binary cross\u2011entropy) and compare its Recall@10; if performance is indistinguishable, the ranking loss is not being applied correctly.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Averaging Recall@10 across equal\u2011weight time windows provides an unbiased estimate of the analyst's top\u201110 review window effectiveness.",
+        "failure_mechanism": "Windows with very few alerts make the top\u201110 set trivial (often containing all alerts), inflating Recall@10 for those windows. Windows with zero incidents may be treated as zero recall or omitted, biasing the average. Simple averaging therefore overstates performance when alert volume varies across time.",
+        "evidence_test": "Compute Recall@10 weighted by the number of alerts (or number of incidents) in each window and compare it to the unweighted average. A substantial difference indicates that the unweighted metric is inflated. Additionally, report the distribution of alert counts per window to show the extent of the bias.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Upsampling confirmed alerts by duplication to ~5% of training alerts supplies sufficient positive signal without harming generalization.",
+        "failure_mechanism": "Duplicating exact alert instances creates memorization opportunities: the model can learn to recognize the duplicated samples themselves rather than generalizable patterns. This can lead to overly optimistic performance on held\u2011out data that does not contain those exact duplicates, especially if duplicates share rare feature combinations.",
+        "evidence_test": "Train two versions: (a) on the original training set without duplication, and (b) on the upsampled set. Evaluate both on the held\u2011out test set. A significant drop in Recall@10 for the non\u2011upsampled model indicates reliance on memorization; a similar performance suggests the upsampling is benign. Additionally, verify that no duplicated alert appears in validation or test.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The logistic regression baseline provides a fair comparison to isolate the benefit of ranking\u2011specific inductive biases.",
+        "failure_mechanism": "Logistic regression is a low\u2011capacity linear model, whereas the proposed ranker (e.g., LambdaMART or a neural listwise ranker) is substantially more expressive. Any observed improvement could stem from the ranker\u2019s higher capacity rather than from its ranking loss objective.",
+        "evidence_test": "Train a high\u2011capacity classification baseline (e.g., gradient\u2011boosted trees or a neural network) with the same feature set and hyperparameter search effort, optimizing for binary cross\u2011entropy. Compare its Recall@10 to that of the ranker. If the ranker no longer outperforms this capacity\u2011matched baseline, the original claim is weakened.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "The PoC presents several methodological concerns that could invalidate or weaken its conclusions. Most critically, the ranking model may not actually be trained with a proper ranking loss, making the experiment unable to isolate the effect of ranking versus classification. Additional issues include potential evaluation inflation due to unweighted window averaging, overfitting from exact duplicate upsampling, and a capacity mismatch between the ranker and its logistic regression baseline.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 (FATAL): The critic claims the LTR model may be functionally a classifier due to missing query groups. However, the design explicitly specifies 'Learning-to-Rank' with 'pairwise or listwise ranking loss'. By definition, standard LTR implementations (LambdaMART) enforce query grouping. The critique makes an empirical claim about code implementation not evidenced in the PoC methodology. This is a valid assumption to rebut via design specification of the method class. F2 (MATERIAL): The critic argues unweighted Recall@10 biases results due to alert volume variation. However, the experiment's scope defines the 'time window' (shift) as the unit of analyst experience, not the alert volume. Unweighted averaging reflects the probability of success per analyst shift. This is a deliberate design choice to align with operator workflow (Section 1), not a metric flaw. F3 (MATERIAL): The critic argues duplicate upsampling causes memorization. However, this is a necessary PoC trade-off for sparse positive labels (Section 2). Crucially, no duplication occurs in validation/test sets, ensuring that memorization of training duplicates will manifest as performance degradation on the held-out test, preserving generalization validity. F4 (MATERIAL): The critic argues LR is a weak baseline compared to high-capacity Ranker. However, the stated scope (Section 8) is to benchmark LTR against the *current operational baseline* (LR), not to isolate ranking bias from capacity differences in an idealized scientific setting. A GBM baseline would shift the scope to 'Ranking vs. Classification in GBM', which is outside the PoC's scope of validating LTR feasibility over the legacy standard.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -7,
+        "adjusted_severity": 2,
+        "justification": "The critique asserts a specific implementation failure (loss not constrained) without inspecting the PoC code. The design explicitly mandates 'Learning-to-Rank' with standard library constraints (query grouping) that enforce this behavior. Without evidence of a non-standard implementation, the critique's claim of a fatal flaw is an assumption unsupported by the methodology."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The unweighted averaging is a deliberate design choice aligned with the operational goal (Section 1). The 'time window' (shift) is the unit of analyst labor. Weighting by alert volume conflates workload with success rate, whereas the metric measures 'how often are incidents included in the top 10 per shift'."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Upsampling is a necessary trade-off for sparse positive signal in a PoC (Section 2). The safeguard (no resampling in validation/test) ensures any memorization of duplicates does not inflate test performance, preserving the validity of the comparison against the baseline."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The critique suggests a capacity-matched baseline, but the stated scope (Section 8) is to benchmark LTR against the *current operational baseline* (LR). A GBM baseline would address a different hypothesis ('Ranking vs. Classification in GBMs'), shifting outside the PoC's scope of validating LTR feasibility over the industry standard."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings were rebutted with sufficient adjustment to bring adjusted severity \u2264 3; no material or fatal flaws remain after accounting for design intent and scope."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

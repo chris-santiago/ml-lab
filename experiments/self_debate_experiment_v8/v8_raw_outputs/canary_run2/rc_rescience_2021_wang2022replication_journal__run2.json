@@ -1,0 +1,132 @@
+{
+  "case_id": "rc_rescience_2021_wang2022replication_journal",
+  "stratum": "regular",
+  "flaw_category": "silent_misconfig",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The specified directed acyclic graph (DAG) accurately captures the true causal structure of the dataset, including bias paths through protected attributes.",
+        "failure_mechanism": "If the DAG is misspecified (e.g., missing confounders, incorrect edge directions, or overlooked backdoor paths), the causal interventions in the GAN generator will fail to block bias propagation, leading to synthetic data that retains or introduces spurious correlations; downstream fairness improvements would then be coincidental rather than causally-informed.",
+        "evidence_test": "Perform causal discovery (e.g., PC algorithm or NOTEARS) on held-out data to validate the DAG, or conduct sensitivity analysis by training with perturbed DAGs (e.g., remove/add edges) and measuring changes in downstream fairness/utility.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "In the synthetic bias injection setting, bias is injected into the training data while the test set reflects the same biased target distribution as deployment conditions.",
+        "failure_mechanism": "If the test set is drawn from the original unbiased real data (common oversight in injection experiments), fairness metrics will artifactually improve on the clean test regardless of debiasing quality, as there is no bias present to cause disparate impact, inflating performance.",
+        "evidence_test": "Explicit description or logged statistics showing whether bias injection was applied identically to both train and test splits (e.g., matching group-conditional label distributions P(Y|A,X) in train vs. test post-injection).",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The synthetic bias injection mechanism produces bias that statistically matches the structure and strength of real-world bias in the datasets.",
+        "failure_mechanism": "Simplistic injection (e.g., probabilistic label flipping based on protected attribute without entangling confounders or causal paths) creates shallow, separable bias that any strong generator can remove, unlike entangled real bias where protected attributes proxy deeper predictors, leading to overstated debiasing capability.",
+        "evidence_test": "Compare statistical fingerprints of injected bias vs. real biased data, such as correlation matrices, mutual information I(A;Y|X), transport distances on group-conditionals P(Y|A,X), or qualitative causal path similarities.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The causally-aware GAN generator successfully implements the intended causal interventions, producing synthetic data where bias paths are blocked as per the DAG.",
+        "failure_mechanism": "GAN training optimizes distributional matching and adversarial losses, which could converge to synthetic data satisfying proxy fairness (e.g., marginal balance) without truly intervening on causal paths, due to mode collapse, poor conditional modeling in tabular data, or suboptimal intervention encoding, yielding plausible downstream metrics without mechanism validity.",
+        "evidence_test": "Diagnostic checks on generated synthetic data, such as testing conditional independences implied by interventions (e.g., d-separation tests for A \u22a5 Y | do(X)), counterfactual simulations, or posterior predictive matching on causal quantities.",
+        "flaw_category": "silent_misconfig"
+      }
+    ],
+    "summary": "The PoC's core causal mechanism rests on unverified structural assumptions and lacks internal validation of the generator's causal behavior, while the synthetic bias experiment risks inflated results from non-representative bias and ambiguous test conditions. These flaws undermine the claim of causally-informed debiasing under realistic conditions.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic focuses on four primary areas: DAG correctness (F1), test set contamination in synthetic injection (F2), the realism of synthetic bias (F3), and the actual effectiveness of the GAN's causal intervention (F4).\n\nRegarding F1: The critic claims the DAG must be 'accurate.' In causal ML research, specifically when proposing a new framework like DECAF, the goal is typically to demonstrate that *given* a causal structure, the method can debias data. The effectiveness of the method is contingent on the DAG, but the PoC aims to prove the mechanism works. However, the critic is right that if the DAG is completely wrong, the results are invalid. I will argue that the DAGs used in the paper are based on established domain knowledge for standard datasets (like Adult), making this a design choice rather than a flaw in the hypothesis testing.\n\nRegarding F2: This is a critical evaluation point. If the test set is 'clean' while the training set is 'biased,' any model that ignores the bias (or any generator that removes it) will naturally perform well. However, the standard protocol for debiasing research is to evaluate on a biased test set to see if the model can generalize despite the bias or if the debiased training data allows the model to avoid picking up the bias. I must verify if the paper's methodology ensures the test set reflects the biased deployment environment.\n\nRegarding F3: This is a common critique of synthetic injection. If the bias is too simple (e.g., just flipping labels), the result is trivial. I will argue that the injection mechanism in DECAF is specifically designed to mimic the causal paths defined in the DAG, making it a controlled environment to test the *causal* capability of the GAN, not a claim that it solves every possible form of real-world bias.\n\nRegarding F4: This is a request for internal diagnostic checks on the GAN. While the critic suggests d-separation tests, the primary objective of DECAF is downstream utility and fairness. If the downstream models show improved fairness and utility, the 'mechanism' is effectively validated via its output. Asking for internal causal diagnostics is a separate research question about GAN interpretability, not a failure of the debiasing hypothesis.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The use of a predefined DAG is a fundamental design choice of the DECAF framework. The hypothesis is that 'causally-informed generation' works; this necessitates a DAG. For the PoC, DAGs are constructed based on established literature for the Adult dataset. While DAG misspecification is a general risk in causal ML, the experiment tests the framework's capacity to utilize a provided structure to debias data."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic correctly identifies a potential failure mode in synthetic injection experiments. If the test set is not subjected to the same bias injection as the training set, fairness metrics are artificially inflated. This is a material concern regarding the evaluation integrity of the injection setting."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The synthetic injection setting is intended as a controlled ablation to verify that the GAN can reverse a known, injected causal bias. It is not intended to be a perfect mirror of all real-world bias complexities, but rather a proof of mechanism. The real-world dataset experiments address the 'entangled bias' concern raised by the critic."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The success of the causal intervention is measured by the performance and fairness of the downstream models trained on the synthetic data. While d-separation tests would be an interesting diagnostic, the downstream metrics serve as the primary validation of whether the bias paths were effectively blocked for the purpose of the hypothesis."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "While the design choices regarding the DAG and synthetic injection scope are justified, the potential for evaluation inflation in the synthetic bias injection setting (F2) is a material flaw that was conceded and remains at high severity."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=8 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

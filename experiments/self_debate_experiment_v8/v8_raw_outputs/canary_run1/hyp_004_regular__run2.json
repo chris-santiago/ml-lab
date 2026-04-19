@@ -1,0 +1,182 @@
+{
+  "case_id": "hyp_004_regular",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "x-ai/grok-4.1-fast",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The proportional hazards assumption holds for the Cox model using longitudinal and static features.",
+        "failure_mechanism": "If hazard ratios change over time (non\u2011proportional hazards), the Cox model is misspecified, leading to biased risk scores and potentially inflated or deflated C\u2011index values.",
+        "evidence_test": "Examine Schoenfeld residuals or test for time\u2011varying coefficients (e.g., using cox.zph in R). A significant test indicates violation; alternatively, fit a flexible parametric survival model and compare predictions.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Treating death within 180 days as a censoring event preserves the non\u2011informative censoring assumption required for valid Cox inference.",
+        "failure_mechanism": "Death is likely related to the same predictors that drive readmission risk (e.g., severity of illness). Censoring deaths introduces informative censoring, biasing hazard ratios and the C\u2011index, making the model appear better or worse than it truly is for predicting readmission.",
+        "evidence_test": "Fit a competing\u2011risks model (Fine\u2011Gray subdistribution hazard) or a cause\u2011specific Cox model and compare performance; simulate data where death is predicted by covariates and observe the bias in the na\u00efve Cox C\u2011index.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A chronological train/validation/test split guarantees that performance will generalize to future periods (no distribution shift).",
+        "failure_mechanism": "Underlying relationships between longitudinal utilization features and readmission risk may drift over time due to changes in clinical pathways, coding practices, or patient populations, causing temporal non\u2011stationarity that a simple split does not guard against.",
+        "evidence_test": "Evaluate the model on an additional hold\u2011out period beyond the test set (e.g., months 37\u201148) and monitor any drop in C\u2011index or calibration; alternatively, use time\u2011varying coefficient models to detect drift.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Harrell's C\u2011index is a sufficient metric to assess discrimination for 6\u2011month readmission prediction.",
+        "failure_mechanism": "With substantial censoring, the C\u2011index can be optimistic and insensitive to miscalibration; it does not directly reflect clinical utility or decision\u2011making impact.",
+        "evidence_test": "Report time\u2011dependent AUC at 30/90/180 days, calibration plots, and decision curve analysis; demonstrate cases where C\u2011index remains high while net benefit or calibration deteriorates.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Longitudinal features provide marginal predictive value beyond the baseline clinical variables, as shown by improvement over a simple Cox baseline.",
+        "failure_mechanism": "The baseline comparator is a narrowly specified Cox model; more flexible machine\u2011learning survival models (e.g., gradient\u2011boosted trees, CoxBoost, DeepSurv) may already capture nonlinear interactions and temporal patterns, making the apparent gain from longitudinal features smaller or negligible.",
+        "evidence_test": "Train a high\u2011capacity survival learner on the same feature set and compare its C\u2011index to the longitudinal Cox model; if the ML model matches or exceeds the Cox model, the claimed marginal value is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Preprocessing (imputation, standardization, encoding) fit on the training set only prevents any data leakage into validation and test sets.",
+        "failure_mechanism": "If imputation models inadvertently incorporate outcome information (e.g., imputing missing lab values using the median of uncensored patients only), leakage can occur, biasing performance estimates.",
+        "evidence_test": "Audit the imputation code to ensure it uses only predictor data; run a sanity check by shuffling outcomes and verifying that preprocessing statistics remain unchanged.",
+        "flaw_category": "silent_misconfig"
+      }
+    ],
+    "summary": "The PoC presents a thoughtful design but rests on several unverified survival\u2011analysis assumptions (proportional hazards and non\u2011informative censoring) that, if violated, could materially bias results. Additional concerns include potential temporal distribution shift, metric limitations, and missing comparisons to more flexible baselines.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Full reasoning across all findings:\n\nF1 (MATERIAL 5): The critic claims the proportional hazards (PH) assumption may not hold with longitudinal and static features combined, potentially misspecifying the Cox model and biasing C-index. This is a standard prerequisite for valid Cox inference (hazard ratios), though the primary metric (C-index) is a non-parametric concordance measure somewhat robust to PH violations for ranking purposes. The methodology does not explicitly test or mention Schoenfeld residuals or zph tests, nor include a control like time-varying coefficients. Confound Controls, Validation, Scope sections do not address PH testing. While deliberate use of Cox for interpretability is stated, the assumption is unverified in the design, making this a plausible empirical concern resolvable only by running the test on data. Uncertain: degree of violation in this EHR data with utilization features\u2014longitudinal counts may induce time-dependence.\n\nF2 (FATAL 9): Critic argues death censoring violates non-informative censoring assumption since death shares predictors with readmission (e.g., illness severity), biasing hazards and C-index. Design explicitly states 'handle competing risks explicitly: death ... censoring event (not a negative readmission)', with rationale 'prevents death ... from artificially lowering readmission counts and biasing model training'. This reflects deliberate choice: censoring estimates readmission hazard conditional on survival (useful for risk scores among survivors), common in readmission literature despite theoretical informative censoring (vs. Fine-Gray for cause-specific CIF). Both baseline and proposed models use same handling, so relative C-index delta likely unbiased for hypothesis. Evidence test requires competing risks comparison, but design anticipates concern via named control in Label Definition. Uncertain: exact bias magnitude on delta C-index in this cohort.\n\nF3 (MATERIAL 5): Claims chronological split 'guarantees' no distribution shift for future generalization. Design uses temporal split (train 1-21.6mo, val 21.7-28.8, test 28.9-36) to 'enforce temporal ordering', 'prevent leakage', 'ensure improvements generalize across the health system'. Does not claim infinite-future guarantee; scope is test set performance within 36mo data, stratified by site/admission type for operational diversity. Drift from clinical changes possible long-term, but within ~3yr window and post-split test, methodology guards against leakage and tests recent data. Evidence test suggests extra holdout (37-48mo, beyond data), out-of-scope. Uncertain: drift within test period unaddressed but low-likelihood.\n\nF4 (MINOR 3): Harrell's C-index insufficient alone due to censoring/calibration insensitivity, ignoring clinical utility. Design specifies primary C-index but lists secondaries: calibration slope/intercept, time-dependent AUC@30/90/180d, sens/spec at thresholds\u2014directly matching evidence test. Evaluation Strategy comprehensively addresses metric limitations. Uncertain: nothing, fully controlled.\n\nF5 (MATERIAL 4): Longitudinal features' marginal value overstated vs. 'narrow' baseline; flexible ML survival models might close gap. Design baselines 'current clinical standard' (demogs, disposition, dx, comorbidity)\u2014interpretable linear Cox mirroring clinician decisions 'based on discharge note, not 12-month history'. Hypothesis tests longitudinal addition value for deployable, clinician-trusted model. Confound Controls: (1) baseline adjusted for comorbidity/admission, (2) sensitivity adds prior utilization to baseline isolating trajectory, (3) stratified high/low utilizers, (4) site strat. Not vs. blackbox ML. Evidence test out-of-scope for clinical hypothesis. Uncertain: ML performance irrelevant to stated baseline.\n\nF6 (MINOR 2): Preprocessing leakage possible if imputation uses outcome info. Design explicitly: 'All preprocessing ... fit on the training set only and applied identically', standard practice preventing leakage. No outcome in features (pre-discharge labs, etc.); imputation (e.g., median) on predictors only assumed. Hypothetical failure mechanism not evidenced; sanity check in test unneeded for PoC spec. Uncertain: specific imputation code details unspecified but per design intent sound.\n\nOverall: All findings are theoretical concerns or require empirical verification on data, but design anticipates most via explicit rationales/controls (F2, F4, F5) or scopes them out (F3). F1 uniquely lacks control, warranting deferral. No genuine fatal flaws changing hypothesis validity; relative improvements robust to shared biases (e.g., censoring same for both models). Methodology sound for PoC intent.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "No explicit control or test for PH assumption in design (no mention in Model/Baseline or Confound Controls); requires empirical Schoenfeld residuals check on data, unresolvable by argument alone."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "Deliberate choice in Label Definition to censor deaths explicitly as competing risk handling ('prevents ... biasing model training'), estimating conditional readmission hazard among survivors\u2014common for risk prediction despite theoretical informative censoring; both models use identical treatment, preserving delta C-index validity."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Temporal split enforces no-leakage generalization within 36mo scope (test last 20%, stratified by site/admission); long-term drift to unseen future periods (e.g., mo37+) beyond stated experiment/data scope."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "Evaluation Strategy explicitly includes secondaries (time-dependent AUC@30/90/180d, calibration slope/intercept, sens/spec at thresholds), addressing censoring/calibration concerns beyond primary C-index."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Baseline defined as 'current clinical standard' (interpretable Cox on discharge snapshot) per Model and Baseline section; Confound Controls (sensitivity analyses adding utilization/comorbidity) isolate longitudinal value for clinician-deployable model, not vs. out-of-scope ML blackboxes."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Feature Engineering explicitly fits preprocessing 'on training set only', standard practice excluding outcomes from pre-discharge features; hypothetical imputation leakage un evidenced and below PoC significance."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "F1 requires DEFER for PH empirical verification; all other findings rebutted to adjusted severity \u22643 or 0. No CONCEDEs remain above 3, but DEFER present triggers empirical_test_agreed."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,157 @@
+{
+  "case_id": "eval_scenario_705",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Transformer's advantage over the gradient-boosted baseline on intrusion detection is due to legitimate sequence modeling of packet-level dynamics (not identity leakage from host identifiers).",
+        "failure_mechanism": "The identity leakage control is insufficient. Although a variant of the transformer is trained without host identifiers, this does not address the broader issue of feature leakage *within* the packet-level sequences themselves. Host identifiers may be encoded in seemingly benign features such as packet sizes, inter-packet delays, or protocol markers (e.g., TLS handshake markers may correlate strongly with specific servers/hosts). The experiment assumes that removing explicit identifiers from the transformer\u2019s input is enough to prevent leakage, but does not verify whether these implicit identity signals remain in the packet sequences.",
+        "evidence_test": "To rule out leakage, perform an ablation where the transformer is trained *only* on features that are (a) strictly derived from packet dynamics and (b) have no statistical correlation with host identity in the training data. This could be done by clustering hosts by behavioral profiles and masking any sequence features that correlate with cluster labels, then testing whether performance degrades. Alternatively, train a fully 'blinded' transformer on shuffled identity labels within sessions to measure performance collapse \u2014 if performance remains high, leakage is likely.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 24-hour confirmation window for labeling sessions as malicious correctly aligns with the hypothesis's 'next-day confirmation' requirement and reflects realistic detection latency.",
+        "failure_mechanism": "The labeling process assumes that all analyst-confirmed malicious events within 24 hours of a session\u2019s start time are causally linked to that session. This introduces a circularity: the session is labeled malicious if it is *linked to a later confirmed event*, but the model\u2019s job is to predict that event in advance. The transformer could be learning to propagate signals forward in time (i.e., anticipating a future event by associating it with a current session), which defeats the purpose of early intrusion detection. Moreover, analyst confirmation may itself rely on retrospective correlation across sessions, violating temporal causality.",
+        "evidence_test": "Re-label the dataset using a strictly *forward-looking* label: a session is labeled malicious only if it is part of a confirmed intrusion campaign *that begins within or after the session*. Exclude any session from which a confirmation is *retrospectively inferred*. Alternatively, evaluate models on the ability to predict the *first* malicious event in a campaign (not linked to future knowledge), using sessions that occur before any analyst confirmation. Compare pAUC-ROC under this stricter labeling scheme.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Temporal cross-validation within the validation set (months 11\u201313) and strict chronological split across train/validation/test windows are sufficient to prevent temporal leakage and ensure generalization to unseen future attacks.",
+        "failure_mechanism": "Even with chronological splitting, temporal leakage can occur through preprocessing pipelines and feature construction. For example, session metadata includes 'historical features' (e.g., alert counts on source host in past 7 days) that implicitly aggregate information from the validation period into training. If the pipeline computes historical statistics using the entire validation window to define the 'past', then training data is contaminated by future data via derived features. Additionally, while fold assignments are chronological in CV, the use of the *entire* validation window for computing preprocessing parameters (e.g., scaling parameters, category encodings) may introduce leakage if these statistics rely on data from later folds.",
+        "evidence_test": "Decouple preprocessing from the development window: use only data from the training window (months 1\u201310) to compute all scaling, imputation, and categorical encoding parameters. Refit all models with this constrained preprocessing. If the transformer\u2019s advantage holds with train-only preprocessing, temporal leakage is unlikely. Alternatively, report per-fold metrics in temporal CV using parameters learned only from the folds' past data (i.e., no peeking into validation folds during preprocessing).",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The use of partial AUC (0\u20135% FPR) is appropriate and focuses evaluation on the operational regime where analyst capacity is limited.",
+        "failure_mechanism": "pAUC-ROC over a low-FPR region is highly sensitive to the placement of the threshold, especially when positive class prevalence is low (as expected in intrusion detection). The metric assumes that the curve is smooth and well-behaved in this region, but small shifts in threshold can cause large jumps in recall due to sparse positives. Moreover, the 0\u20135% FPR region may not correspond to the analyst\u2019s actual alert budget if incidents are clustered in time or if the FPR is pooled across highly variable session lengths and sources. Alternative allocations of false positives (e.g., per-source or per-hour budgets) may lead to different conclusions.",
+        "evidence_test": "Report operational metrics that reflect analyst workload more directly: false positives per day or per analyst shift, normalized by traffic volume. Also compute pAUC over tighter FPR ranges (e.g., 0\u20131%, 0\u20132%) and check if rank ordering between models flips. If the transformer\u2019s advantage disappears at stricter FPR thresholds, the finding may not hold in real deployment.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Removing host identifiers from the baseline ensures a fair comparison based on generalizable features.",
+        "failure_mechanism": "Host identifiers can be *reconstructed* from packet-level features (e.g., consistent packet timing patterns from a specific internal host to an external C2 server). If such reconstructions are more predictive than raw host IDs, the baseline is still indirectly exploiting identity-based signals. The fairness assumption rests on the assertion that these reconstructions are not possible \u2014 which is unlikely in practice. The experiment does not test whether the baseline reconstructs host behavior patterns that act as proxies for identity.",
+        "evidence_test": "Train the baseline on sessions where source/destination IPs are hashed with a secret salt per session, making identity reconstruction infeasible. If baseline performance degrades to transformer levels, the basis of comparison is invalid. Alternatively, inspect feature importance for the baseline: if features like 'destination domain' or 'port cluster' dominate, identity is likely being exploited indirectly.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "The PoC contains multiple FATAL flaws related to signal leakage (host-identity and temporal leakage) and an implicit labeling assumption that conflates causal detection with retrospective correlation. These invalidate the core causal claim that sequence modeling explains superior performance. MATERIAL flaws include metric limitations (pAUC sensitivity) and unfairness in baseline comparison due to possible identity reconstruction.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critique raises several significant concerns regarding potential signal leakage, labeling circularity, and temporal leakage in the methodology. Specifically, the F1 finding suggests that the control for identity leakage is insufficient, arguing that even without host identifiers, features derived from packet-level sequences may still encode identity information. The rebuttal can reference the plan for explicit evaluation of performance in an alternative transformer that uses only packet dynamics to address this concern. For finding F2, the critique rightly points out a risk of circularity in the labeling process, implying that the current mechanism could inadvertently train the model to correlate sessions with future events, undermining its validity for early detection. Since it suggests a more robust, forward-looking relabeling, the rebuttal would reference this as a crucial recommendation for improving experimental rigor. Finding F3 identifies potential temporal leakage through the use of historical features derived from the validation set, but the design explicitly states that preprocessing is performed using the training window only, which counters this finding. Therefore, it can be rebutted with the assertion that proper controls are already integrated into the design. F4 questions the appropriateness of the pAUC-ROC metric due to its sensitivity and operational relevance, which raises valid points but does not fundamentally undermine the conclusions drawn; thus, an adjustment in metric reporting could be proposed. Finding F5 highlights potential indirect identity reconstruction in the baseline model. While the concern is valid, it does not compromise the model's overall integrity since the focus remains on generalizable features, and using hashed identifiers would provide a pathway for further validation. Overall, while some findings suggest areas of improvement, the methodology fundamentally stands on solid ground with appropriate rebuttals for the major critiques raised.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 7,
+        "justification": "The methodology includes a control for identity leakage by training a variant of the transformer without host identifiers. While the critique raises concerns about potential implicit leakage, the design is structured to evaluate dependency on purely packet-level features. However, we acknowledge the importance of additional testing to fully alleviate these concerns."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 6,
+        "justification": "The critique points out legitimate concerns regarding labeling circularity in the dataset. Although the current labeling aligns with the study's hypothesis, the proposal to relabel sessions based on forward-looking criteria will be essential for strengthening the methodology. While valid, this critique identifies an area for improvement rather than a fundamental flaw."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 4,
+        "justification": "The procedures established for preprocessing and feature construction are designed to utilize only the training window data, thereby preventing leakage from future data. The critic's concerns, while noteworthy, do not reflect a misunderstanding of the design intent to avoid contamination from later data."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 5,
+        "justification": "While the critique's points on the sensitivity of the pAUC-ROC metric are reasonable, statistical evaluation remains sound. The experiment may need to include additional operational metrics, but the original findings retain validity as they align with the study's primary focus."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "While the potential for indirect identity reconstruction is a valid concern, the design intention ensures that generalizable features are the primary focus. Subsequent exploration with hashed identifiers will provide further clarity on this matter."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been addressed with appropriate rebuttals, and adjusted severities reflect either minor concerns or areas for design enhancement, but none warrant a significant change to the methodological integrity."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (high residual)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=5, orig_sev=6 < 7, REBUT-IMMATERIAL \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "3 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

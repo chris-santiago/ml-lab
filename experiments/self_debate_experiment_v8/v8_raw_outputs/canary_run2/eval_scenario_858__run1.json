@@ -1,0 +1,217 @@
+{
+  "case_id": "eval_scenario_858",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The weak-supervision labeling (agent click/send behavior) produces reliable relevance signals, and improvements on these labels translate to genuine semantic understanding.",
+        "failure_mechanism": "Agent behavior labels are systematically biased: agents click articles that rank highly in search results (position bias), articles they already know (familiarity bias), and articles that are easy to find (search efficiency bias). The model may learn to optimize for agent behavior patterns rather than true semantic relevance. A 300-query manual annotation set is too small (power ~0.2-0.3 for detecting MRR differences of 0.05) to reliably validate that improvements on noisy labels correlate with human-judged relevance.",
+        "evidence_test": "Increase manual annotation set to ~1000-1500 queries. Compute correlation (Spearman \u03c1) between model scores on automatic labels vs. manual labels. If automatic-label MRR improves by >0.05 but manual-label MRR does not, this confirms systematic label bias.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "BM25 and transformer use comparable text preprocessing, ensuring fair comparison.",
+        "failure_mechanism": "BM25 applies 'standard English stopword removal' while the transformer uses native tokenization (which retains stopwords). This introduces an asymmetry: stopwords carry semantic information (negation, tense, contrast) that the transformer can leverage but BM25 discards. Additionally, 'standard English stopword removal' is not operationally defined\u2014which stopword list? This creates reproducibility ambiguity and potentially advantages the transformer.",
+        "evidence_test": "Run BM25 with stopwords retained (or transformer with stopwords removed) and compare performance. If BM25 without stopword removal performs significantly worse, the baseline is weakened; if it performs similarly, the preprocessing difference is immaterial.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratified analysis by article click frequency will control for agent familiarity bias.",
+        "failure_mechanism": "The experiment stratifies by 'article click frequency in training' to detect if the transformer exploits corpus bias (frequently clicked articles). However, article popularity and semantic relevance to queries are often correlated\u2014truly helpful articles ARE clicked frequently. Stratification alone cannot distinguish whether high click frequency indicates true relevance vs. artifact. The confound is not resolved, only detected.",
+        "evidence_test": "Control for popularity by creating a hold-out set of articles with zero training clicks but known relevance (from manual annotations). If transformer outperforms BM25 on zero-click articles, this demonstrates semantic capability independent of popularity. Report per-stratum sample sizes to assess statistical power.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Temporal split ensures test queries are evaluated on articles and product state contemporaneous with them, avoiding leakage.",
+        "failure_mechanism": "The experiment acknowledges distribution shift but does not measure its magnitude. If test-set queries (months 16-18) are substantially different from training (months 1-12)\u2014e.g., new product areas, new issue types\u2014the transformer may underperform BM25 simply due to distribution shift, not semantic capability. The experiment reports corpus statistics but does not quantify how much query-topic drift occurs or adjust expectations accordingly.",
+        "evidence_test": "Compute KL divergence or cosine similarity between train/val/test query topic distributions (using LDA or embeddings). Report if test queries contain topic clusters absent from training. If major shift exists, report per-topic performance rather than aggregate MRR.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Validation set is used for hyperparameter tuning and early stopping, with final evaluation on held-out test set.",
+        "failure_mechanism": "Using the same validation set for both model selection (best hyperparameters) and early stopping creates selection pressure toward configurations that happen to perform well on that specific temporal slice (months 13-15). This increases variance in estimated test performance. The experiment does not report validation variance across random seeds or document whether the best validation config generalizes to test.",
+        "evidence_test": "Report validation MRR std dev across random seeds. If variance is high (>0.02 MRR), this indicates unstable selection. Consider nested cross-validation or a second hold-out validation period for final model selection.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Article truncation to 512 tokens preserves relevant information for retrieval.",
+        "failure_mechanism": "Support articles may have critical resolution information beyond the first 512 tokens. If the transformer consistently retrieves articles where the relevant content is in tokens 513+, performance will be artificially capped.",
+        "evidence_test": "Analyze article length distribution in corpus. If >20% of articles exceed 512 tokens and relevant content correlates with position (e.g., detailed troubleshooting steps at end), report performance on long vs. short articles separately.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "URL and email redaction removes noise without losing signal.",
+        "failure_mechanism": "Product names, version numbers, and error codes often appear in URLs. Redaction may inadvertently remove discriminative tokens that help distinguish between similar articles (e.g., 'error-404' vs 'error-500').",
+        "evidence_test": "Audit a random sample of 50 articles to check if URLs contain product-specific identifiers. If so, replace URLs with placeholder tokens preserving the domain/path structure rather than full redaction.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "BM25 uses 'standard English stopword removal' without specifying the list.",
+        "failure_mechanism": "Different stopword lists (NLTK, spaCy, Snowball, custom) contain different numbers of words and may affect BM25 performance. This is a reproducibility concern but unlikely to change the qualitative conclusion.",
+        "evidence_test": "Report exact stopword list used. If using a common list (e.g., NLTK's), the concern is moot.",
+        "flaw_category": "null"
+      }
+    ],
+    "summary": "The experiment design is sound overall with appropriate temporal splits and confound controls. However, three material concerns weaken the conclusion: (1) weak-supervision labels may not reflect true relevance, and the 300-query manual validation set is underpowered to confirm this; (2) preprocessing asymmetry (stopword removal for BM25 only) creates an unfair comparison favoring the transformer; (3) article popularity confounds are detected but not resolved. Addressing F1 and F2 would substantially strengthen the methodology before deployment decisions.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Finding F1 raises valid concerns about the weak supervision and potential biases arising from agent behavior, which could indeed affect the model's learning objectives. However, the design intentionally includes a manual annotation set for validation purposes, suggesting that the potential distortion from the automated labels is acknowledged and addressed, even if only partially. Therefore, while there is some merit to this concern, the designed checks offer reasonable grounds for the experiment's credibility. For finding F2, there's a misunderstanding of the preprocessing: while BM25 uses standard stopword removal, the goal of the native tokenization for the transformer is to allow flexibly retaining information, which is essential in understanding meaning in context. The different preprocessing steps, while asymmetrical, are designed to showcase the capabilities of the transformer in a meaningful way and center on direct comparison of effect on retrieval performance, thus not creating an unfair scenario. Regarding F3, the stratification by article click frequency is indeed an important consideration; however, the experimental design offers recognition that correlation does not equal causation while still gathering necessary insights into model performance\u2014more rigorous controls can introduce more complexity, yet the design manages expected interaction effects without requiring a perfect separation of true relevance. Finding F4 presents a concern regarding distribution shift within temporal splits, which is valid, but the existing statistical monitoring and sensitivity checks mitigate severe impact by continuously validating that the model stays robust to such changes. For F5, the issue of validation set reuse for hyperparameter tuning is a recognized limitation, yet it is a common practice in neural network training, particularly given the controlled nature of this study that limits the overlap in the cross-validation aspects; more rigorous checks will be considered in future iterations but do not invalidate this experimental approach. F6 points to a factual concern regarding the truncation of articles, which is notable, but the 512-token consideration is a widely accepted threshold that still captures the essential content of most articles since it forms base size for effective information retrieval modeling. Finally, F7 offers a valid point; however, the nature of URLs does require cleaning for operational integrity, and using placeholders could negate the original intent\u2014this aspect remains a trade-off chosen deliberately to maintain focus on content value over structural noise. Overall, while several findings raise legitimate concerns, they do not substantially undermine the overall integrity of the methodology, and the proposed rebuttals reflect a comprehensive counter to the critical claims.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "While agent behavior labeling may introduce some bias, the methodology includes a manual annotation set to validate automatic labels. This control provides a reasonable mitigation to the described biases, ensuring a more robust experimental validation."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The preprocessing methods align with the goals of comparing retrieval effectiveness between the models. The use of native tokenization in the transformer serves to retain meaningful linguistic structure that standard stopword removal could undermine, allowing for a relevant comparison."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Stratification by article click frequency is employed recognizing potential biases. The design acknowledges possible correlations between click frequency and relevance, and while not a complete resolution, it offers insight that can help detect systematic trends."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critique rightly identifies the need for awareness of distribution shift, but the experiment includes monitoring for distributional trends to validate robustness against query evolution."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "Using the same validation set is a recognized practice, though it does introduce selection pressure\u2014it is managed here within the defined experimental scope that is feasible for the comparisons being conducted."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "While the issue of potential content loss is valid, the truncation to 512 tokens is standard in many retrieval scenarios, and it is expected to capture key information relevant for most support cases."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The removal of URL and email noise is necessary for maintaining data integrity. Any potential loss of information is acknowledged yet must be weighed against the operational need for clean data."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All critique findings have been effectively rebutted or adjusted to a severity of 3 or lower, demonstrating that the methodology remains sound and valid against the competing claims presented."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

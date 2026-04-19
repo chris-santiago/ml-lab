@@ -1,0 +1,157 @@
+{
+  "case_id": "eval_scenario_848",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The transformer-based classifier with full message text and sender history will outperform a header/URL-based baseline on phishing detection.",
+        "failure_mechanism": "The claim assumes that the transformer model's performance improvement is due to semantic understanding rather than template memorization or exploitation of heuristics in the sender-history features. However, the sender-history features provided to both models are highly predictive in phishing detection (e.g., sender domain reputation). If these features dominate the classification decision, the transformer's text modeling may add little value, and the 'uplift' could be an artifact of how the features are engineered or weighted, not the model architecture itself.",
+        "evidence_test": "Measure the relative feature importance/contribution of sender-history vs. text features for the transformer model (e.g., via SHAP, attention weights, or ablations). If sender-history features contribute the majority of predictive power, the hypothesis is not about transformer performance but about feature engineering. Alternatively, ablate sender-history features entirely and retrain the transformer and baseline to isolate the text contribution.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Temporal split ensures generalization to future, unseen campaigns.",
+        "failure_mechanism": "A chronological split does not guarantee generalization to deployment conditions if attacker tactics evolve so rapidly that even a 3-6 month temporal gap introduces significant distribution shift. For example, if a new exploit method emerges in months 16\u201318 that was unseen in training, the model may fail catastrophically despite the temporal split. The PoC acknowledges non-stationarity but does not quantify the magnitude of drift or validate robustness to extreme shifts.",
+        "evidence_test": "Evaluate the model on a more challenging out-of-distribution test set (e.g., geographically or linguistically distinct phishing campaigns) or simulate rapid drift by training on months 1\u201312 and testing on a synthetic 'shock' dataset representing a sudden tactic change (e.g., adoption of a new obfuscation method). If performance degrades significantly, the claim weakens.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The header/URL baseline is a fair comparison to the transformer model.",
+        "failure_mechanism": "The baseline is logistic regression, which may be insufficient to capture non-linear interactions in header/URL features. A stronger baseline could be a modern gradient-boosted tree (e.g., XGBoost, LightGBM) or a small neural network, which might achieve significantly better performance on header/URL features alone. Without this comparison, the claimed 'outperformance' of the transformer could be due to a weak baseline rather than the transformer's strengths.",
+        "evidence_test": "Compare the header/URL baseline to a boosted tree or small neural network trained on the same features. If these models outperform logistic regression but still underperform the transformer, the baseline comparison is robust. Otherwise, the hypothesis is not about transformers vs. headers/URLs but transformers vs. suboptimal baselines.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Label quality is ensured by the 30-day grace period.",
+        "failure_mechanism": "The grace period assumes that all critical label information (e.g., user compromise, delayed campaign attribution) is captured within 30 days. However, sophisticated phishing campaigns may have longer latency (e.g., weeks or months) before full attribution is possible. If labels are noisy or delayed beyond 30 days, they may be mislabeled in the training set, introducing label noise that disproportionately affects the transformer (since it relies on semantic signals that may correlate with delayed labels).",
+        "evidence_test": "Audit a random sample of emails labeled as benign after 30 days to check for false negatives (i.e., emails later discovered to be malicious). If the false negative rate is non-negligible, retrain the model with delayed labels or use label smoothing/noise-aware training. Alternatively, measure performance on the unresolved-label cohort to quantify robustness to label noise.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "PR-AUC is the appropriate metric for operational prioritization of catching malicious emails at low false-positive rates.",
+        "failure_mechanism": "While PR-AUC is suitable for imbalanced datasets, it does not directly optimize for the operational constraint of 'low false-positive rate' or specify the acceptable FP rate in deployment. The secondary metrics (e.g., precision at 95% recall) partially address this but are post-hoc and not aligned with a concrete deployment operating point. The claim that PR-AUC 'directly reflects' operational priority is overstated without linking PR-AUC thresholds to business impact or SOC resource constraints.",
+        "evidence_test": "Map PR-AUC thresholds to operational FP rates and resource costs (e.g., SOC analyst time per FP). If the PR-AUC-optimal operating point results in an impractical FP rate, the metric choice is misaligned. Alternatively, use a utility-based metric (e.g., cost-sensitive F1) that encodes explicit penalties for FP/FN.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC has significant methodological flaws that risk invalidating the core hypothesis. The primary concern is the silent misconfiguration where sender-history features may dominate the transformer's performance, and the lack of distributional shift robustness tests. Material flaws include weak baseline comparisons and label noise assumptions. Minor flaws include metric alignment and temporal generalization.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 claims that the sender-history features might dominate the model, making the 'transformer uplift' a result of feature engineering rather than text modeling. However, the design explicitly provides identical sender-history features to both the transformer and the baseline. Any uplift observed is therefore specifically due to the addition of the text/MIME stream, regardless of whether sender-history is predictive. The hypothesis is about whether text *adds* value over the baseline, not whether text is the *sole* driver of performance. \n\nF2 argues that a temporal split doesn't guarantee generalization if drift is extreme. This is a theoretical concern about the nature of phishing, not a flaw in the methodology. The design already includes a temporal split (the industry gold standard for non-stationary data) and a specific confound control (7c) to quantify temporal drift by evaluating on a recent training cohort. Requiring a 'synthetic shock' dataset is outside the scope of a PoC using real-world data.\n\nF3 suggests that Logistic Regression is too weak a baseline. While a GBDT might be stronger, the goal of the PoC is to compare a text-heavy transformer approach against a standard header/URL approach. Logistic Regression is a standard, transparent baseline for these features. Moreover, the design focuses on the *contribution of text*; if text provides a massive lift over a well-tuned linear baseline, the hypothesis that text is useful is supported. The 'fairness' is ensured by equivalent tuning effort (grid search) and identical history features.\n\nF4 concerns the 30-day grace period. The design explicitly addresses this in Section 1 and 7c: emails that remain unresolved after 30 days are excluded from the primary sets and held out for a separate robustness check. This prevents delayed labels from contaminating the primary evaluation and allows the designer to quantify the impact of label noise separately.\n\nF5 argues that PR-AUC doesn't explicitly define an operating point. PR-AUC is a model-selection metric (used to find the best overall classifier), while the secondary metrics (precision at 95% recall, recall at 99% specificity) are the operational metrics. This is a standard ML practice: use a summary metric for selection and point-metrics for operational planning. The claim that it 'reflects the priority' is a high-level justification for choosing PR over ROC in an imbalanced setting.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The design explicitly isolates the text contribution by providing the same sender-history features to both the transformer and the baseline. Therefore, any delta in performance is mathematically attributable to the text modeling, regardless of the absolute predictive power of the history features."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The temporal split is the correct methodology for testing generalization in non-stationary environments. The design further addresses drift in Section 7(d). Demanding synthetic shock datasets or OOD geographic sets exceeds the scope of a PoC intended to validate uplift on organization-specific data."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The baseline's purpose is to represent the current standard of header/URL analysis. By ensuring identical history features and equivalent tuning effort (L2 grid search), the comparison focuses on the addition of the transformer's text stream. A non-linear baseline is not required to prove that text adds significant value."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The design anticipates label latency by implementing a 30-day grace period and specifically excluding unresolved samples into a separate robustness cohort (Section 1 and 7c), ensuring the primary results are not skewed by ambiguous labels."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "PR-AUC is used for model selection; the operational constraints are addressed via the secondary point-metrics (precision at 95% recall, etc.). This is standard practice and does not invalidate the model's comparative performance."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Most findings were successfully rebutted as design choices or out-of-scope. However, F1 remains at adjusted severity 5 because while the delta is isolated, the critic's point about quantifying the relative contribution (text vs. history) is a valid empirical question that should be answered during the actual test run."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

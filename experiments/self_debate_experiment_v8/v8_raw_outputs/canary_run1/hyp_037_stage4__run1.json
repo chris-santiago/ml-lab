@@ -1,0 +1,306 @@
+{
+  "case_id": "hyp_037_stage4",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Merchant category embeddings are initialized via co-occurrence statistics from the full modeling corpus before training and then frozen.",
+        "failure_mechanism": "If 'full modeling corpus' includes data from validation (months 13-15) and test (months 16-18) windows, then co-occurrence statistics computed on this full corpus leak future transaction patterns into the embedding initialization. This is signal leakage: embeddings learned on validation/test transaction patterns will encode information that did not exist at training time, artificially inflating performance on held-out data.",
+        "evidence_test": "Check whether the embedding initialization uses only data from the training window (months 1-12). If initialization uses any data beyond month 12, this is leakage. A valid design would compute co-occurrence statistics exclusively from the training period.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Preprocessing artifacts (standardization parameters, categorical vocabularies) are established once from the full modeling corpus before training and then frozen.",
+        "failure_mechanism": "Computing standardization parameters (mean, std) and categorical vocabularies from the full 18-24 month corpus rather than just the training window causes data leakage. For example, if a merchant category appears only in months 16-18 (test period), including it in the frozen vocabulary allows the model to 'know' about this category during training \u2014 information that would not be available in deployment. Similarly, standardization parameters biased by test-period values underestimate true out-of-sample error.",
+        "evidence_test": "Verify that all preprocessing parameters (mean, std for numeric features; category mappings for merchant categories) are computed using only data from months 1-12. Re-run preprocessing using training-only data and compare feature distributions and model performance.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The churn label definition specifies '60+ consecutive days of inactivity within 30 days following a prediction date'.",
+        "failure_mechanism": "This definition is internally inconsistent: a 60-day period cannot fit within a 30-day window. Either (a) the label definition is wrong and will be computed incorrectly, or (b) the intended meaning is ambiguous. This fundamentally corrupts the target variable \u2014 the model may be optimizing for a poorly defined objective, producing meaningless performance estimates regardless of feature quality.",
+        "evidence_test": "Obtain the exact SQL or code used to compute labels. The correct definition should be either: (1) 30+ days of inactivity within the 30-day window, or (2) 60+ days of inactivity starting after the 30-day window. Verify label distribution matches domain expectations for the issuer.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline uses fixed regularization selected a priori, while the proposed model undergoes full hyperparameter tuning on validation data.",
+        "failure_mechanism": "This creates an unfair comparison. The proposed model is optimized to maximize performance on the validation set (months 13-15), while the baseline deliberately is not. Any performance difference could reflect overfitting to validation data rather than true signal from transaction sequences. The baseline serves as a strawman that is intentionally not competitive.",
+        "evidence_test": "Tune the baseline logistic regression on the same validation set using the same primary metric (precision at top 5%). Report both the untuned and tuned baseline. If the gap between tuned baseline and proposed model shrinks substantially, the hypothesis is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Early stopping is applied by monitoring the primary metric on validation data, and hyperparameter selection uses validation set performance.",
+        "failure_mechanism": "The validation set (months 13-15) is used for both model selection (hyperparameter tuning) AND early stopping. This makes the validation set part of the training process. While the test set remains held out, the validation set performance is an optimistic estimate of generalization \u2014 we've selected the model configuration that performed best on months 13-15, which may not reflect performance on future months (16-18).",
+        "evidence_test": "Use nested cross-validation within the training window, or reserve a portion of training data for early stopping while keeping validation purely for final model selection. Alternatively, report both validation and test metrics \u2014 if validation performance is much higher than test, this indicates overfitting to validation.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratification checks verify that train/val/test sets have similar tenure distributions.",
+        "failure_mechanism": "In a temporal split, tenure distributions naturally evolve \u2014 newer accounts age into the population over time. A check that distributions are 'similar' may mask meaningful drift. If the test set contains a higher proportion of newer accounts (who have higher baseline churn), the model may appear to perform worse not because of poor generalization, but because the population has fundamentally different churn rates.",
+        "evidence_test": "Report actual tenure distribution statistics (mean, median, quartiles) for each window. If there is meaningful drift, stratify results by tenure cohort and report performance separately for new vs. established accounts.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Precision at top 5% is the primary metric, using a fixed intervention budget.",
+        "failure_mechanism": "Precision at a fixed recall threshold can be highly variable when the positive class is rare. With churn rates typically 2-5%, the top 5% includes many non-churners, and small changes in the ranking can cause large swings in precision. This creates high variance in the primary metric, potentially masking real differences between models or falsely indicating differences due to noise.",
+        "evidence_test": "Report confidence intervals for precision (e.g., via bootstrap). Consider a more stable primary metric like precision-recall AUC or F1 score, or use a larger intervention budget (top 10%) to reduce variance.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "No random/baseline predictor is included for comparison.",
+        "evidence_test": "Include a random baseline (randomly ranked accounts) and a naive baseline (e.g., rank by tenure or by recent inactivity) to contextualize the magnitude of improvements. Without this, it's unclear whether the proposed model provides meaningful lift over trivial strategies.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Prior retention campaign data is included 'if available' \u2014 a limitation acknowledged in the design.",
+        "failure_mechanism": "If prior campaign data is available but not included as a feature, this creates confounding: the proposed model may perform better simply because accounts targeted by past campaigns have different characteristics than non-targeted accounts, and this history is not controlled for.",
+        "evidence_test": "If campaign data exists, include it as a feature in both models. If it doesn't exist, acknowledge this more explicitly and discuss how the absence limits causal interpretation.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Transaction sequences are represented as daily summaries or aggregated appropriately for model input.",
+        "failure_mechanism": "The aggregation strategy (daily summaries vs. other approaches) is not specified. Different aggregation methods could produce substantially different feature representations, and the choice is not systematically explored. This creates ambiguity about what the proposed model actually learns.",
+        "evidence_test": "Specify the exact sequence encoding strategy (e.g., mean/max pooling of daily embeddings, attention over sequence, etc.) and ablate different aggregation methods in the validation phase.",
+        "flaw_category": "ambiguous_evidence"
+      },
+      {
+        "finding_id": "F11",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The design does not establish causality \u2014 embeddings may be proxies for unobserved risk factors.",
+        "failure_mechanism": "This is acknowledged in the scope section, but it's worth noting that without causal analysis, we don't know if transaction sequences cause churn or merely correlate with it. This limits actionable insights even if predictive performance is high.",
+        "evidence_test": "This is a scope limitation, not a flaw. Acknowledged appropriately.",
+        "flaw_category": "context_dependent"
+      }
+    ],
+    "summary": "The hypothesis has critical flaws in data preprocessing and baseline design. Most severe are: (1) embedding initialization and preprocessing parameters computed on the full corpus including validation/test data, constituting signal leakage; (2) an internally inconsistent churn label definition; (3) an intentionally weak baseline that is not tuned while the proposed model is optimized on validation data. These issues invalidate the experimental comparison. Additionally, the use of validation data for both early stopping and model selection creates optimistic bias.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "I have analyzed the 11 findings. F1 and F2 identify critical signal leakage. The design explicitly states that preprocessing and embedding initialization are established from the 'full modeling corpus' before training. In a temporal split, this is a fatal error; any statistics derived from the validation or test sets leak future information into the training phase. I must concede these.\n\nF3 identifies a logical impossibility in the label definition (60 days of inactivity within a 30-day window). This is a genuine error in the documentation/logic that would corrupt the target variable. I must concede this.\n\nF4 argues that the baseline (Logistic Regression) is a 'strawman' because it is not tuned. However, the design intent is to establish a 'stable linear reference point' to isolate the value of the new feature set. While tuning the baseline is best practice, for a PoC focusing on feature utility (sequence embeddings) rather than architecture optimization, a fixed linear baseline is a common design choice to avoid 'over-engineering' the baseline. However, the severity is high, so I will rebut based on design intent but acknowledge the validity of the concern.\n\nF5 concerns the dual use of the validation set for tuning and early stopping. This is standard practice in ML PoCs to prevent total data exhaustion, and the presence of a sealed test set (months 16-18) specifically prevents this from inflating the final recommendation. This is immaterial to the final verdict.\n\nF6 suggests that tenure distributions evolve. The design explicitly includes tenure as a feature and uses stratification checks. This controls for the shift. The critic is asking for more reporting, but the methodology to control the confound is present.\n\nF7 argues that Precision@Top 5% is high variance. Given the population size ('hundreds of thousands to millions'), the sample size in the top 5% is massive (thousands of accounts), making the variance of the precision estimate low. The critic's claim about 'rare classes' causing variance is true for small samples, but not for this scale.\n\nF8 asks for a random baseline. The RFM baseline already serves as a highly competitive 'naive' benchmark. Adding a random baseline is a 'nice-to-have' but not material to the hypothesis test.\n\nF9 and F11 are acknowledged in the design's 'Confound Controls' and 'Scope' sections. F10 is a request for more detail on implementation, which is normal for a PoC document and not a flaw in the experimental logic.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic is correct. Using the 'full modeling corpus' for embedding initialization leaks future transaction patterns from the validation and test sets into the training process."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic is correct. Calculating standardization parameters and vocabularies on the full corpus instead of the training window exclusively introduces data leakage."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The label definition is logically impossible (60 days of inactivity within 30 days). This is a fatal flaw in the target variable construction."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The baseline is intentionally a fixed linear reference to isolate the added value of the sequence embeddings. The hypothesis is about the signal in the features, not the optimization of the classifier."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The use of a sealed test set (months 16-18) specifically protects against validation-set overfitting. Final recommendations are based on the test set, not the validation set."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "Tenure is included as an explicit feature in both models (Section 3) and stratification is performed, which directly controls for tenure-based drift."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The critic claims high variance due to rare classes, but ignores the scale of the dataset ('millions of accounts'). 5% of millions provides a sufficiently large sample size for stable precision estimates."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The RFM baseline is already a strong non-trivial benchmark. A random baseline would provide no additional insight into the hypothesis."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "This is explicitly addressed in Section 7 (Confound Controls), where the design provides a plan for stratification if data is available."
+      },
+      {
+        "finding_id": "F10",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Aggregation specifics are implementation details; the core hypothesis concerns the utility of the embeddings themselves."
+      },
+      {
+        "finding_id": "F11",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "This is explicitly excluded from the claims in Section 8 (Scope of Claims)."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "Three FATAL findings (F1, F2, F3) were conceded. The methodology suffers from severe signal leakage via the 'full modeling corpus' and a logically impossible target label definition, both of which invalidate the results."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=9 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=9 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=8 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F10",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F11",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "3 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

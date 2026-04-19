@@ -1,0 +1,107 @@
+{
+  "case_id": "hyp_004_regular",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Cox proportional hazards regression is appropriate for modeling time-to-readmission with censoring, producing valid hazard ratios, calibrated probabilities, and reliable C-index.",
+        "failure_mechanism": "The proportional hazards (PH) assumption requires hazard ratios to be constant over survival time for each covariate; if violated (e.g., longitudinal utilization features have time-varying effects like recency bias or trajectory changes), partial likelihood maximization yields biased coefficients, distorted survival curves, and misleading discrimination/calibration metrics especially in the 6-month tail.",
+        "evidence_test": "Compute and plot scaled Schoenfeld residuals for key covariates (especially longitudinal features) against time; confirm no systematic trends (flat lines) and PH test p-values >0.05 globally and per-covariate; compare model fit (e.g., C-index) with time-stratified Cox or accelerated failure time models.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The test set from months 28.9\u201336 (20% of data) provides a representative evaluation under temporal distribution conditions at the end of the observation period.",
+        "failure_mechanism": "The cohort exclusion of patients with <180 days post-discharge follow-up requires test index discharges to occur by approximately month 30 to observe outcomes within the 36-month data span, truncating the test set to an earlier subperiod (~1\u20132 months instead of 7 months); this compresses test size (~3% of cohort vs. 20%), widens CIs, and induces shift away from later-period discharges more reflective of near-deployment conditions.",
+        "evidence_test": "Report min/max/quantiles of index discharge dates in the constructed test set; if max date \u226a month 36 or test proportion <15% of total cohort, truncation confirmed; compare covariate distributions (KS test p<0.05) and label incidence rates between truncated test vs. synthetic 'late test' (e.g., discharges 30\u201336 with right-censoring at data end).",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Unplanned readmission labels are consistently defined and free of temporal/site drift across the 36-month period and hospital sites.",
+        "failure_mechanism": "Classification of 'unplanned' vs. elective/scheduled admissions or same-hospital transfers may drift due to evolving coding practices, clinician documentation changes, or site-specific protocols over time, inflating/inflating apparent discrimination if train/test labels encode period artifacts rather than true risk.",
+        "evidence_test": "Compute label incidence rates stratified by site/admission type/month blocks; check for trends (e.g., chi-square test p<0.05 across train/val/test); audit sample of labels for inter-site agreement (Cohen's kappa >0.8) or sensitivity to exclusion rules.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The experiment design is thoughtful with strong baselines, censoring handling, and confound controls, but relies on unverified preconditions for model validity and test representativeness that could bias results toward overoptimism under realistic temporal shifts.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Finding F1 claims a FATAL flaw based on the Proportional Hazards (PH) assumption of the Cox model. While it is true that PH violations can bias coefficients, the primary objective of this PoC is discrimination (Harrell's C-index). The C-index is remarkably robust to PH violations because it evaluates the rank-ordering of risk rather than the absolute hazard ratio. Furthermore, for a PoC intended to establish the value of longitudinal features over a static baseline, the relative improvement in C-index remains a valid signal even if PH is not perfectly met. The focus is on whether the features add predictive value, not on perfecting the survival curve for clinical titration.\n\nFinding F2 claims a MATERIAL flaw regarding the temporal split. The critic argues that the requirement for 180 days of follow-up truncates the test set (months 28.9-36) because patients discharged near month 36 cannot have 180 days of follow-up. However, the design explicitly handles this through censoring. Section 2 states: 'patients who leave the health system or disenroll are censored at the last known encounter plus 30 days.' While the study population section mentions excluding those with <180 days of follow-up to 'observe the full 6-month window,' this refers to the capacity to identify the event. In survival analysis, we do not discard patients who haven't reached the 180-day mark yet; we censor them. If the design strictly excluded anyone without 180 days of history, it would be a flaw, but the use of a Cox model (which is specifically designed for right-censoring) and the mention of censoring rules in Section 2 indicates that the test set is not truncated, but rather contains right-censored observations. The C-index handles these censored pairs correctly.\n\nFinding F3 claims a MATERIAL flaw regarding label drift in 'unplanned' readmissions. This is a general data quality concern applicable to almost any EHR study. The design addresses this in Section 3 by stratifying the split by hospital site and admission type. By ensuring that the train, validation, and test sets all contain representative proportions of each site and admission route, the model is forced to learn features that generalize across these potential sources of drift rather than overfitting to a specific site's coding quirk. This is a standard control for the hypothesized risk.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 1,
+        "justification": "The primary metric is Harrell's C-index, which measures rank-order discrimination. C-index is robust to PH violations; while coefficients may be biased, the ability to distinguish high-risk from low-risk patients (the hypothesis goal) remains valid. In a PoC comparing a new feature set to a baseline, the relative C-index delta is the signal of interest."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The critic assumes patients discharged late in the window are discarded. However, Section 2 explicitly defines the handling of censoring. A Cox model treats patients who have not yet reached 180 days of follow-up as right-censored, not as excluded. The C-index accounts for this censoring, meaning the test set retains its full temporal breadth (28.9-36) without truncation."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Potential site-specific or temporal drift in label coding is explicitly mitigated by the stratified split described in Section 3 ('stratify by hospital site and admission type'). This ensures that the distribution of sites and admission contexts is balanced across all splits, preventing site-specific artifacts from inflating performance metrics."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings were successfully rebutted. F1 is immaterial to the primary metric (C-index), and F2 and F3 are addressed by the existing design's use of survival censoring and stratified splitting. All adjusted severities are \u2264 3."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

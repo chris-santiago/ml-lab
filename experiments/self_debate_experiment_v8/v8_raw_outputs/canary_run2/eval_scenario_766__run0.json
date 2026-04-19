@@ -1,0 +1,182 @@
+{
+  "case_id": "eval_scenario_766",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The experiment uses a 'group-based temporal split' while also 'stratifying churn rates to ensure the class distribution is balanced across splits'",
+        "failure_mechanism": "Temporal stratification and pure temporal splitting are mutually exclusive. If churn rates vary naturally over the 18-month period (which is common), balancing class distributions across splits either requires: (a) selecting non-contiguous weeks to achieve balance (breaking temporal ordering), (b) dropping data to force balance (creating artificial class distribution), or (c) is mathematically impossible without temporal leakage. This invalidates the claim that test performance reflects deployment on 'future data' because the test set class distribution is artificially manipulated, not naturally occurring.",
+        "evidence_test": "Examine the actual churn rate per month in the training, validation, and test periods. If rates differ by more than 10% and the document claims balanced stratification, one of these conditions must be true: data was excluded, weeks were selected non-temporally, or temporal integrity was compromised.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "At a validation-selected threshold, precision \u226580% is enforced, and the corresponding recall is recorded.",
+        "failure_mechanism": "Enforcing a precision constraint on validation data then measuring test performance assumes the validation-test distribution match is sufficient. If the test period has different churn prevalence (natural temporal drift), the 80% precision constraint may become unsatisfiable on test data, leading to undefined metrics or selection bias. Additionally, threshold selection on validation with hard constraints can overfit to validation-specific characteristics that don't transfer to test.",
+        "evidence_test": "Measure precision distribution on the test set at the validation-selected threshold. If precision falls below 80% or the threshold becomes inapplicable on test data, the evaluation metric is compromised. Also track how many validation folds achieve \u226580% precision at the selected threshold.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A user is labeled as churned (1) if their subscription is cancelled within exactly 30 days after the observation window.",
+        "failure_mechanism": "The 'exactly 30 days' window introduces artificial label noise. Users cancelling on day 29, 30, or 31 represent functionally similar churn behavior from a business perspective. The hard boundary may systematically misclassify users (e.g., day 31 = 0 instead of 1), degrading model training quality and inflating perceived test difficulty. Additionally, the 2-week finalization lag creates uncertainty about when labels become available, which may affect preprocessing pipelines that use future data.",
+        "evidence_test": "Examine the temporal distribution of cancellation dates relative to observation window end. If there is significant clustering exactly at 30 days or if day 29-31 rates are similar, this indicates a system artifact that should be relaxed to a range (e.g., 25-35 days).",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Users with downgrades rather than outright cancellations are excluded to maintain clarity of the outcome.",
+        "failure_mechanism": "This exclusion narrows the prediction problem from a realistic business objective ('will the user disengage?') to a narrow technical one ('will the user cancel subscription?'). Downgrade users may be at significant churn risk (e.g., downgrade \u2192 cancel within 90 days). Excluding them creates a deployment mismatch: the model is trained on a subset of the actual at-risk population, and test performance may not reflect what happens when the model is deployed to all users. This fundamentally changes the business value proposition.",
+        "evidence_test": "Track churn rates for users who downgrade vs. those who cancel outright. If downgrade users have high subsequent churn (e.g., >40% within 60 days), the excluded population is at-risk and the exclusion creates a deployment mismatch.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "All preprocessing... is fit exclusively on the training set. The fitted transformers are then applied to validation and test sets without refitting.",
+        "failure_mechanism": "While this claim is theoretically correct, there is no verification mechanism in the experiment design to confirm this was actually implemented. Silent misconfiguration of preprocessing (e.g., accidentally fitting on full dataset, or fitting per-user rather than per-split) could create plausible-looking results while actually leaking test information into training. This is particularly dangerous with XGBoost/LightGBM defaults that may handle missing values differently than the documented median/mode imputation.",
+        "evidence_test": "Run preprocessing trace checks: verify transformer fit parameters match training-set-only statistics (e.g., mean, median, mode) and do not match validation/test statistics. Implement a diff check comparing fitted parameters against ground-truth training statistics.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Three robustness checks detect and bound promotional and seasonal confounding.",
+        "failure_mechanism": "The confound checks can detect spurious correlations but do not prevent the model from learning them during training. If promotional or seasonal features have high predictive power, the model may rely on them rather than true churn signals. This creates a deployment vulnerability where performance drops when promotions change but the model hasn't learned a robust signal.",
+        "evidence_test": "Examine feature importance for the gradient-boosted model. If 'days_since_promotion' or 'quarter' features have high importance (>10% contribution), the model may be relying on confounding signals rather than genuine churn predictors.",
+        "flaw_category": "eval_inflation"
+      }
+    ],
+    "summary": "The PoC has one FATAL flaw (contradictory temporal splitting and stratification) that invalidates the temporal integrity claim, plus multiple MATERIAL flaws affecting label quality, metric definition, and deployment alignment. The experiment design requires significant revision before conclusions can be trusted.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Let me analyze each finding systematically.\n\n**F1 (FATAL): Temporal split + stratification conflict**\nThe critic claims that stratifying churn rates to achieve balanced class distribution across splits is mutually exclusive with pure temporal splitting. However, this misinterprets the methodology. The phrase \"stratified within each split\" refers to ensuring balanced class representation WITHIN each temporal window when sampling training data or computing metrics - standard practice in imbalanced classification. It does NOT require selecting non-contiguous weeks or dropping data. The group-based temporal split (user appears in only one split) is preserved. The critic's evidence test examines actual churn rates per month, but the methodology only claims stratification was applied within each split, not that the natural temporal churn distribution was artificially equalized. This is a misunderstanding of the design.\n\n**F2 (MATERIAL): Precision constraint transfer across temporal drift**\nThe critic raises a valid concern about enforcing 80% precision on validation (M13-15) then applying the threshold to test (M16-18). If churn prevalence shifts, precision may not hold. However, the methodology is designed to measure this exact gap - selecting a threshold on validation and observing test performance at that threshold is the correct way to detect distribution shift. The test metrics will show precision at the pre-selected threshold, transparently revealing any degradation. This is by design, not a flaw.\n\n**F3 (MATERIAL): Exactly 30-day window boundary noise**\nThe critic correctly notes that hard 30-day boundaries create label noise at days 29/30/31. This is a real effect but applies uniformly across all time periods, so the model learns the true boundary as part of the ground truth. The design explicitly defines churn as cancellation within 30 days - if the business cares about this specific window, the labels are correct for the hypothesis. This is a design choice, not a flaw.\n\n**F4 (MATERIAL): Excluding downgrade users**\nThe critic argues this creates deployment mismatch because downgrade users often churn. However, the experiment scope explicitly tests: \"will the user cancel subscription?\" - not \"will the user disengage?\" Downgrades are a different business outcome (user chooses to stay at lower tier). Training a model on cancellations to predict cancellations is within scope. The hypothesis does not claim generalization to all churn forms.\n\n**F5 (MATERIAL): No verification of exclusive training-set preprocessing**\nThe critic notes no mechanism verifies preprocessing was actually fit only on training data. This is a standard implementation verification concern - the methodology specifies the correct approach; verification is an execution matter. The PoC cannot redesign to add verification without fundamentally changing from a methodology defense to an implementation audit.\n\n**F6 (MINOR): Confound checks don't prevent learning confounds**\nThe design explicitly states confounds are \"reported with clear caveats\" - detection for transparency is the purpose. Preventing the model from learning would require dropping features pre-hoc, which would make the experiment less realistic. This is working as designed.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The critic's premise that stratification requires non-contiguous data selection is incorrect. The methodology stratifies WITHIN each temporal split (standard imbalanced classification practice), not across splits. Users remain in their original temporal window. The group's evidence test assumes the methodology claims artificial distribution equalization, which it does not. Adjusted severity 4 reflects this is a conceptual misunderstanding, not a fatality."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The threshold selection mechanism is correctly designed: select on validation \u2192 apply fixed threshold to test \u2192 observe precision at that threshold. Any degradation reveals distribution shift, which is the intended measurement. This is how out-of-sample evaluation works. The critic conflates 'precision may not hold' with 'methodology is flawed' - the former is the finding, the latter is the design working correctly."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "Boundary noise at day 30 is uniform across training/validation/test. The model learns the true 30-day boundary as the business defines it. This is the correct label specification for testing whether event-level features predict subscription cancellation. The critic's concern applies to label engineering, not experiment validity."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The hypothesis scope explicitly tests cancellation prediction, not disengagement. Downgrade users represent a different business outcome. Training a cancellation model on cancellation data is within the stated scope. 'Deployment mismatch' would only be a flaw if the claim was broader - but the claim is specifically limited to cancellation prediction."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The methodology specifies correct preprocessing (fit on training only, apply to val/test). Verification is an implementation matter, not a methodology flaw. Adding verification mechanisms would change this from methodology defense to implementation audit, which exceeds the PoC scope. This is standard practice concern, not a design failure."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "The confound checks explicitly aim to 'detect and bound' confounding for transparency - detection IS the purpose. Preventing the model from learning would require dropping features, making the experiment less realistic. The methodology is working as designed. This is a valid observation but below materiality for the experiment's conclusions."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All six findings have adjusted severity \u22644 after rebuttal. F1 is a factual misunderstanding (stratification is within temporal splits, not across); F2-F5 represent design choices correctly implemented per scope; F6 is below materiality. The experiment correctly implements group-based temporal splitting, isolates the event-level feature hypothesis, and measures out-of-sample performance as claimed. No FATAL or material flaws survive rebuttal."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=8 \u2265 7, REBUT-EVIDENCE \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

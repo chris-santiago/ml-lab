@@ -1,0 +1,157 @@
+{
+  "case_id": "eval_scenario_862",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "nvidia/nemotron-3-super-120b-a12b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A single-quarter (1-month) test set is sufficient to reliably evaluate generalization to future, novel threats under temporal distribution shift.",
+        "failure_mechanism": "Threat evolution (e.g., attacker pivots to entirely new tactics, infrastructures, or languages) often occurs on multi-quarter timescales; a short test window risks sampling an unrepresentative slice that either overlaps heavily with validation campaigns (overstating robustness) or captures an extreme shift (understating it), leading to unreliable estimates of long-term deployment performance.",
+        "evidence_test": "Perform rolling-window evaluations with multiple consecutive holdout quarters (e.g., test on quarters 13-16 sequentially) or compute quantitative shift metrics (e.g., population-level KL divergence on sender distributions, lexical shifts in subjects, or attack taxonomy labels) between validation and test sets to confirm representativeness.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Phishing/malware campaigns exhibit sufficiently strong temporal autocorrelation to invalidate random splits and justify the specific train/val/test quarter gaps.",
+        "failure_mechanism": "If autocorrelation is weaker than assumed (e.g., high attacker innovation rate with <20% infrastructure reuse across quarters), the strict temporal split penalizes models unnecessarily without testing the key hypothesis (text understanding vs. features), or worse, the val/test gap may overshoot real shifts, confounding model comparison with distribution gap size.",
+        "evidence_test": "Quantify autocorrelation via metrics like quarter-to-quarter Jaccard similarity on sender domains/IPs, campaign reuse rate (clustered by time/similarity), or empirical comparison of PR-AUC on random-split vs. temporal-split training using a proxy test set.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Campaigns can be reliably identified and stratified for bootstrap confidence intervals using 'campaign or day' grouping on the test set.",
+        "failure_mechanism": "Without a concrete, reproducible campaign definition (e.g., sender+time+content similarity), stratification defaults to coarser (daily) grouping, ignoring positive clustering within campaigns and yielding artificially narrow confidence intervals that understate variance from bursty threats.",
+        "evidence_test": "Explicitly define and implement campaign clustering (e.g., DBSCAN on sender+timestamp+TF-IDF similarity with epsilon tuned on train data), then compare bootstrap variance under campaign vs. simple stratified (per-label) resampling.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Removing HTML tags and excessive whitespace from email bodies does not discard phishing signals critical to the transformer's advantage.",
+        "failure_mechanism": "Phishing emails frequently embed signals in HTML structure (e.g., obfuscated scripts in attributes, hidden iframes, mismatched visible/hidden text ratios); naive tag stripping loses these without converting to readable text, causing the transformer to miss targeted signals while aggregate metrics pass on text-only phishing.",
+        "evidence_test": "Run ablation comparing transformer PR-AUC with HTML-agnostic stripping vs. proper HTML-to-text conversion (e.g., via BeautifulSoup preserving structure cues like alt-text mismatches) on a HTML-heavy subset of test data.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Hand-engineered keyword lists 'from domain expertise' (urgency/financial/phishing terms) fairly represent the state-of-the-art non-transformer baseline for text signals.",
+        "failure_mechanism": "Unspecified lists risk being either post-hoc optimized (artificially boosting baseline, understating transformer gap) or outdated/incomplete (overstating gap), undermining the comparison unless the list is fixed and defensible.",
+        "evidence_test": "Specify the exact keyword list upfront, then sensitivity test with variants (e.g., YARA rules from public threat intel vs. minimal list) and report PR-AUC impact.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The design is rigorous with strong controls for leakage, imbalance, and attribution, but rests on unverified temporal assumptions and risks silent signal loss in preprocessing/stratification that could weaken central claims about transformer superiority under realistic shifts.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 criticizes the use of a single\u2011month test set as insufficient to reliably estimate long\u2011term generalization under temporal shift. The methodology deliberately holds out quarter\u202f16 to simulate the operational scenario where a model is retrained each quarter and evaluated on the immediate next quarter; this design choice avoids leakage and aligns with the stated goal of testing performance on future quarters, not multi\u2011year robustness. F2 questions the assumed strength of temporal autocorrelation that justifies the train/val/test gaps. The split is a defensive control against memorization; even if autocorrelation were weaker, both models would be equally affected, preserving a fair comparison of the text\u2011vs\u2011features hypothesis. F3 notes that bootstrap confidence intervals rely on an undefined 'campaign' stratification, potentially under\u2011estimating variance. The analysis defaults to day\u2011level stratification when campaign labels are unavailable, which still respects temporal autocorrelation better than no stratification and is a deliberate, pragmatic choice given the lack of a universal campaign definition. F4 argues that stripping HTML tags and whitespace may discard phishing signals embedded in HTML structure. Both the transformer and the hand\u2011engineered baseline are deprived of raw HTML; thus any HTML\u2011based signal is absent from both inputs, isolating the comparison to text\u2011derived advantages. F5 points out that the hand\u2011engineered keyword lists are unspecified, risking post\u2011hoc optimization or incompleteness. The lists are fixed prior to training (derived from domain expertise) and not tuned on the validation set, limiting optimization bias; moreover, the baseline\u2019s performance is not highly sensitive to the exact list, making any omission immaterial to the relative comparison.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The single\u2011quarter test set reflects the operational retraining cycle (train on quarters\u202f1\u201112, validate on 13\u201115, test on quarter\u202f16) and prevents target leakage. This design choice is intentional and aligns with the experiment\u2019s goal of evaluating performance on the immediate future quarter, not long\u2011term horizon."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The temporal split serves as a control against memorization; even if autocorrelation were weaker, both models would suffer equivalently, preserving an unbiased comparison of the transformer\u2019s text advantage versus hand\u2011engineered features."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "When campaign labels are unavailable, the analysis defaults to day\u2011level stratification, which still respects temporal autocorrelation better than no stratification. This pragmatic approach is a deliberate design decision given the absence of a universal campaign definition."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Both the transformer and the baseline receive only plain text after HTML tag stripping; thus any HTML\u2011based phishing signal is absent from both inputs, ensuring the comparison isolates the value of learned text representations rather than HTML structure."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The keyword lists are fixed prior to training based on domain expertise and are not tuned on the validation set, limiting post\u2011hoc optimization bias. Moreover, the baseline\u2019s performance is not highly sensitive to the exact list, so any omission or incompleteness has negligible impact on the relative advantage of the transformer."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been rebutted with adjustments that bring each adjusted severity to 3 or below, satisfying the EXONERATE condition; thus the methodology stands and no empirical test is required."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

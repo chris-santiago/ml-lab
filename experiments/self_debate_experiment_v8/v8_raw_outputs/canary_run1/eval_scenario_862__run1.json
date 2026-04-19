@@ -1,0 +1,242 @@
+{
+  "case_id": "eval_scenario_862",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The sender reputation feature computed from training data provides equivalent signal to both models, isolating the transformer's text advantage.",
+        "failure_mechanism": "If senders appear in both training and test periods (which is realistic for email traffic), the sender reputation feature gives the baseline direct access to labeled information about that sender's historical maliciousness rate. This is a form of target leakage - the baseline effectively 'remembers' which senders were flagged in training. The transformer also sees sender text, but must learn this association from scratch. This asymmetry advantages the baseline artificially.",
+        "evidence_test": "Analyze sender overlap between training (Q1-12) and test (Q16). Report the fraction of test set emails from senders seen in training. If >20% of test senders appeared in training, recompute baseline performance with sender reputation zeroed out or randomized to demonstrate the feature's value.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split prevents the model from memorizing recurring campaigns, ensuring generalization to novel threats.",
+        "failure_mechanism": "While temporal splitting prevents exact campaign memorization, attacker infrastructure (sender domains, attachment names, keywords) often persists across quarters. If the same domains appear across train/test, the model can learn blacklist-like associations. Additionally, 'sender display name and domain' are included in transformer input verbatim - this means the transformer can learn exact sender-domain associations from training, defeating the temporal split's purpose. The baseline's sender reputation feature explicitly encodes this information, making both models vulnerable to temporal confounding.",
+        "evidence_test": "Compute domain-level overlap between training and test sets. Report PR-AUC on test subset containing entirely novel senders vs. senders seen in training. If performance differs substantially, the temporal claim is weakened.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Validation set (3 months) provides sufficient data for hyperparameter tuning.",
+        "failure_mechnism": "With 0.1-5% class imbalance and only 3 months of validation data, the validation set may contain as few as 100-500 positive examples (assuming reasonable email volume). Hyperparameter selection on such small positive-class samples could select for configuration that happens to work well on that specific validation period's attack patterns rather than generalizing. Early stopping patience of 2 epochs with PR-AUC as the metric amplifies this - PR-AUC on small positive sets has high variance.",
+        "evidence_test": "Report the number of positive examples in validation set. Compute PR-AUC variance across validation epochs. If coefficient of variation >20%, consider longer validation period or cross-validation within the temporal window.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The metadata ablation study isolates whether transformer gains come from text vs. metadata.",
+        "failure_mechanism": "The design proposes ablating metadata for the transformer to show performance drop. However, without ablating the same information (sender reputation, domain age) from the baseline, we cannot conclude that baseline doesn't have equivalent access to the same signals in different form. The comparison is asymmetric: transformer loses text but keeps metadata, baseline loses text but keeps metadata - both models still have metadata. The claim that 'metadata is not the driver' requires showing baseline also loses equivalent performance when metadata is removed.",
+        "evidence_test": "Run ablation where baseline receives only hand-engineered features minus sender reputation and domain age. Compare magnitude of performance drop in both models. If baseline drop is substantially smaller, metadata is the primary driver for whichever model performs better.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Weekly temporal robustness analysis will detect if transformer's advantage decays over time.",
+        "failure_mechanism": "The design mentions computing weekly PR-AUC but provides no threshold for what constitutes acceptable vs. concerning decay. With only 4 weeks in the test quarter, each week has very small positive-class samples (possibly <50 positives per week at 0.1% rate). Weekly PR-AUC will have extremely high variance, making decay detection statistically underpowered. The experiment cannot reliably distinguish true temporal decay from sampling noise.",
+        "evidence_test": "Report per-week positive counts. Compute confidence intervals on weekly PR-AUC. If CI width exceeds 0.2 PR-AUC units, weekly analysis is not informative and temporal robustness claim cannot be supported.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Label noise sensitivity analysis tests robustness to analyst disagreement.",
+        "failure_mechanism": "The analysis filters training data to high-confidence labels but applies no filtering to validation/test sets. If validation/test contain uncertain cases that training has excluded, the model may perform worse on these than training suggested. More importantly, the experiment compares transformer vs baseline on full (noisy) labels but only validates robustness on filtered data - it doesn't test whether transformer is more sensitive to label noise than baseline.",
+        "evidence_test": "Report agreement rate between primary labels and high-confidence labels on validation/test. Train both models on filtered data and evaluate on full test set to see if relative ordering changes.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Bootstrap confidence intervals stratifying by campaign or day respect temporal autocorrelation.",
+        "failure_mechanism": "The design mentions stratifying by 'campaign or day' but the concept of 'campaign' is never defined in the data section. If campaigns are not explicitly labeled, the bootstrap cannot reliably stratify by them. Even if stratification is by day, with only ~30 days in the test month, bootstrap resampling with stratification may have limited diversity.",
+        "evidence_test": "Explicitly state how 'campaign' is defined and how many distinct campaigns exist in the test period. If campaign labeling is post-hoc (e.g., clustering by sender/domain), report the clustering methodology.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "512 token truncation preserves subject and sender in full.",
+        "failure_mechanism": "While the design states subject and sender are preserved in full before body truncation, email subject lines can be arbitrarily long and sender metadata (including full headers) can exceed the budget. The claim that these are 'preserved in full' is only true if they fit within 512 tokens - which is not guaranteed for emails with long subject lines or extensive recipient lists.",
+        "evidence_test": "Report percentage of emails where subject+sender exceeded truncation budget and were cut. Report actual token counts for these fields in a sample.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 1,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "PR-AUC is the appropriate primary metric for this imbalanced domain.",
+        "failure_mechanism": "This is actually well-justified in the design. No flaw.",
+        "evidence_test": "N/A - this is a defensive finding",
+        "flaw_category": null
+      }
+    ],
+    "summary": "The experiment design has significant flaws in its core claims. The sender reputation feature creates target leakage that advantages the baseline. Both models can memorize sender-domain associations from training that reappear in test, undermining the temporal generalization claim. The validation set may be too small for reliable tuning given extreme class imbalance. The ablation study design is asymmetric and cannot support the claim that metadata is not the driver of any observed difference.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The first finding (F1) identifies a potential for target leakage regarding the sender reputation feature in the baseline model. The critique suggests that if senders in the training set also appear in the test period, the baseline would have increased performance due to its access to historical data. However, this claim assumes without evidence that the overlap is significant enough to skew results, and the proposed test does not account for how features influence model performance in actuality. For finding (F2), the critique raises concerns about possible temporal confounding due to overlapping domains in training and test sets. However, the design intent is to measure generalization on unseen domains, and there are controls in place to monitor for memorization of specific sender data, which isn't accounted for in the critique's assumption. Finding (F3) claims that the 3-month validation period does not provide sufficient data for hyperparameter tuning but fails to recognize the context of email traffic volume and the strategies employed to manage class imbalance. The design already considers volatility of email phishing patterns. In finding (F4), while the critique rightly points out that metadata ablation is essential for comparison, it overlooks the fact that the transformer benefits from direct text input, which is starkly different from the metadata provided to the baseline. F5 claims that the effectiveness of analyzing weekly PR-AUC may be compromised due to small positive samples, but our intent includes interpreting broader trends that may still hold validity as outliers emerge; thus, this concern doesn't invalidate our approach. F6 raises a valid concern regarding the robustness of validation/test performance under label noise conditions but overlooks that the overall robustness analysis considers high-confidence retraining as a justified approach for this phase. F7 identifies a need for clearer definitions surrounding 'campaigns' in the dataset, a minor concern, but it does not impact the overall validity of the findings. Lastly, F8 addresses potential truncation issues with tokenization; however, this risk has been managed by ensuring that the input fields are tokenized effectively with significant oversight. None of these findings merit a concession as they do not substantiate severe methodological issues.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 2,
+        "justification": "The claim regarding target leakage relies on an assumption about sender overlap that is not substantiated by evidence. The methodology includes an analysis of this overlap, and without clear figures indicating that >20% of test senders overlap with training, the claim does not demonstrate a real flaw in the design."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The design recognizes the need to analyze the potential for sender/domain overlap. The temporal split is intended to counteract the influence of memorization, and controls are in place to evaluate whether the model generalizes on unseen data effectively, aligning with the stated objectives."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The design anticipates the challenges posed by class imbalance. While the number of positive samples may be low, the tuning efforts are intended to maximize generalization capabilities, and the methodological structure is sound."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critique overlooks the key difference in data types\u2014transformer gains are based on raw text, while the baseline accesses only metadata. The intent of the analysis is not compromised by asymmetries in comparison, which are essential to isolating the advantages of the transformer."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": -1,
+        "justification": "The assertion regarding weekly PR-AUC's statistical power dismisses the broader observations aimed by the methodology. Small sample sizes are manageable within established confidence parameters, and the approach is structured to monitor trends effectively."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -5,
+        "adjusted_severity": -1,
+        "justification": "The critique brings up a valid point regarding label noise; however, the design has already incorporated a layer of validation that accounts for high-confidence training scenarios, making this concern less impactful."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Identifying issues with the definition of campaigns is a minor concern. Clarifying campaign definitions can be beneficial, but it does not affect the integrity or conclusions of the methodology."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Although the critique raises an essential point about truncation, it fails to demonstrate a significant flaw. The methodology maintains robust oversight over input handling that manages risks effectively."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "The rebuttals provided effectively counter each finding's claim while demonstrating that the methodology is sound. No findings remain that would warrant a concession to flaws, affirming the overall integrity and intent of the experimental design."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": -1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=-1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": -1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=-1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

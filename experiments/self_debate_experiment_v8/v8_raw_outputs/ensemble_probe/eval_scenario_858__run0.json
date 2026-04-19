@@ -1,0 +1,619 @@
+{
+  "case_id": "eval_scenario_858",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived",
+    "critics": [
+      "google/gemma-4-31b-it",
+      "anthropic/claude-3-haiku",
+      "deepseek/deepseek-v3.2"
+    ]
+  },
+  "critic_outputs": [
+    {
+      "findings": [
+        {
+          "finding_id": "F1",
+          "severity": 8,
+          "severity_label": "FATAL",
+          "suppressed": false,
+          "claim": "The weak-supervision labeling strategy (clicks/sends within 5 minutes) accurately captures document relevance.",
+          "failure_mechanism": "The PoC acknowledges position bias but does not implement a mechanism to decouple it from the labels. In a production system, agents are more likely to click the top-ranked result of the *existing* system (BM25) regardless of its absolute relevance. If the training labels are derived from these clicks, the transformer model will simply learn to mimic the current BM25 ranker's biases rather than learning true semantic relevance. This creates a feedback loop where the model is trained to predict 'what the current system suggests' rather than 'what is actually relevant'.",
+          "evidence_test": "Compare the MRR of the transformer model on the manually annotated set (~300 queries) versus the automatically labeled set. If the model shows significant gains on automatic labels but stagnant or negative gains on manual labels, the model is overfitting to the existing system's position bias.",
+          "flaw_category": "eval_inflation"
+        },
+        {
+          "finding_id": "F2",
+          "severity": 7,
+          "severity_label": "FATAL",
+          "suppressed": false,
+          "claim": "The transformer-based dense retriever is being compared fairly against BM25.",
+          "failure_mechanism": "The PoC describes a 'Bi-Encoder' architecture (encoding query and article separately and using dot-product). However, it does not specify the use of 'hard negatives' during contrastive training. Using only in-batch negatives (random articles) is a well-known failure mode for dense retrievers; the model learns to distinguish between completely unrelated documents but fails to distinguish between a relevant document and a highly similar but irrelevant one (which BM25 is often better at). Without mining hard negatives (e.g., using the BM25 top-k results as negatives), the transformer's performance is likely to be artificially low or unstable, making the comparison an unfair test of the transformer's potential.",
+          "evidence_test": "Run a version of the training pipeline that includes hard negatives (top-k BM25 results that were not clicked) and compare the resulting test MRR to the in-batch negative version.",
+          "flaw_category": "missing_baselines"
+        },
+        {
+          "finding_id": "F3",
+          "severity": 5,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "The use of 'first 512 tokens of body' is sufficient for retrieval.",
+          "failure_mechanism": "Support articles often contain critical resolution steps or 'TL;DR' summaries at the bottom or in specific sections. By truncating to the first 512 tokens, the PoC may be removing the actual signal that makes an article relevant. If BM25 (which typically indexes the whole document) is compared against a truncated transformer input, the transformer is at a structural disadvantage. Conversely, if BM25 is also truncated, the baseline is strawmanned.",
+          "evidence_test": "Analyze the distribution of 'relevant' keywords/entities in the manually labeled set. If a significant percentage of the signal resides beyond token 512, the truncation is a material flaw.",
+          "flaw_category": "silent_misconfig"
+        },
+        {
+          "finding_id": "F4",
+          "severity": 2,
+          "severity_label": "MINOR",
+          "suppressed": false,
+          "claim": "The temporal split prevents all forms of leakage.",
+          "failure_mechanism": "While the split is chronological, the PoC does not mention deduplicating queries. In support logs, customers often submit the same query multiple times or different customers submit identical queries for the same outage. If identical queries appear in both training and test sets, the model can memorize the mapping rather than learning semantic retrieval.",
+          "evidence_test": "Calculate the percentage of exact-string query overlaps between the training and test sets.",
+          "flaw_category": "signal_leakage"
+        },
+        {
+          "finding_id": "F5",
+          "severity": 0,
+          "severity_label": "NIT",
+          "suppressed": true,
+          "claim": "Lowercasing and whitespace cleaning are sufficient normalization.",
+          "failure_mechanism": "Technical support queries often contain case-sensitive product codes or error IDs (e.g., 'Error 404' vs 'error 404' is fine, but 'ProductX' vs 'productx' might be different in some domains).",
+          "evidence_test": "Compare performance with and without lowercasing on a small subset of technical queries.",
+          "flaw_category": "null"
+        }
+      ],
+      "summary": "The PoC is well-structured regarding temporal splitting and baseline tuning, but it suffers from a critical failure to address position bias in weak supervision and a lack of hard-negative mining for the transformer, which likely invalidates the comparison between the two models.",
+      "no_material_findings": false
+    },
+    {
+      "findings": [],
+      "no_material_findings": true,
+      "summary": "Here is my review of the proof-of-concept for the transformer-based semantic search model:\n\nFindings:\n\n1. **Claim:** The automatic relevance labeling approach based on agent behavior (article clicks, sends, and citations) accurately reflects true relevance.\n   **Failure Mechanism:** The automatic la",
+      "_parse_fallback": true
+    },
+    {
+      "findings": [
+        {
+          "finding_id": "F1",
+          "severity": 9,
+          "severity_label": "FATAL",
+          "suppressed": false,
+          "claim": "Agent clicks/sends within 5 minutes of query submission are reliable proxies for article relevance.",
+          "failure_mechanism": "This labeling strategy conflates relevance with agent search behavior and system UI effects. Agents may click the first plausible result due to time pressure, even if it's suboptimal. Articles prominently displayed (position bias) or frequently used (familiarity bias) will be over-labeled as relevant. The model may learn to predict agent click patterns (which include noise, suboptimal choices, and biases) rather than true semantic relevance. This creates a systematic label corruption that both models train on, but the transformer's capacity could allow it to overfit to these behavioral artifacts more effectively than BM25, producing illusory gains.",
+          "evidence_test": "Correlate model rankings (both BM25 and transformer) against the ~300 manually labeled queries. If the transformer's MRR gain over BM25 on automatic labels disappears or reverses on manual labels, the improvement is an artifact of label noise. Additionally, measure the correlation between article position in the legacy search UI (if available) and its likelihood of being labeled positive; a strong correlation indicates position bias contamination.",
+          "flaw_category": "unverified_prereqs"
+        },
+        {
+          "finding_id": "F2",
+          "severity": 7,
+          "severity_label": "FATAL",
+          "suppressed": false,
+          "claim": "The validation set (months 13-15) is a reliable proxy for the test set (months 16-18) for hyperparameter tuning and model selection.",
+          "failure_mechanism": "Temporal distribution shift between validation and test periods could render validation-optimal hyperparameters suboptimal or misleading for the test period. If the relationship between queries, articles, and agent behavior changes significantly between months 13-15 and 16-18 (e.g., due to a major product launch, policy change, or UI update), tuning on the earlier window may select a model that overfits to outdated patterns. This violates the core assumption of temporal evaluation: that the validation period is representative of the future test period for the purpose of generalization.",
+          "evidence_test": "Compare corpus and label distribution statistics (e.g., mean query/article length, topic distribution, click-through rates, proportion of new articles) between validation and test sets. A significant divergence indicates non-stationarity. Perform a sensitivity analysis: train the transformer with a few fixed hyperparameter sets and evaluate on both validation and test. If the ranking of hyperparameter sets by performance differs substantially between the two periods, validation tuning is unreliable.",
+          "flaw_category": "distribution_shift"
+        },
+        {
+          "finding_id": "F3",
+          "severity": 6,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "Stratified analysis post-hoc is sufficient to detect and account for confounds like query length, spelling errors, and article familiarity.",
+          "failure_mechanism": "Post-hoc stratification can reveal performance disparities but cannot correct for them or establish that the model's core mechanism is semantic understanding. The transformer could achieve an overall MRR gain by massively improving on a specific, easy stratum (e.g., short, clean queries for which BM25 already works well) while performing worse on the hard cases the hypothesis implicitly targets (e.g., long, complex, or paraphrased queries). The claim of 'semantic search' implies superiority on cases where lexical overlap fails; without pre-stratified evaluation or a focused test on a 'semantic gap' subset, the overall metric is not conclusive.",
+          "evidence_test": "Define a 'semantic gap' test subset before evaluation (e.g., queries where the relevant article contains no significant term overlap with the query, identified via TF-IDF or BM25 score threshold). Report MRR for both models specifically on this subset. If the transformer does not outperform BM25 on this subset, its overall gain is not due to semantic understanding.",
+          "flaw_category": "eval_inflation"
+        },
+        {
+          "finding_id": "F4",
+          "severity": 5,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "Using the same validation set for tuning both the transformer and BM25 ensures a 'fair comparison'.",
+          "failure_mechanism": "The transformer has orders of magnitude more parameters and hyperparameters than BM25. Tuning both on the same validation set with a 'computational budget' does not account for the vastly larger risk of overfitting the validation set inherent in the transformer's complexity. The transformer's hyperparameter grid search (learning rate, batch size, epochs) interacts with its capacity to memorize validation-set peculiarities, especially given the small validation window (3 months). BM25, with 2 hyperparameters, has minimal overfitting risk. Thus, the comparison may be biased in favor of the transformer, which can optimize its parameters to the specific validation distribution more effectively.",
+          "evidence_test": "Implement a nested cross-validation or time-series cross-validation scheme (e.g., rolling origin validation) to estimate the variance in model selection. Alternatively, hold out a second validation set from the training period for final model selection after the primary validation set is used for tuning. If the transformer's performance relative to BM25 drops significantly when evaluated on a fresh hold-out not used in its extensive tuning, the fairness claim is invalid.",
+          "flaw_category": "eval_inflation"
+        },
+        {
+          "finding_id": "F5",
+          "severity": 4,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "The weak-supervision labeling strategy's biases (selection, position) are sufficiently mitigated by the small manual annotation set used for 'sanity-checking'.",
+          "failure_mechanism": "A ~300 query manual set is likely underpowered to detect systematic label corruption, especially if the corruption is correlated (e.g., affects certain article types or query patterns uniformly). The plan to only 'sanity-check' that improvements correlate is insufficient. If the manual set is not representative of the full test distribution\u2014particularly of the hard cases where label noise might be highest\u2014it cannot serve as a reliable arbiter. The manual set itself could be subject to annotation inconsistencies or expert biases.",
+          "evidence_test": "Calculate the statistical power of the manual set to detect a meaningful difference in MRR between the two models. Report the agreement (e.g., Cohen's Kappa) between manual labels and automatic labels, broken down by strata. If agreement is low in strata where the transformer shows the largest gains, the automatic label improvements are suspect.",
+          "flaw_category": "unverified_prereqs"
+        },
+        {
+          "finding_id": "F6",
+          "severity": 2,
+          "severity_label": "MINOR",
+          "suppressed": false,
+          "claim": "Excluding non-primary language queries 'isolates semantic effects from language-specific variation'.",
+          "failure_mechanism": "This assumes the semantic capabilities of the transformer are language-agnostic within the primary language. However, the model's pre-trained embeddings and the fine-tuning data may encode language-specific syntactic and cultural patterns that do not constitute 'semantic understanding' in a general sense. The exclusion simplifies the experiment but implicitly claims the results are about semantics, not about performance on a specific linguistic domain. If the primary language is English, the results may not generalize to other languages even with comparable training data, due to inherent properties of the pre-trained model and tokenizer.",
+          "evidence_test": "This is a scope limitation, not a methodological flaw within the stated scope. The claim is adequately caveated in the 'Claim Scope' section. No internal test is needed; it's a deployment consideration.",
+          "flaw_category": "context_dependent"
+        },
+        {
+          "finding_id": "F7",
+          "severity": 1,
+          "severity_label": "MINOR",
+          "suppressed": false,
+          "claim": "Using only the first 512 tokens of the article body is sufficient for semantic retrieval.",
+          "failure_mechanism": "Relevant information for a query may be located beyond the first 512 tokens, especially in longer, detailed support articles. This truncation creates an artificial ceiling on retrieval performance for both models, but may impact them differently. The transformer, with its self-attention mechanism, might be better at leveraging the truncated context compared to BM25's bag-of-words approach, but this is a test of truncated semantics, not full-document semantics. The results may not reflect performance in a system that indexes the full article.",
+          "evidence_test": "Sample a subset of test queries where the relevant article is long (>512 tokens). Manually inspect if the key information answering the query appears after the first 512 tokens. If this occurs frequently, the reported metrics are lower bounds, and the comparison may be skewed if one model is more robust to truncation.",
+          "flaw_category": "context_dependent"
+        }
+      ],
+      "summary": "The PoC's core methodology is undermined by a severe, unverified prerequisite: using agent behavioral logs as relevance labels likely conflates true relevance with behavioral noise and bias, risking that the transformer learns to mimic agent clicks rather than semantics. The temporal validation strategy may also be unreliable for model selection due to distribution shift.",
+      "no_material_findings": false
+    }
+  ],
+  "pooled_findings": [
+    {
+      "finding_id": "EF1",
+      "severity": 8,
+      "severity_label": "FATAL",
+      "suppressed": false,
+      "claim": "The weak-supervision labeling strategy (clicks/sends within 5 minutes) accurately captures document relevance.",
+      "failure_mechanism": "The PoC acknowledges position bias but does not implement a mechanism to decouple it from the labels. In a production system, agents are more likely to click the top-ranked result of the *existing* system (BM25) regardless of its absolute relevance. If the training labels are derived from these clicks, the transformer model will simply learn to mimic the current BM25 ranker's biases rather than learning true semantic relevance. This creates a feedback loop where the model is trained to predict 'what the current system suggests' rather than 'what is actually relevant'.",
+      "evidence_test": "Compare the MRR of the transformer model on the manually annotated set (~300 queries) versus the automatically labeled set. If the model shows significant gains on automatic labels but stagnant or negative gains on manual labels, the model is overfitting to the existing system's position bias.",
+      "flaw_category": "eval_inflation",
+      "_source_critic": 0,
+      "_original_finding_id": "F1"
+    },
+    {
+      "finding_id": "EF2",
+      "severity": 7,
+      "severity_label": "FATAL",
+      "suppressed": false,
+      "claim": "The transformer-based dense retriever is being compared fairly against BM25.",
+      "failure_mechanism": "The PoC describes a 'Bi-Encoder' architecture (encoding query and article separately and using dot-product). However, it does not specify the use of 'hard negatives' during contrastive training. Using only in-batch negatives (random articles) is a well-known failure mode for dense retrievers; the model learns to distinguish between completely unrelated documents but fails to distinguish between a relevant document and a highly similar but irrelevant one (which BM25 is often better at). Without mining hard negatives (e.g., using the BM25 top-k results as negatives), the transformer's performance is likely to be artificially low or unstable, making the comparison an unfair test of the transformer's potential.",
+      "evidence_test": "Run a version of the training pipeline that includes hard negatives (top-k BM25 results that were not clicked) and compare the resulting test MRR to the in-batch negative version.",
+      "flaw_category": "missing_baselines",
+      "_source_critic": 0,
+      "_original_finding_id": "F2"
+    },
+    {
+      "finding_id": "EF3",
+      "severity": 5,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "The use of 'first 512 tokens of body' is sufficient for retrieval.",
+      "failure_mechanism": "Support articles often contain critical resolution steps or 'TL;DR' summaries at the bottom or in specific sections. By truncating to the first 512 tokens, the PoC may be removing the actual signal that makes an article relevant. If BM25 (which typically indexes the whole document) is compared against a truncated transformer input, the transformer is at a structural disadvantage. Conversely, if BM25 is also truncated, the baseline is strawmanned.",
+      "evidence_test": "Analyze the distribution of 'relevant' keywords/entities in the manually labeled set. If a significant percentage of the signal resides beyond token 512, the truncation is a material flaw.",
+      "flaw_category": "silent_misconfig",
+      "_source_critic": 0,
+      "_original_finding_id": "F3"
+    },
+    {
+      "finding_id": "EF4",
+      "severity": 2,
+      "severity_label": "MINOR",
+      "suppressed": false,
+      "claim": "The temporal split prevents all forms of leakage.",
+      "failure_mechanism": "While the split is chronological, the PoC does not mention deduplicating queries. In support logs, customers often submit the same query multiple times or different customers submit identical queries for the same outage. If identical queries appear in both training and test sets, the model can memorize the mapping rather than learning semantic retrieval.",
+      "evidence_test": "Calculate the percentage of exact-string query overlaps between the training and test sets.",
+      "flaw_category": "signal_leakage",
+      "_source_critic": 0,
+      "_original_finding_id": "F4"
+    },
+    {
+      "finding_id": "EF5",
+      "severity": 9,
+      "severity_label": "FATAL",
+      "suppressed": false,
+      "claim": "Agent clicks/sends within 5 minutes of query submission are reliable proxies for article relevance.",
+      "failure_mechanism": "This labeling strategy conflates relevance with agent search behavior and system UI effects. Agents may click the first plausible result due to time pressure, even if it's suboptimal. Articles prominently displayed (position bias) or frequently used (familiarity bias) will be over-labeled as relevant. The model may learn to predict agent click patterns (which include noise, suboptimal choices, and biases) rather than true semantic relevance. This creates a systematic label corruption that both models train on, but the transformer's capacity could allow it to overfit to these behavioral artifacts more effectively than BM25, producing illusory gains.",
+      "evidence_test": "Correlate model rankings (both BM25 and transformer) against the ~300 manually labeled queries. If the transformer's MRR gain over BM25 on automatic labels disappears or reverses on manual labels, the improvement is an artifact of label noise. Additionally, measure the correlation between article position in the legacy search UI (if available) and its likelihood of being labeled positive; a strong correlation indicates position bias contamination.",
+      "flaw_category": "unverified_prereqs",
+      "_source_critic": 2,
+      "_original_finding_id": "F1"
+    },
+    {
+      "finding_id": "EF6",
+      "severity": 7,
+      "severity_label": "FATAL",
+      "suppressed": false,
+      "claim": "The validation set (months 13-15) is a reliable proxy for the test set (months 16-18) for hyperparameter tuning and model selection.",
+      "failure_mechanism": "Temporal distribution shift between validation and test periods could render validation-optimal hyperparameters suboptimal or misleading for the test period. If the relationship between queries, articles, and agent behavior changes significantly between months 13-15 and 16-18 (e.g., due to a major product launch, policy change, or UI update), tuning on the earlier window may select a model that overfits to outdated patterns. This violates the core assumption of temporal evaluation: that the validation period is representative of the future test period for the purpose of generalization.",
+      "evidence_test": "Compare corpus and label distribution statistics (e.g., mean query/article length, topic distribution, click-through rates, proportion of new articles) between validation and test sets. A significant divergence indicates non-stationarity. Perform a sensitivity analysis: train the transformer with a few fixed hyperparameter sets and evaluate on both validation and test. If the ranking of hyperparameter sets by performance differs substantially between the two periods, validation tuning is unreliable.",
+      "flaw_category": "distribution_shift",
+      "_source_critic": 2,
+      "_original_finding_id": "F2"
+    },
+    {
+      "finding_id": "EF7",
+      "severity": 6,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "Stratified analysis post-hoc is sufficient to detect and account for confounds like query length, spelling errors, and article familiarity.",
+      "failure_mechanism": "Post-hoc stratification can reveal performance disparities but cannot correct for them or establish that the model's core mechanism is semantic understanding. The transformer could achieve an overall MRR gain by massively improving on a specific, easy stratum (e.g., short, clean queries for which BM25 already works well) while performing worse on the hard cases the hypothesis implicitly targets (e.g., long, complex, or paraphrased queries). The claim of 'semantic search' implies superiority on cases where lexical overlap fails; without pre-stratified evaluation or a focused test on a 'semantic gap' subset, the overall metric is not conclusive.",
+      "evidence_test": "Define a 'semantic gap' test subset before evaluation (e.g., queries where the relevant article contains no significant term overlap with the query, identified via TF-IDF or BM25 score threshold). Report MRR for both models specifically on this subset. If the transformer does not outperform BM25 on this subset, its overall gain is not due to semantic understanding.",
+      "flaw_category": "eval_inflation",
+      "_source_critic": 2,
+      "_original_finding_id": "F3"
+    },
+    {
+      "finding_id": "EF8",
+      "severity": 5,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "Using the same validation set for tuning both the transformer and BM25 ensures a 'fair comparison'.",
+      "failure_mechanism": "The transformer has orders of magnitude more parameters and hyperparameters than BM25. Tuning both on the same validation set with a 'computational budget' does not account for the vastly larger risk of overfitting the validation set inherent in the transformer's complexity. The transformer's hyperparameter grid search (learning rate, batch size, epochs) interacts with its capacity to memorize validation-set peculiarities, especially given the small validation window (3 months). BM25, with 2 hyperparameters, has minimal overfitting risk. Thus, the comparison may be biased in favor of the transformer, which can optimize its parameters to the specific validation distribution more effectively.",
+      "evidence_test": "Implement a nested cross-validation or time-series cross-validation scheme (e.g., rolling origin validation) to estimate the variance in model selection. Alternatively, hold out a second validation set from the training period for final model selection after the primary validation set is used for tuning. If the transformer's performance relative to BM25 drops significantly when evaluated on a fresh hold-out not used in its extensive tuning, the fairness claim is invalid.",
+      "flaw_category": "eval_inflation",
+      "_source_critic": 2,
+      "_original_finding_id": "F4"
+    },
+    {
+      "finding_id": "EF9",
+      "severity": 4,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "The weak-supervision labeling strategy's biases (selection, position) are sufficiently mitigated by the small manual annotation set used for 'sanity-checking'.",
+      "failure_mechanism": "A ~300 query manual set is likely underpowered to detect systematic label corruption, especially if the corruption is correlated (e.g., affects certain article types or query patterns uniformly). The plan to only 'sanity-check' that improvements correlate is insufficient. If the manual set is not representative of the full test distribution\u2014particularly of the hard cases where label noise might be highest\u2014it cannot serve as a reliable arbiter. The manual set itself could be subject to annotation inconsistencies or expert biases.",
+      "evidence_test": "Calculate the statistical power of the manual set to detect a meaningful difference in MRR between the two models. Report the agreement (e.g., Cohen's Kappa) between manual labels and automatic labels, broken down by strata. If agreement is low in strata where the transformer shows the largest gains, the automatic label improvements are suspect.",
+      "flaw_category": "unverified_prereqs",
+      "_source_critic": 2,
+      "_original_finding_id": "F5"
+    },
+    {
+      "finding_id": "EF10",
+      "severity": 2,
+      "severity_label": "MINOR",
+      "suppressed": false,
+      "claim": "Excluding non-primary language queries 'isolates semantic effects from language-specific variation'.",
+      "failure_mechanism": "This assumes the semantic capabilities of the transformer are language-agnostic within the primary language. However, the model's pre-trained embeddings and the fine-tuning data may encode language-specific syntactic and cultural patterns that do not constitute 'semantic understanding' in a general sense. The exclusion simplifies the experiment but implicitly claims the results are about semantics, not about performance on a specific linguistic domain. If the primary language is English, the results may not generalize to other languages even with comparable training data, due to inherent properties of the pre-trained model and tokenizer.",
+      "evidence_test": "This is a scope limitation, not a methodological flaw within the stated scope. The claim is adequately caveated in the 'Claim Scope' section. No internal test is needed; it's a deployment consideration.",
+      "flaw_category": "context_dependent",
+      "_source_critic": 2,
+      "_original_finding_id": "F6"
+    },
+    {
+      "finding_id": "EF11",
+      "severity": 1,
+      "severity_label": "MINOR",
+      "suppressed": false,
+      "claim": "Using only the first 512 tokens of the article body is sufficient for semantic retrieval.",
+      "failure_mechanism": "Relevant information for a query may be located beyond the first 512 tokens, especially in longer, detailed support articles. This truncation creates an artificial ceiling on retrieval performance for both models, but may impact them differently. The transformer, with its self-attention mechanism, might be better at leveraging the truncated context compared to BM25's bag-of-words approach, but this is a test of truncated semantics, not full-document semantics. The results may not reflect performance in a system that indexes the full article.",
+      "evidence_test": "Sample a subset of test queries where the relevant article is long (>512 tokens). Manually inspect if the key information answering the query appears after the first 512 tokens. If this occurs frequently, the reported metrics are lower bounds, and the comparison may be skewed if one model is more robust to truncation.",
+      "flaw_category": "context_dependent",
+      "_source_critic": 2,
+      "_original_finding_id": "F7"
+    }
+  ],
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "EF1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The weak-supervision labeling strategy (clicks/sends within 5 minutes) accurately captures document relevance.",
+        "failure_mechanism": "The PoC acknowledges position bias but does not implement a mechanism to decouple it from the labels. In a production system, agents are more likely to click the top-ranked result of the *existing* system (BM25) regardless of its absolute relevance. If the training labels are derived from these clicks, the transformer model will simply learn to mimic the current BM25 ranker's biases rather than learning true semantic relevance. This creates a feedback loop where the model is trained to predict 'what the current system suggests' rather than 'what is actually relevant'.",
+        "evidence_test": "Compare the MRR of the transformer model on the manually annotated set (~300 queries) versus the automatically labeled set. If the model shows significant gains on automatic labels but stagnant or negative gains on manual labels, the model is overfitting to the existing system's position bias.",
+        "flaw_category": "eval_inflation",
+        "_source_critic": 0,
+        "_original_finding_id": "F1"
+      },
+      {
+        "finding_id": "EF2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The transformer-based dense retriever is being compared fairly against BM25.",
+        "failure_mechanism": "The PoC describes a 'Bi-Encoder' architecture (encoding query and article separately and using dot-product). However, it does not specify the use of 'hard negatives' during contrastive training. Using only in-batch negatives (random articles) is a well-known failure mode for dense retrievers; the model learns to distinguish between completely unrelated documents but fails to distinguish between a relevant document and a highly similar but irrelevant one (which BM25 is often better at). Without mining hard negatives (e.g., using the BM25 top-k results as negatives), the transformer's performance is likely to be artificially low or unstable, making the comparison an unfair test of the transformer's potential.",
+        "evidence_test": "Run a version of the training pipeline that includes hard negatives (top-k BM25 results that were not clicked) and compare the resulting test MRR to the in-batch negative version.",
+        "flaw_category": "missing_baselines",
+        "_source_critic": 0,
+        "_original_finding_id": "F2"
+      },
+      {
+        "finding_id": "EF3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The use of 'first 512 tokens of body' is sufficient for retrieval.",
+        "failure_mechanism": "Support articles often contain critical resolution steps or 'TL;DR' summaries at the bottom or in specific sections. By truncating to the first 512 tokens, the PoC may be removing the actual signal that makes an article relevant. If BM25 (which typically indexes the whole document) is compared against a truncated transformer input, the transformer is at a structural disadvantage. Conversely, if BM25 is also truncated, the baseline is strawmanned.",
+        "evidence_test": "Analyze the distribution of 'relevant' keywords/entities in the manually labeled set. If a significant percentage of the signal resides beyond token 512, the truncation is a material flaw.",
+        "flaw_category": "silent_misconfig",
+        "_source_critic": 0,
+        "_original_finding_id": "F3"
+      },
+      {
+        "finding_id": "EF4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The temporal split prevents all forms of leakage.",
+        "failure_mechanism": "While the split is chronological, the PoC does not mention deduplicating queries. In support logs, customers often submit the same query multiple times or different customers submit identical queries for the same outage. If identical queries appear in both training and test sets, the model can memorize the mapping rather than learning semantic retrieval.",
+        "evidence_test": "Calculate the percentage of exact-string query overlaps between the training and test sets.",
+        "flaw_category": "signal_leakage",
+        "_source_critic": 0,
+        "_original_finding_id": "F4"
+      },
+      {
+        "finding_id": "EF5",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Agent clicks/sends within 5 minutes of query submission are reliable proxies for article relevance.",
+        "failure_mechanism": "This labeling strategy conflates relevance with agent search behavior and system UI effects. Agents may click the first plausible result due to time pressure, even if it's suboptimal. Articles prominently displayed (position bias) or frequently used (familiarity bias) will be over-labeled as relevant. The model may learn to predict agent click patterns (which include noise, suboptimal choices, and biases) rather than true semantic relevance. This creates a systematic label corruption that both models train on, but the transformer's capacity could allow it to overfit to these behavioral artifacts more effectively than BM25, producing illusory gains.",
+        "evidence_test": "Correlate model rankings (both BM25 and transformer) against the ~300 manually labeled queries. If the transformer's MRR gain over BM25 on automatic labels disappears or reverses on manual labels, the improvement is an artifact of label noise. Additionally, measure the correlation between article position in the legacy search UI (if available) and its likelihood of being labeled positive; a strong correlation indicates position bias contamination.",
+        "flaw_category": "unverified_prereqs",
+        "_source_critic": 2,
+        "_original_finding_id": "F1"
+      },
+      {
+        "finding_id": "EF6",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The validation set (months 13-15) is a reliable proxy for the test set (months 16-18) for hyperparameter tuning and model selection.",
+        "failure_mechanism": "Temporal distribution shift between validation and test periods could render validation-optimal hyperparameters suboptimal or misleading for the test period. If the relationship between queries, articles, and agent behavior changes significantly between months 13-15 and 16-18 (e.g., due to a major product launch, policy change, or UI update), tuning on the earlier window may select a model that overfits to outdated patterns. This violates the core assumption of temporal evaluation: that the validation period is representative of the future test period for the purpose of generalization.",
+        "evidence_test": "Compare corpus and label distribution statistics (e.g., mean query/article length, topic distribution, click-through rates, proportion of new articles) between validation and test sets. A significant divergence indicates non-stationarity. Perform a sensitivity analysis: train the transformer with a few fixed hyperparameter sets and evaluate on both validation and test. If the ranking of hyperparameter sets by performance differs substantially between the two periods, validation tuning is unreliable.",
+        "flaw_category": "distribution_shift",
+        "_source_critic": 2,
+        "_original_finding_id": "F2"
+      },
+      {
+        "finding_id": "EF7",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratified analysis post-hoc is sufficient to detect and account for confounds like query length, spelling errors, and article familiarity.",
+        "failure_mechanism": "Post-hoc stratification can reveal performance disparities but cannot correct for them or establish that the model's core mechanism is semantic understanding. The transformer could achieve an overall MRR gain by massively improving on a specific, easy stratum (e.g., short, clean queries for which BM25 already works well) while performing worse on the hard cases the hypothesis implicitly targets (e.g., long, complex, or paraphrased queries). The claim of 'semantic search' implies superiority on cases where lexical overlap fails; without pre-stratified evaluation or a focused test on a 'semantic gap' subset, the overall metric is not conclusive.",
+        "evidence_test": "Define a 'semantic gap' test subset before evaluation (e.g., queries where the relevant article contains no significant term overlap with the query, identified via TF-IDF or BM25 score threshold). Report MRR for both models specifically on this subset. If the transformer does not outperform BM25 on this subset, its overall gain is not due to semantic understanding.",
+        "flaw_category": "eval_inflation",
+        "_source_critic": 2,
+        "_original_finding_id": "F3"
+      },
+      {
+        "finding_id": "EF8",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Using the same validation set for tuning both the transformer and BM25 ensures a 'fair comparison'.",
+        "failure_mechanism": "The transformer has orders of magnitude more parameters and hyperparameters than BM25. Tuning both on the same validation set with a 'computational budget' does not account for the vastly larger risk of overfitting the validation set inherent in the transformer's complexity. The transformer's hyperparameter grid search (learning rate, batch size, epochs) interacts with its capacity to memorize validation-set peculiarities, especially given the small validation window (3 months). BM25, with 2 hyperparameters, has minimal overfitting risk. Thus, the comparison may be biased in favor of the transformer, which can optimize its parameters to the specific validation distribution more effectively.",
+        "evidence_test": "Implement a nested cross-validation or time-series cross-validation scheme (e.g., rolling origin validation) to estimate the variance in model selection. Alternatively, hold out a second validation set from the training period for final model selection after the primary validation set is used for tuning. If the transformer's performance relative to BM25 drops significantly when evaluated on a fresh hold-out not used in its extensive tuning, the fairness claim is invalid.",
+        "flaw_category": "eval_inflation",
+        "_source_critic": 2,
+        "_original_finding_id": "F4"
+      },
+      {
+        "finding_id": "EF9",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The weak-supervision labeling strategy's biases (selection, position) are sufficiently mitigated by the small manual annotation set used for 'sanity-checking'.",
+        "failure_mechanism": "A ~300 query manual set is likely underpowered to detect systematic label corruption, especially if the corruption is correlated (e.g., affects certain article types or query patterns uniformly). The plan to only 'sanity-check' that improvements correlate is insufficient. If the manual set is not representative of the full test distribution\u2014particularly of the hard cases where label noise might be highest\u2014it cannot serve as a reliable arbiter. The manual set itself could be subject to annotation inconsistencies or expert biases.",
+        "evidence_test": "Calculate the statistical power of the manual set to detect a meaningful difference in MRR between the two models. Report the agreement (e.g., Cohen's Kappa) between manual labels and automatic labels, broken down by strata. If agreement is low in strata where the transformer shows the largest gains, the automatic label improvements are suspect.",
+        "flaw_category": "unverified_prereqs",
+        "_source_critic": 2,
+        "_original_finding_id": "F5"
+      },
+      {
+        "finding_id": "EF10",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Excluding non-primary language queries 'isolates semantic effects from language-specific variation'.",
+        "failure_mechanism": "This assumes the semantic capabilities of the transformer are language-agnostic within the primary language. However, the model's pre-trained embeddings and the fine-tuning data may encode language-specific syntactic and cultural patterns that do not constitute 'semantic understanding' in a general sense. The exclusion simplifies the experiment but implicitly claims the results are about semantics, not about performance on a specific linguistic domain. If the primary language is English, the results may not generalize to other languages even with comparable training data, due to inherent properties of the pre-trained model and tokenizer.",
+        "evidence_test": "This is a scope limitation, not a methodological flaw within the stated scope. The claim is adequately caveated in the 'Claim Scope' section. No internal test is needed; it's a deployment consideration.",
+        "flaw_category": "context_dependent",
+        "_source_critic": 2,
+        "_original_finding_id": "F6"
+      },
+      {
+        "finding_id": "EF11",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Using only the first 512 tokens of the article body is sufficient for semantic retrieval.",
+        "failure_mechanism": "Relevant information for a query may be located beyond the first 512 tokens, especially in longer, detailed support articles. This truncation creates an artificial ceiling on retrieval performance for both models, but may impact them differently. The transformer, with its self-attention mechanism, might be better at leveraging the truncated context compared to BM25's bag-of-words approach, but this is a test of truncated semantics, not full-document semantics. The results may not reflect performance in a system that indexes the full article.",
+        "evidence_test": "Sample a subset of test queries where the relevant article is long (>512 tokens). Manually inspect if the key information answering the query appears after the first 512 tokens. If this occurs frequently, the reported metrics are lower bounds, and the comparison may be skewed if one model is more robust to truncation.",
+        "flaw_category": "context_dependent",
+        "_source_critic": 2,
+        "_original_finding_id": "F7"
+      }
+    ],
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "I need to analyze each finding against the explicit methodology controls. EF1 and EF5 both concern weak-supervision label quality and position bias. The methodology explicitly acknowledges these concerns in Section 1: 'We acknowledge this approach introduces selection bias (agents may not search optimally) and position bias (search-result ranking influences clickthrough). To mitigate, we supplement automatic labels with a small hold-out manual annotation set (~300 queries)... used only for sanity-checking that automatic-label improvements correlate with human-judged relevance.' This is a direct, named control addressing the critic's concern - the manual annotation set is specifically designed to detect if the model is learning position bias rather than true relevance. EF2 concerns hard negatives in training - this is a training methodology choice that doesn't invalidate the evaluation comparison; both models are trained on identical data. EF3 and EF11 concern 512-token truncation - the methodology explicitly states both transformer AND BM25 use 'first 512 tokens of body', ensuring fair comparison. EF4 concerns query deduplication - a minor concern with rare edge cases in production logs. EF6 concerns temporal distribution shift - the methodology explicitly addresses this in Section 2 and Section 7, planning to report corpus statistics to document drift. EF7 concerns post-hoc stratification limitations - the methodology explicitly states stratified analysis is for detection ('to detect confounds'), not correction, and requires consistent gains across bins for hypothesis confirmation. EF8 concerns hyperparameter overfitting risk - this is inherent to comparing neural models against traditional methods and is a valid scope limitation. EF9 concerns manual annotation power - the methodology explicitly describes this as a 'sanity check' not a full validation, which is appropriate for a PoC. EF10 is explicitly scoped out in the Claim Scope section.",
+    "rebuttals": [
+      {
+        "finding_id": "EF1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "cited_text": "We acknowledge this approach introduces selection bias (agents may not search optimally) and position bias (search-result ranking influences clickthrough). To mitigate, we supplement automatic labels with a small hold-out manual annotation set (~300 queries) labeled by domain experts; this is used only for sanity-checking that automatic-label improvements correlate with human-judged relevance.",
+        "justification": "The methodology explicitly acknowledges position bias and implements a direct control: manual annotation sanity-check. The critic's proposed evidence test (comparing MRR on manual vs automatic labels) is exactly what the methodology designs the manual set to do. This is a named design control, not a vague response."
+      },
+      {
+        "finding_id": "EF2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 4,
+        "cited_text": "Fine-tuning uses contrastive loss (InfoNCE or triplet loss with in-batch negatives) over 3\u20135 epochs on training data, with early stopping on the validation set.",
+        "justification": "The critic is correct that hard negatives are not explicitly included. However, this is a training methodology choice, not an evaluation flaw. The comparison between transformer and BM25 remains fair because both are trained and evaluated on identical data. The concern about 'artificially low' transformer performance would affect both models equally if it were a problem. This is a valid training improvement suggestion but does not invalidate the experiment design."
+      },
+      {
+        "finding_id": "EF3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "cited_text": "Article text (title + first 512 tokens of body) are normalized deterministically... BM25 uses standard English stopword removal (no stemming, to ensure fair comparison).",
+        "justification": "The methodology explicitly applies identical truncation to BOTH the transformer and BM25. This ensures fair comparison - if truncation creates a disadvantage, it affects both models equally. The critic's concern about BM25 indexing the whole document is incorrect; BM25 in this setup uses the same 512-token truncation."
+      },
+      {
+        "finding_id": "EF4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "cited_text": "We use a chronological (temporal) split with no overlap",
+        "justification": "Query deduplication between train and test is a minor concern. In production support logs, identical queries are rare and the temporal split already prevents direct leakage. This is below significance for the experiment's conclusions."
+      },
+      {
+        "finding_id": "EF5",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "cited_text": "We acknowledge this approach introduces selection bias (agents may not search optimally) and position bias (search-result ranking influences clickthrough). To mitigate, we supplement automatic labels with a small hold-out manual annotation set (~300 queries) labeled by domain experts; this is used only for sanity-checking that automatic-label improvements correlate with human-judged relevance.",
+        "justification": "This is the same control as EF1. The methodology explicitly acknowledges the label noise concern and implements manual annotation as a detection mechanism. The critic's proposed evidence test is exactly what the methodology designs the manual set to do. The severity is reduced but not fully eliminated because the manual set is small (300 queries)."
+      },
+      {
+        "finding_id": "EF6",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "cited_text": "Temporal splitting is essential because: (a) articles are published and revised over time... (b) support queries evolve with product features and known issues, so the semantic relationship between query and article is non-stationary... We report corpus statistics (mean article/query length, topic distribution) across train/val/test splits to document any distribution drift.",
+        "justification": "The methodology explicitly acknowledges temporal non-stationarity as a design consideration and implements corpus statistics reporting as a control to measure distribution drift. This is a direct response to the critic's concern - the experiment will measure and report whether validation-test shift exists."
+      },
+      {
+        "finding_id": "EF7",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "cited_text": "Stratified analysis is performed post-hoc on test results to detect confounds. Hypothesis confirmation requires consistent gains across query-length and spelling-error bins.",
+        "justification": "The methodology explicitly states stratified analysis is for detection ('to detect confounds'), not correction. The requirement for consistent gains across bins addresses the critic's concern about overall metric misleading. This is a scope limitation - the experiment detects but does not correct for confounds, which is appropriate for a PoC."
+      },
+      {
+        "finding_id": "EF8",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "cited_text": "Both models use the same validation set for model selection and are evaluated on the identical test set, ensuring apples-to-apples comparison.",
+        "justification": "The critic raises a valid concern about differential overfitting risk. However, this is inherent to comparing neural models (many hyperparameters) against traditional methods (few hyperparameters). The methodology uses the same validation set for both, which is the standard practice. Nested cross-validation would add significant complexity beyond a PoC scope."
+      },
+      {
+        "finding_id": "EF9",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "cited_text": "this is used only for sanity-checking that automatic-label improvements correlate with human-judged relevance.",
+        "justification": "The methodology explicitly describes the 300-query manual set as a 'sanity check' not a full validation. This is appropriate for a PoC. The small size is a known limitation explicitly acknowledged by the design - it's not claimed to be a definitive arbiter."
+      },
+      {
+        "finding_id": "EF10",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "cited_text": "This experiment does not establish: (a) that the semantic model generalizes to languages or product domains not in the training data",
+        "justification": "This is explicitly scoped out in the Claim Scope section. The critic's own evidence test acknowledges 'This is a scope limitation, not a methodological flaw within the stated scope.'"
+      },
+      {
+        "finding_id": "EF11",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "cited_text": "Article text (title + first 512 tokens of body) are normalized deterministically... BM25 uses standard English stopword removal",
+        "justification": "Same as EF3 - both models use identical truncation. This is a MINOR finding about potential performance ceiling, not a comparison validity issue."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All FATAL and MATERIAL findings have been rebutted with design controls or scope limitations. The highest adjusted severity is 5 (EF5), which is below the threshold for critique_wins. The methodology explicitly acknowledges position bias (EF1, EF5), implements manual annotation checks (EF1, EF5), addresses temporal non-stationarity (EF6), and applies identical preprocessing to both models (EF3, EF11). The remaining concerns are either scope limitations (EF2, EF7, EF8, EF10) or below-significance minor issues (EF4, EF9, EF11). No finding with adjusted severity \u2265 7 was conceded, and all material concerns have been addressed through named design controls or appropriate scope limitations."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "EF1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "EF2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=7 \u2265 7, REBUT-SCOPE \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "EF3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF5",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "EF6",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF7",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF8",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF9",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF10",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF11",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "3 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "ensemble": true
+}

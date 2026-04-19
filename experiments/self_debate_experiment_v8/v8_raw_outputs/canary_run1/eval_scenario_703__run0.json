@@ -1,0 +1,177 @@
+{
+  "case_id": "eval_scenario_703",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "z-ai/glm-4.7-flash",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The dataset used for modeling is representative of the target ICU population because admissions with incomplete documentation (<50%) are excluded to ensure data quality.",
+        "failure_mechanism": "Patients with low documentation rates are often the most unstable, severely ill, or end-of-life patients\u2014precisely the cohort where clinical text is potentially most predictive. By excluding them, the model is trained on a biased subset with artificially low mortality and benign clinical trajectories, rendering its performance estimates on the general ICU population meaningless.",
+        "evidence_test": "Statistically compare the distribution of key variables (mortality, SOFA score, admission type, age) between the included and excluded cohorts. If the excluded group has significantly different baseline characteristics, the model fails to generalize to the intended population.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "5-fold cross-validation on the training set provides a reliable estimate of generalization performance for hyperparameter selection.",
+        "failure_mechanism": "The training set is temporally ordered (historical vs. future). If the 5-fold split is random (standard KFold) or not time-aware, the folds contain a mix of data from different times. The model will use admissions from a 'future' split (relative to the training data at that moment) to estimate performance on 'past' data. This violates the IID assumption and generates optimistic bias, leading to over-regularization (underfitting) or failure to capture temporal drift.",
+        "evidence_test": "Verify the implementation uses a TimeSeriesSplit or sequential cross-validation strategy where validation folds strictly contain later admissions than the training folds. Report the C-index for both random and time-aware CV to demonstrate the magnitude of the bias.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Forward-filling laboratory values within the 72-hour observation window is a valid approximation of patient physiology for mortality prediction.",
+        "failure_mechanism": "Forward-fill assumes the value measured at $t=1$ persists as a valid metric for the entire period $t=1 \to t=72$. However, severe physiological crashes often manifest as transient drops or abnormalities that are not repeated. Forward-filling erases these critical trends, causing the model to miss the dynamic deterioration signal that is highly predictive of 30-day mortality.",
+        "evidence_test": "Compare model performance on test data when using raw gaps (NaNs) or unspecific imputation (e.g., hospital mean) versus forward-fill. Visualize the distribution of 'gap durations' in the dataset to confirm that some gaps are substantial enough to invalidate the fill assumption.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Automated screening of free-text for outcome-predictive language effectively removes leakage while preserving the signal needed for the model to succeed.",
+        "failure_mechanism": "The screening process relies on heuristic rules (e.g., 'exclude words like comfort care'). It is highly likely that terms related to poor prognosis, comfort measures, or declining status are strongly correlated with mortality *independently* of the clinical factors already encoded. By removing these terms, the model loses high-signal information that might be necessary to distinguish between binary outcomes, especially when the text is sparse.",
+        "evidence_test": "Analyze the remaining text corpus to see if semantic features are still available (e.g., diagnosis mentions). Compute the correlation between the presence/absence of the screened terms and the outcome to determine if they constitute signal rather than pure leakage.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 'Cox proportional hazards' assumption holds for the combined model (structured + text).",
+        "failure_mechanism": "The addition of unbounded, non-linear embedding vectors (768-dim) into a Cox model can distort the proportional hazards assumption. Text embeddings, while normalized by pooling, may behave like complex non-linear functions of time-dependent covariates, violating the linear-log-hazard assumption of the base model.",
+        "evidence_test": "Perform Schoenfeld residual tests on the full model. If residuals show non-zero correlation with time, the C-index metric becomes misleading regarding the model's validity.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "N1",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The pretrained biomedical transformer captures clinically relevant semantic information effectively.",
+        "failure_mechanism": "This is an assumption about the quality of the tokenizer/pretrained weights, not a flaw in the design. It relies on the hype of BERT models.",
+        "evidence_test": "Standard benchmarking of the specific transformer (BioBERT/SciBERT) on the MIMIC-III/IV XL MT datasets (not required for this PoC, but good practice).",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "N2",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The 50% documentation threshold is a clinically sound heuristic for data quality.",
+        "failure_mechanism": "The threshold is arbitrary. Some high-risk patients are systematically under-documented due to protocols, not poor quality.",
+        "evidence_test": "Correlate the 'completeness' score with observed mortality and see if a smooth curve exists, or if it spikes at 50%.",
+        "flaw_category": "synthetic_data_assump"
+      }
+    ],
+    "summary": "The PoC suffers from critical sample selection bias (excluding poorly documented patients) and a fundamental violation of time-series validation methodology (potential use of random CV on temporal data), rendering the hyperparameter tuning and generalizability claims invalid. Several implicit distributional assumptions regarding missingness imputation and text signal retention weaken the strength of the findings.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1: The critic claims excluding admissions with <50% documentation creates a selection bias, specifically removing the most unstable patients. However, the design explicitly specifies that completeness is measured by 'unit-year cohort' stratification. This means we are excluding patients from units/years where documentation was systematically poor (e.g., a specific ward during a staffing crisis or an old EHR version), not individual patients who were 'too sick to be documented.' Documentation completeness is a system-level property, not a patient-level physiological state. The intent is to ensure a reliable signal-to-noise ratio for the embeddings.\n\nF2: The critic is concerned about random K-Fold CV on temporal data. While the overall split is chronological, the CV is performed *within* the training set. The primary goal of this CV is hyperparameter tuning (regularization strength, L1/L2). Since the final evaluation is on a locked, prospective test set, any slight optimistic bias in the tuning phase is immaterial compared to the rigor of the final hold-out. Furthermore, the design specifically uses the validation set for 'early stopping' and 'generalization verification,' which serves as the temporal guardrail before the test set.\n\nF3: The critic argues forward-fill erases dynamic trends. However, the design doesn't just use forward-fill; it captures the 'worst or mean within 72h' (Section 3). Forward-filling is used to manage informatively missing values for the model's input, but the summary statistics (min/max/worst) explicitly preserve the 'physiological crash' signal the critic is worried about.\n\nF4: The critic claims removing 'comfort care' language removes signal. This is a fundamental misunderstanding of the experiment's goal. The goal is to predict mortality based on clinical state, not to detect the moment a doctor decides to stop treatment. 'Comfort care' is a proxy for the outcome, not a predictor of the underlying pathology. Including it would be target leakage (the 'oracle' effect), which would invalidate the hypothesis that clinical text adds predictive value over structured data.\n\nF5: The critic notes that the Cox proportional hazards assumption might be violated by high-dimensional embeddings. This is a theoretical concern. However, the primary evaluation metric is the C-index, which is a rank-correlation metric and remains a valid measure of discrimination even if the proportional hazards assumption is violated. For a PoC focused on discrimination (triage), this is an immaterial theoretical point.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The exclusion is based on 'unit-year cohort' documentation completeness, not individual patient-level missingness. This removes systemic data quality failures (e.g., faulty EHR integration in a specific year/ward) rather than excluding the most unstable patients."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 1,
+        "justification": "CV is used for hyperparameter tuning within the training set; the final model is validated on a prospective validation set and tested on a locked chronological test set, which is the definitive measure of generalization."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The design explicitly captures 'worst or mean' values within 72h (Section 3), which preserves the extreme physiological signals (crashes) that forward-fill alone might obscure."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Terms like 'comfort care' are outcome-proxies (leakage), not clinical predictors. Removing them is essential to test if the model can predict mortality from clinical indicators rather than identifying the physician's final decision."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The C-index measures discrimination/ranking, which remains valid and clinically useful for triage regardless of whether the strict proportional hazards assumption is met."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings were successfully rebutted. The most severe finding (F1) was based on a misunderstanding of the cohort-level exclusion strategy, and all other findings addressed design choices that were either explicitly controlled for in the methodology or immaterial to the primary discrimination metric."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

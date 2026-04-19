@@ -1,0 +1,207 @@
+{
+  "case_id": "eval_scenario_703",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The model's discrimination (C-index) and calibration (Brier score) on the test set suffice to conclude that clinical notes provide predictive value for 30-day ICU mortality beyond structured EHR data.",
+        "failure_mechanism": "The evaluation is purely correlational and does not establish that the association between note content and mortality is robust to unmeasured confounding, selection bias, or reverse causality. Medical notes are written in response to patient status and clinician judgment; they may reflect disease severity or impending deterioration that is already captured (or about to be captured) by structured data. Thus, increased C-index may arise from leakage of future information into the note text, time-dependent confounding, or documentation practices that correlate with both note content and outcome but are not causally meaningful.",
+        "evidence_test": "A causal test would require an interventional or quasi-experimental design: e.g., exogenous variation in note content (e.g., mandatory note templates) unrelated to patient risk that changes model predictions, or propensity score-based adjustment for all variables that influence both note writing and mortality. Alternatively, randomized misspelling or removal of note content in a blinded fashion could test whether semantic content\u2014not signal from note metadata or timing\u2014drives performance.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split and inclusion of time-updated structured features (e.g., SOFA, medications) correctly simulate a prospective deployment scenario for 30-day mortality prediction.",
+        "failure_mechanism": "The model uses data from the first 72 hours of ICU stay, including vital signs, labs, and clinical notes. However, modern ICU care is highly dynamic: SOFA components (e.g., PaO2/FiO2), medications (vasopressors, sedatives), and note content evolve over time. The temporal split preserves chronological order of admissions but does **not** prevent **temporal overlap between training and evaluation within a single admission**. That is, data from days 2\u20133 may be used to predict day 1\u201330 mortality. The model is not operating on a true \u2018first 72 hours\u2019 input when evaluated on, say, day 2 lab or note data\u2014it uses information that becomes available after the prediction window starts. This violates the fundamental assumption of prospective evaluation and inflates performance.",
+        "evidence_test": "Train and evaluate the model using **only data available within the first 6, 12, 24, or 48 hours** of admission to simulate a true early-warning system. Any performance drop would indicate reliance on data beyond the permissible input window. Alternatively, conduct a **posed forward-looking analysis**: predict 30-day mortality using only features available at hour 0 or hour 6; initialize models with zero future information.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The C-index on a 30-day restricted test set is a clinically meaningful measure of discrimination for triage decisions.",
+        "failure_mechanism": "The C-index assumes censoring at discharge is uninformative, but in ICU settings, discharge is often Censoring at discharge is not independent of mortality risk: sicker patients are more likely to die in-hospital, and survivors are discharged\u2014censoring informative with respect to the event (30-day mortality). When true event times are unobserved after discharge, the C-index may be biased. Moreover, the C-index is a rank-based measure and does not directly translate to utility in triage decisions, where net benefit or decision curve analysis may be more appropriate.",
+        "evidence_test": "Recompute performance using **Fine-Gray subdistribution hazard model** or **restricted mean survival time (RMST)** up to 30 days, reporting absolute risk reduction or RMST difference for clinical interpretability. Reinforce evaluation with **decision curve analysis** using net benefit across clinically actionable thresholds (e.g., 1\u201320% predicted risk) to assess real-world utility.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The model predicts 30-day in-hospital mortality, which is a well-defined and clinically relevant endpoint.",
+        "failure_mechanism": "In-hospital mortality is an imperfect proxy for 30-day mortality: early discharge to hospice, transfer to long-term care, or death post-transfer may cause misclassification. More critically, the model cannot be evaluated beyond discharge using this design\u2014some 30-day mortality events occur after discharge, leading to informative censoring. The 30-day in-hospital proxy may misrepresent true 30-day all-location mortality, which is the intended clinical objective.",
+        "evidence_test": "Collaborate with EHR and registry data to track vital status beyond discharge (e.g., via state death records or national health databases) to validate how many 30-day deaths occur post-discharge. Report both in-hospital 30-day and all-location 30-day metrics, and assess discrepancy.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratified analyses by note availability quartile support the robustness of note-based gains.",
+        "failure_mechanism": "Stratification by note availability does not guarantee that the **semantic content** of notes is comparable across quartiles. A patient with many short notes may encode different clinical information than one with fewer, longer ones. If the model's advantage is driven by note quantity (which is already modeled via explicit features) rather than quality, the evaluation conflates confounding by volume with semantic value. Moreover, the note availability flag is based on a threshold (50% completeness), which may not correspond to clinical relevance.",
+        "evidence_test": "Perform a **secondary analysis** excluding admissions with incomplete notes entirely (listwise deletion) and compare results. Also, compute **per-note embeddings** and test whether the addition of any single note improves risk prediction\u2014this isolates semantic contribution beyond volume effects.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The forward-fill and missing-indicator approach adequately handles informative missingness in lab values.",
+        "failure_mechanism": "Forward-filling laboratory values over 72 hours assumes that missing labs are missing at random within the window, but in ICU practice, labs are sparser in stable or lower-acuity patients\u2014suggesting informative missingness. Forward-filling can propagate bias: imputed normal values can falsely appear stable in deteriorating patients. The binary missingness flag may not suffice without explicit modeling of the missingness mechanism (e.g., MNAR models).",
+        "evidence_test": "Compare models trained with **multiple imputation** (MICE or Amelia) vs forward-fill, and assess C-index and calibration. Include an **interaction term** between lab value and missingness indicator to test whether the model accounts for missing not at random.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The use of medical notes embedded with BioBERT or SciBERT captures clinically meaningful semantic content.",
+        "failure_mechanism": "Biomedical transformers trained on PubMed or similar corpora may not generalize to ICU note styles, abbreviations, or domain-specific jargon. Pretrained embeddings may encode general biomedical semantics but not ICU-specific temporality (e.g., 'trending up') or contextual imprecision (e.g., 'likely sepsis') that are critical for prognostication.",
+        "evidence_test": "Qualitatively evaluate embeddings with t-SNE or UMAP and conduct clinician annotation to assess whether note-derived vectors align with clinically relevant phenotypes (e.g., sepsis, shock). Contrast performance using **randomly initialized embeddings** vs pretrained biomedical models to test whether pretraining adds value.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "Multiple FATAL flaws invalidate the core causal and temporal assumptions of the study. The study likely measures leakage of future information and documentation responses to patient deterioration, not genuine predictive value of semantic note content. A MATERIAL flaw arises from using in-hospital mortality as a proxy for 30-day mortality, which omits post-discharge deaths. Additionally, temporal overlap in feature windows violates prospective evaluation. These issues must be addressed before results can be trusted.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "**F1 (FATAL, 9):** The critic argues the evaluation is purely correlational and doesn't address reverse causality or unmeasured confounding - notes reflect patient status already captured in structured data. However, the methodology explicitly states (Scope section 8): 'It does not establish causality (notes do not cause mortality) or generalization to other hospital systems.' The experiment scope is discrimination (ranking), not causal inference. The design includes multiple confound controls (note volume features, stratified analysis, structured-only baseline) to isolate note contribution. This is a valid concern in causal inference context but outside stated scope.\n\n**F2 (FATAL, 8):** The critic claims temporal overlap within admission - data from days 2-3 used to predict day 1-30 mortality violates prospective deployment. This is a misunderstanding. The design uses data from the FIRST 72 hours (a fixed window at admission) to predict 30-day outcomes. This IS the prospective early-warning scenario - using early data to predict future events. The 72-hour window IS the input, not the prediction horizon. There's no leakage between input window and outcome window. The evidence test (time-restricted models) would be useful sensitivity analysis but doesn't invalidate the current 72-hour design which is clinically meaningful.\n\n**F3 (MATERIAL, 7):** The critic correctly notes C-index assumes non-informative censoring at discharge, which is violated in ICU. This is a legitimate technical limitation. However, C-index is explicitly appropriate for ranking-based discrimination (the stated use case: triage decisions). The design also includes calibration (Brier score), sensitivity/specificity, and decision curve analysis as secondary metrics. The concern is valid but doesn't invalidate C-index for ranking.\n\n**F4 (MATERIAL, 6):** The critic correctly identifies that in-hospital mortality misses post-discharge deaths, causing informative censoring. This is a genuine measurement limitation. The design acknowledges 30-day in-hospital as a proxy but doesn't address post-discharge tracking. This is a real gap worth addressing.\n\n**F5 (MATERIAL, 5):** The critic argues stratification by note availability doesn't guarantee semantic content comparability. This is valid in principle. However, the design includes explicit volume features (note length, count) AND a secondary baseline testing structured + summary stats vs structured alone. The sensitivity analysis section explicitly addresses this: 'We retrain the note-augmented model excluding note features.' The concern is partially addressed but could be stronger.\n\n**F6 (MATERIAL, 4):** The critic argues forward-fill assumes MAR but ICU labs are MNAR (sparser in stable patients). This is a legitimate concern about the missing data handling. The design includes binary missing indicators but doesn't test alternative imputation methods. The evidence test (MICE vs forward-fill comparison) would strengthen the analysis.\n\n**F7 (MINOR, 3):** The critic questions whether BioBERT captures ICU-specific semantics. This is a reasonable concern about embedding generalizability. However, the design includes comparison baselines that would reveal if pretrained embeddings add value vs random init. The concern is partially addressed through the baseline structure.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The finding is valid in a causal inference context but not within the stated experiment scope. The methodology explicitly scopes the claim to discrimination (C-index) and explicitly disclaims causality in Section 8: 'It does not establish causality (notes do not cause mortality).' The design includes confound controls (note volume features, stratified analysis by volume quartile, structured-only baseline, sensitivity analysis) to isolate the marginal contribution of notes. This is a known and stated limitation, not a flaw."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -6,
+        "adjusted_severity": 2,
+        "justification": "This is a design misunderstanding. The model uses data from the FIRST 72 hours (a fixed window at admission) to predict 30-day mortality. This IS the prospective early-warning scenario - using early available data to predict future outcomes. There is no temporal overlap between input and outcome windows. The 72-hour input window is clinically meaningful for early triage. The proposed evidence test (time-restricted models) would be useful sensitivity analysis but does not identify a flaw in the current design."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The concern about informative censoring affecting C-index is technically valid. However, C-index remains appropriate for the stated use case (ranking patients for triage decisions). The design includes secondary metrics (Brier score calibration, sensitivity/specificity, decision curve analysis with net benefit) that partially address this. The finding is real but does not invalidate the primary metric for discrimination as specified."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "This is a genuine limitation. The design uses in-hospital mortality as a proxy for 30-day mortality but doesn't track post-discharge deaths. This causes informative censoring and misclassifies the true outcome. The design acknowledges this as a proxy but doesn't address the gap. This is a valid finding that should be addressed in future iterations."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The concern is partially addressed through design: the methodology explicitly includes note volume features (length, count) and a secondary baseline testing structured + summary stats vs structured alone. The sensitivity analysis section (Section 7) explicitly states: 'We retrain the note-augmented model excluding note features and compare it to the standalone baseline.' This isolates semantic contribution from volume effects. The finding is real but the design already contains controls."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The concern about forward-fill assuming MAR is valid in principle. However, the design includes binary missingness indicators as a partial control. The proposed evidence test (comparing MICE vs forward-fill) would strengthen robustness but the current approach is a reasonable simplification for a PoC. The finding is real but below the threshold for material impact on the discrimination conclusion."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The concern about BioBERT generalizability to ICU-specific language is reasonable. However, the design includes a structured-only baseline that would reveal whether note embeddings add any value at all. If pretrained embeddings didn't generalize, the note-augmented model would show no improvement over baseline. The baseline comparison structure implicitly tests this. The finding is a theoretical concern that the design controls for."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "After rebuttal, F1 adjusts to severity 4 (REBUT-SCOPE), F2 to 2 (REBUT-DESIGN), F3 to 3 (REBUT-IMMATERIAL), F4 to 6 (CONCEDE but below threshold 7), F5 to 1 (REBUT-DESIGN), F6 to 1 (REBUT-IMMATERIAL), F7 to 0 (REBUT-IMMATERIAL). All advancing findings have adjusted severity \u2264 6, with only F4 (informative censoring from post-discharge deaths) conceded at severity 6 - below the critical threshold of 7. The methodology is sound for its stated scope of discrimination evaluation."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-SCOPE \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=6, CONCEDE \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

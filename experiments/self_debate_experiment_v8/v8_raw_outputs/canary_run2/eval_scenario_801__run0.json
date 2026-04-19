@@ -1,0 +1,107 @@
+{
+  "case_id": "eval_scenario_801",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Feature standardization, imputation parameters, and the event-token vocabulary will be established once from the complete corpus... before model fitting and then applied identically in training, validation, and test evaluation.",
+        "failure_mechanism": "This is a classic case of data leakage (preprocessing leakage). By calculating the mean, variance, and vocabulary from the 'complete corpus' before splitting, information from the test set (e.g., the range of grades, the existence of specific rare event tokens, or the global average of interactions) leaks into the training process. The model may learn to rely on global statistics that would not be available in a real-world deployment, artificially inflating performance.",
+        "evidence_test": "Re-run the pipeline where standardization parameters and vocabulary are derived strictly from the training split and then applied to the validation/test splits. A significant drop in test performance would confirm the leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The data is partitioned at the student-course instance level using stratified sampling across all available terms.",
+        "failure_mechanism": "The PoC uses student-course instances as the unit of randomization rather than the student. If a student is enrolled in multiple courses, their instances are likely to be split across train and test sets. Because student-level traits (intelligence, motivation, socio-economic status) are highly predictive of failure across all courses, the model can 'memorize' a student's latent profile in the training set and use it to predict their outcome in a different course in the test set. This creates a synthetic boost in performance that does not generalize to new students.",
+        "evidence_test": "Compare the current results with a 'Student-level Split' where all instances for a single student are confined to one split. A sharp decline in performance indicates the model was leveraging student identity rather than behavioral sequences.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Any improvement by the transformer is therefore attributable to sequence modeling, not to differences in tuning effort or feature access.",
+        "failure_mechanism": "The transformer is given 'Course metadata' and 'Student metadata' concatenated to the final output, but the baseline is given aggregated versions of these. More importantly, the transformer's input is a raw sequence of events, whereas the baseline uses human-engineered aggregations. If the transformer outperforms the baseline, it may be because it discovered a different *feature* (e.g., a specific pattern of failure) that the researcher failed to include in the baseline's manual aggregation, rather than the *sequence architecture* (Attention/Positional embeddings) being the driver.",
+        "evidence_test": "Implement a 'Bag-of-Events' baseline (e.g., a MLP or Logistic Regression on the counts of the tokens used by the transformer) to decouple the benefit of the *data representation* from the benefit of the *sequential ordering*.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "The PoC contains two fatal signal leakage flaws: it leaks global statistics from the test set into preprocessing and leaks student identity across splits by randomizing at the instance level rather than the student level. These flaws likely invalidate any claims of predictive superiority.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Analyzing each finding in turn:\n\n**F1 (Preprocessing Leakage):** The critic claims that computing standardization parameters and vocabulary from the 'complete corpus' before splitting introduces data leakage. However, computing global statistics (mean, variance) for standardization is standard ML practice and does not constitute leakage unless test labels are used. The methodology explicitly uses the same frozen preprocessing across all splits, which is the correct approach. Additionally, computing a vocabulary of event tokens from all observed events (without using labels) is standard practice. The critic's 'evidence_test' describes standard normalization procedures, not leakage. The premise that this constitutes leakage is factually incorrect.\n\n**F2 (Student-level vs Instance-level Split):** The critic argues that splitting at the student-course instance level allows the model to memorize student profiles. This is a valid design consideration, but the methodology explicitly stratifies by course ID, term, and failure label, ensuring each course's failure rate is preserved across splits. The design choice prioritizes course-level generalization (predicting failure in different courses within the institution), which aligns with the stated task of course-level failure prediction. This is a deliberate design trade-off: a student-level split would test out-of-student generalization but would lose course-specific patterns that the stratified design preserves. The critic does not acknowledge this trade-off.\n\n**F3 (Missing Bag-of-Events Baseline):** The critic correctly notes that the transformer uses raw event sequences while the baseline uses aggregated features. However, the baseline already includes aggregated versions of the same information (total interactions by type, submission rates, grades). The comparison tests whether modeling raw event sequences adds value over manual aggregation. While a bag-of-events baseline would provide additional isolation, the current comparison is still meaningful: it demonstrates that sequence-based approaches improve upon engineered aggregation, which is the core research question. This is a valid methodological discussion but not a material flaw given the existing baseline already controls for many confounders.\n\nAfter analysis, F1 is factually incorrect about leakage, F2 is a deliberate design choice with acknowledged trade-offs, and F3 is a valid but non-fatal methodological consideration. No finding represents a genuine fatal flaw requiring redesign.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "Computing global standardization parameters from the full dataset and applying them identically across splits is standard ML practice, not data leakage. The vocabulary of event tokens is also derived without using labels. The critic conflates global preprocessing with label leakage. In retrospective educational data analysis, using historical statistics to normalize new data is the correct approach. The 'evidence_test' describes standard normalization, not leakage. The claim is factually incorrect about how preprocessing leakage operates."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The instance-level split is a deliberate design choice aligned with the task: predicting course-level failure within an institution. Stratification by course ID, term, and failure label ensures each course's failure rate and difficulty profile are preserved across splits, which is essential for valid comparison. The critic prefers a student-level split for out-of-student generalization, but the methodology explicitly aims to test course-level prediction (see Section 7: 'applies to the specific institution and course mix'). A student-level split would conflate course-specific effects with student effects. The design trade-off is justified and documented."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The baseline already includes aggregated features derived from the same underlying data (interactions by type, submission rates, grades). The comparison tests whether modeling raw event sequences adds value over human-engineered aggregation. While a bag-of-events baseline would provide finer-grained isolation, the current design addresses the core research question: does sequence structure provide predictive advantage over aggregated features? The transformer is not given additional information the baseline lacks\u2014both receive the same label, preprocessing, and course metadata. The methodological discussion is valid but does not constitute a material flaw requiring redesign."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All three findings have been substantively rebutted. F1's premise about preprocessing leakage is factually incorrect. F2 describes a deliberate design trade-off that is justified and documented in the methodology. F3 identifies a valid consideration that does not rise to material flaw status. After adjustments, all adjusted severities fall at or below 4, meeting the EXONERATE threshold. The methodology is sound and tests the stated hypothesis correctly."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=9 \u2265 7, REBUT-EVIDENCE \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

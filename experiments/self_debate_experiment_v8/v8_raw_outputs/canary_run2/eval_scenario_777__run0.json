@@ -1,0 +1,232 @@
+{
+  "case_id": "eval_scenario_777",
+  "stratum": "regular",
+  "flaw_category": "distribution_shift",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The label 'unplanned readmission within 30 days' can be accurately and unambiguously derived from administrative encounter data with error rates \u22645% after refinement.",
+        "failure_mechanism": "Administrative encounter data often misclassify readmissions as planned or unplanned due to inconsistent coding practices. The method relies on deterministic rules based on encounter types, which can be gamed by providers (e.g., scheduling an elective procedure shortly after discharge to mask a readmission). Manual chart review on a 5% sample may not capture systematic biases in coding. 5% error in labeling can materially impact model performance in rare-event prediction.",
+        "evidence_test": "Conduct a blinded manual chart review on a representative 10% sample (not just 5%) across all discharge units and time periods. Compare agreement between administrative labels and gold-standard clinical adjudication. If Cohen\u2019s kappa or precision/recall against manual review falls below 0.85, the label is not reliable enough for model training and evaluation. Additionally, evaluate model performance on relabeled validation samples to quantify sensitivity to label noise.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Temporal-stratified splitting with patient-level stratification prevents all forms of data leakage and ensures that the transformer does not gain unfair advantage by observing future patterns relative to the index discharge.",
+        "failure_mechanism": "While patient-level temporal splitting prevents patient overlap, it does not prevent leakage from overlapping clinical episodes across patients. For example, if two patients are treated for the same condition by the same clinical team, their discharge sequences may share protocols, staffing patterns, or institutional biases. Even more critically, aggregate statistics (e.g., unit-level utilization trends, seasonal patterns) learned from the training window could leak into the transformer via shared baselines or via global embedding parameters if training data spans a long temporal window where institutional practices evolve. The transformer\u2019s use of time-series sequences learned at the patient level may still exploit hospital-specific temporal patterns not available at inference time.",
+        "evidence_test": "Perform a targeted audit: select 10% of test patients and shuffle their time-stamped sequences (without changing baseline features) to break temporal coherence. Re-evaluate the transformer and logistic regression. If the transformer\u2019s performance degradation is negligible while the logistic regression\u2019s performance remains stable, the transformer is likely exploiting non-permissible temporal correlations. Alternatively, train the transformer on synthetic sequences where each patient\u2019s historic events are resampled from a shuffled pool of unrelated patients \u2014 this should destroy any temporal signal but preserve baseline and sequential patterns that don\u2019t rely on real-time order.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline features used for logistic regression are informationally equivalent to the transformer\u2019s baseline features, enabling a fair apples-to-apples comparison.",
+        "failure_mechanism": "The transformer implicitly receives richer temporal representations of the same features (e.g., lab trends, diagnosis progression) through its sequential input, which are not available to the logistic regression\u2019s static feature vector. Although the logistic regression has access to recent lab values and counts, it lacks the trajectory and timing information encoded in the transformer\u2019s sequences. This undermines fair comparison: the transformer has more information in principle. Additionally, the transformer may learn interactions between baseline features and temporal patterns that are not separable in the logistic regression feature space.",
+        "evidence_test": "Construct a constrained baseline feature set for logistic regression: include only the *final* values of each sequence (e.g., the most recent lab result, the last diagnosis code embedded in a truncated format), and remove all aggregate counts and indices that implicitly summarize time. Then retrain both models. If the transformer still outperforms, the gain plausibly comes from temporal modeling. If performance parity emerges, the gap was due to richer input information.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The PR-AUC metric on the test set is sufficient to evaluate operational utility for alerting under a fixed budget.",
+        "failure_mechanism": "PR-AUC summarizes performance across all decision thresholds, but alerts are operationalized at a fixed recall level (e.g., top 20% of patients). PR-AUC can mask poor calibration at the threshold of interest, especially in imbalanced data. A model with high PR-AUC may have low precision at the desired recall, leading to alert fatigue. Decision curve analysis helps but is secondary in the evaluation. The primary metric should be recall (or precision) *at the fixed budget*. PR-AUC is a proxy, not the objective.",
+        "evidence_test": "Recompute evaluation with the primary metric defined as recall at the top 20% riskiest patients (by predicted probability), measured on the test set. Compare this with the recall achieved at the PR-AUC-maximizing threshold. If the two thresholds diverge significantly (e.g., >15% difference in recall), then PR-AUC does not align with the stated operational goal. Also, compute the calibration of predicted probabilities in the top 20% risk bin \u2014 expected vs observed readmission rates should differ by <10% absolute.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The model generalizes across discharge units (medical, surgical, ICU, etc.) due to unit-level stratification.",
+        "failure_mechanism": "Unit-level stratification ensures adequate representation but does not guarantee that model behavior is invariant across units. The transformer may learn unit-specific temporal patterns (e.g., surgical patients stabilize faster) that do not generalize when deployed to a different unit or hospital. Worse, if the training distribution over units differs significantly from deployment, performance could drop sharply despite stratification. Stratum-specific calibration and error rate analysis are necessary, but not sufficient, to ensure robustness.",
+        "evidence_test": "Evaluate per-unit PR-AUC, calibration (Brier score by unit), and identify any unit with PR-AUC below 0.2 or with calibration error >0.05. If such units exist, the model is not universally deployable across units without further intervention. Additionally, perform a leave-one-unit-out cross-validation: train on all units except one, test on the held-out unit. If performance collapses on any unit, the model has not generalized across clinical contexts.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The inclusion of patients with at least 12 months of prior history ensures that all baseline and temporal features are comparable across patients and suitable for machine learning.",
+        "failure_mechanism": "While restricting to patients with long prior history improves feature comparability, it introduces a selection bias: healthier, more stable patients with regular follow-up are overrepresented. Readmission risk may be systematically different in this cohort than in the broader inpatient population (especially among underserved patients or those who lack continuity of care). This may inflate overall performance metrics while reducing real-world utility.",
+        "evidence_test": "Compare demographic and clinical characteristics (age, comorbidity index, prior admissions) between the analytic cohort and the full inpatient population. If significant differences exist (Cohen\u2019s d > 0.2), report performance metrics on the full population with imputed or flagged history features. Alternatively, use inverse probability weighting or case-control matching to reweight the analytic cohort to match the broader population.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Permutation importance on baseline features alone can reliably isolate the contribution of temporal sequences to model performance.",
+        "failure_mechanism": "Permutation importance is confounded by correlation between baseline and temporal features. If a high-risk diagnosis appears both in the baseline comorbidity index and in the diagnosis sequence, masking the sequence has little effect, even if the sequence carries predictive temporal signal (e.g., a recent rise in lab abnormalities). The transformer may rely on both sources, making the ablation inconclusive.",
+        "evidence_test": "Construct an ablated transformer input that removes entire sequences (e.g., zero out diagnosis sequences, medication sequences) but keeps baseline features intact. Train from scratch on this ablated input and compare to the full model. If performance drops significantly, the temporal modality contributes meaningfully. Also, use SHAP values on the temporal tokens to isolate their marginal contribution on a per-instance basis, and aggregate across cases.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Hyperparameter tuning on the validation set with 50\u2013100 trials is sufficient to find the optimal configuration for the transformer model.",
+        "failure_mechanism": "Random or Bayesian search may miss configurations that are optimal in the tail of the distribution, especially with small validation sets (20% of timeline). Model performance can be highly sensitive to embedding dimension, sequence length, and attention head count. Poorly chosen sequence lengths (e.g., 12 months of sparse diagnostic codes) may degrade attention to meaningful local patterns. The number of trials may not be enough to robustly identify the best configuration under class imbalance.",
+        "evidence_test": "Run a larger hyperparameter search (e.g., 500 trials) with a fixed compute budget, and plot convergence of PR-AUC on the validation set. If performance improves beyond 200 trials, the current search was insufficient. Also, perform stability analysis: retrain the top 5 configurations 5 times each with different seeds. If variance in PR-AUC exceeds 0.02 across runs, the model is unstable and conclusions are unreliable.",
+        "flaw_category": "eval_inflation"
+      }
+    ],
+    "summary": "The PoC contains multiple fatal flaws that invalidate core assumptions about label validity, leakage controls, and fair model comparison. These are centered on administrative label reliability, leakage in temporal splits, and informational inequality between baseline and transformer inputs. These issues must be addressed before the hypothesis can be credibly evaluated.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critique raises several valid concerns regarding the approach taken in the proof-of-concept regarding label definition, data leakage, valid comparison, and model evaluation. Starting with Finding F1, while administrative data can indeed have errors, our design includes a robust manual chart review process. This addresses the cited reliability issue within acceptable bounds for our label creation. Finding F2 correctly identifies potential leakage but underestimates the effectiveness of our stratification approach, designed specifically to avoid these issues. For Finding F3, the concern regarding the implicit richer representations in the transformer is acknowledged; however, both models are tuned similarly to allow for fair comparisons despite the structural differences in their inputs. Finding F4 highlights a pertinent point about using PR-AUC, yet the main operational metric for alerts is clearly defined, making standalone PR-AUC useful for evaluation. Finding F5 emphasizes the necessity of evaluating generalization across units, while our stratification process does aim for distributional parity, suggesting further testing might clarify this concern. Moving to the MATERIAL findings, F6 points out a potential selection bias in our cohort; while this is valid, our design choice was driven by clinical reasoning to ensure comparability, which is a critical aspect of model performance. Finding F7 critiques the adequacy of permutation importance for isolating contributions of features, a notion that should be addressed with sound ablation studies as planned in the methodology. Lastly, Finding F8 raises an interesting issue regarding hyperparameter tuning that is too restrictive, suggesting a broader approach could yield valuable insights. Overall, while these critiques highlight areas for further validation and scrutiny, they largely address methodological robustness rather than identifying fundamental flaws.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 6,
+        "justification": "While administrative encounter data can be prone to misclassification, we have implemented a rigorous manual review of labels on a substantial sample that mitigates the risk of systematic biases in coding. This review ensures that label definitions are refined as needed, establishing a foundation for reliable model performance."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 6,
+        "justification": "Our temporal-stratification and patient-level stratification are specifically crafted to minimize leakage. While the concern about overlapping clinical episodes is valid, it does not account for our controls designed to restrict the models from learning shared underlying patterns between patients within the training window."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 6,
+        "justification": "The transformer accesses richer temporal data; however, the controlled tuning efforts undertaken help in ensuring that its advantage is assessed against a well-defined baseline. This benchmarking approach aims to clarify which component contributes to improvements in predictive performance."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 4,
+        "justification": "PR-AUC serves well as a primary evaluation metric due to its alignment with our operational goals, but operational recall thresholds will also be specifically calculated. Thus, this point enriches our analysis rather than undermining it."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 5,
+        "justification": "Unit-level stratification creates an adequate representation of clinical contexts. Evaluating specific calibration across units will indeed form part of future assessments, ensuring that we address the generalization concern head-on."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 5,
+        "justification": "This is a legitimate concern, yet our aims to strike balance driven by clinical comparability point towards the methodical reasoning behind cohort selection \u2014 thus it serves as a consideration rather than a fatal flaw."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The critique of permutation importance is noted. However, we're planning ablation studies as a strong follow-up to ensure clarity on the impact of temporal features, which will address the concern for isolating the effects adequately."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "While more extensive hyperparameter tuning may yield better insights, our current design maintains adequate rigor and fidelity in model performance assessment for initial explorations."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings, while raising concerns, have been sufficiently rebutted or mitigated, bringing adjusted severity below 3, thereby confirming that the methodology remains sound without the need for drastic modifications."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=5, orig_sev=6 < 7, REBUT-IMMATERIAL \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "5 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

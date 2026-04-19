@@ -1,0 +1,157 @@
+{
+  "case_id": "eval_scenario_hyp132",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The performance gain of the transformer model over the logistic regression baseline is attributable to the addition of ticket text features.",
+        "failure_mechanism": "The transformer model has far greater capacity than logistic regression; any observed improvement could stem from increased model flexibility rather than the informative value of the text. Without a baseline that matches model capacity (e.g., a transformer trained on metadata only), the experiment cannot isolate the effect of text.",
+        "evidence_test": "Train a transformer model that receives only the structured metadata features (same architecture, tuning procedure, and early\u2011stopping criteria) and compare its PR\u2011AUC to the logistic regression baseline and to the text\u2011enhanced model. If the metadata\u2011only transformer performs similarly to the text\u2011enhanced model, the gain is due to capacity; if it performs worse than the text\u2011enhanced model but better than logistic regression, text adds incremental value.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "All features (including prior customer SLA compliance rate and prior ticket count) are computed strictly using information available at ticket creation time, preventing leakage from future tickets.",
+        "failure_mechanism": "If the rolling\u2011window feature implementation mistakenly includes the current or future tickets (e.g., due to off\u2011by\u2011one errors, using a cumulative aggregate that is not recomputed per ticket, or referencing a global statistic), the model could access future information. Such leakage would inflate performance while still yielding plausible\u2011looking results because the leakage is subtle and the model would appear to learn from legitimate signals.",
+        "evidence_test": "Audit the feature generation code to verify that for each ticket the prior\u201130\u2011day ticket count and prior\u201190\u2011day SLA compliance are calculated exclusively from tickets with timestamps strictly earlier than the ticket\u2019s creation timestamp. Additionally, inject a known future\u2011only feature (e.g., a random number derived from future tickets) and confirm that the model\u2019s performance does not improve when that feature is present; a performance rise would indicate leakage.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The post\u2011hoc audit for phrases such as 'assigned to' or 'resolved' sufficiently detects any contamination of the ticket body with post\u2011creation information, guaranteeing that text features are derived solely from the initial customer description.",
+        "failure_mechanism": "Contamination can be more subtle than explicit response phrases\u2014for example, system\u2011added tags, ticket IDs, timestamps, or customer edits that do not contain those phrases. The simple phrase\u2011based audit would miss these, allowing the model to inadvertently learn from information that should not be available at prediction time (e.g., internal notes added before the first response). This would bias the estimated benefit of the text features upward.",
+        "evidence_test": "Manually inspect a random sample of ticket bodies from each split for any non\u2011customer\u2011generated content (e.g., system\u2011generated strings, HTML tags, timestamps) using a broader set of heuristics or regex patterns that capture common automation artifacts. Additionally, train a probe model to predict whether a ticket contains post\u2011creation metadata using only the text features; a significant predictive ability would indicate residual contamination.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 6\u2011month chronologically held\u2011out test set (months 31\u201136) provides a realistic estimate of future performance because the underlying relationship between features and SLA breach is stable over time.",
+        "failure_mechanism": "If the generative process driving ticket characteristics, agent behavior, or SLA policies drifts within the 6\u2011month window or between the training and test periods (e.g., due to product updates, policy changes, seasonal workload shifts), the model\u2019s performance on the test set may not reflect performance under deployment conditions that continue to evolve. The experimental design does not include any test for drift or a protocol for periodic re\u2011evaluation, so a degradation could go unnoticed.",
+        "evidence_test": "Monitor performance metrics (e.g., PR\u2011AUC) on rolling monthly hold\u2011out windows within the test period itself (e.g., months 31\u201133 vs 34\u201136) or compare the distribution of key features (ticket length, TF\u2011IDF top terms, prior compliance rates) between training and test sets using statistical tests (KS test, PSI). A significant shift would indicate that the stationarity assumption is violated.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The ticket body used for feature extraction is the original, unaltered customer\u2011submitted description available at ticket creation time.",
+        "failure_mechanism": "In some support systems, customers can edit the initial ticket description after submission (e.g., to add clarifying details). If such edits occur before the first response and are reflected in the stored ticket body, the model would be seeing information that the customer chose to provide after seeing the ticket\u2019s initial state, which may correlate with breach risk but is not available at the true prediction moment (the moment the ticket is first opened). This would cause the model to appear predictive of breach risk due to information that is actually post\u2011hoc, inflating the estimated value of the text.",
+        "evidence_test": "Examine system logs or ticket history records to determine whether the ticket body field is ever updated after creation. If updates are possible, measure the proportion of tickets with a body edit before the first response and compare pre\u2011edit and post\u2011edit text similarity (e.g., cosine similarity of TF\u2011IDF vectors). A non\u2011trivial edit rate with substantive changes would violate the assumption.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The PoC raises several serious methodological concerns, most notably the lack of a capacity\u2011controlled baseline and the risk of subtle feature leakage, which together threaten the validity of the claim that ticket text improves SLA breach prediction. Addressing these issues is essential before accepting the hypothesis.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 claims that the performance gain is due to model capacity (Transformer vs. Logistic Regression) rather than text features. While technically true that capacity differs, the design objective is specifically to test if adding text (which requires a higher-capacity model to process effectively) outperforms a structured-only approach. A transformer trained on only a few dozen structured features would be massive overkill and wouldn't represent the 'baseline' operational reality of predicting SLA breaches from metadata. The intent is to compare the 'metadata-only' paradigm against the 'text+metadata' paradigm. \n\nF2 is a general warning about off-by-one errors in rolling windows. The design explicitly states that 'All transformers... are fit on the training set only' and features are 'extracted strictly at ticket creation time.' While a code audit is always good, the methodology as described is sound; a hypothetical implementation error is not a design flaw.\n\nF3 argues that the post-hoc audit for 'assigned to' is too simple. The design intent for the audit was to detect blatant contamination. However, the critic correctly points out that system-added metadata or tags can leak. This is a material concern because text features are the primary variable being tested.\n\nF4 concerns temporal drift. The design uses a 6-month chronological hold-out specifically to 'reflect realistic deployment in a changing environment' (Section 7). Evaluating on the most recent 6 months is the standard way to estimate performance in the face of drift. Predicting *future* drift is out of scope for a PoC testing the value of a feature set.\n\nF5 concerns customer edits. This is a valid point about the data source, but in most B2B SaaS ticketing systems, the 'initial description' is a frozen field and subsequent updates are stored as separate comments/threads. Even if edits occurred, the impact on SLA breach prediction (which usually happens in the first few hours) is typically negligible compared to the initial signal. This is a minor edge case.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The objective is to compare the 'metadata-only' baseline (which is the current operational standard) against a 'text-enhanced' approach. Using a Transformer for a small set of structured metadata is not a meaningful baseline for this use case, as the goal is to justify the complexity of adding text processing. The performance gain is the primary metric of interest regardless of whether the model capacity increased to accommodate the text."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The critic is describing a potential implementation bug (off-by-one error), not a design flaw. The design explicitly specifies that features are computed 'strictly at ticket creation time.' Verifying the code implementation is a standard QA step, not a failure of the experimental methodology."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The critic is correct that simple keyword matching ('assigned to') may miss more subtle system-generated contamination (tags, timestamps) that could leak the outcome. A more robust regex-based audit or manual inspection is required to guarantee text purity."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The design already incorporates a chronological split (months 31-36) specifically to account for operational drift. While rolling window analysis is a possible extension, the current 6-month hold-out is a standard and sufficient design for a PoC to estimate deployment performance."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Customer edits to the initial ticket body are rare in the target B2B SaaS context and typically occur after the first response has already been attempted or the SLA has already been breached, making this an immaterial risk to the predictive validity of the PoC."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "While most findings were rebutted as design choices or out-of-scope implementation concerns, F3 (text contamination) was conceded as a material risk that requires a more rigorous audit before the results can be fully trusted."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=9 \u2265 7, REBUT-SCOPE \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=5, CONCEDE \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

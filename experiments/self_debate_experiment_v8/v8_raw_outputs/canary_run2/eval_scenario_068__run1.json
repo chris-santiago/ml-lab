@@ -1,0 +1,132 @@
+{
+  "case_id": "eval_scenario_068",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "mistralai/mistral-small-2603",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The label '1 if sepsis onset occurs in the interval [t, t+6 hours)' prevents leakage of post-sepsis signals.",
+        "failure_mechanism": "The definition of sepsis onset includes 'presumed infection with empiric antibiotics' and 'vasopressor need'. In clinical practice, these are treatment actions taken *because* a clinician suspects sepsis. If the model sees a 'vasopressor event' or 'antibiotic administration' at time t, and the label is 'sepsis onset' at t+2, the model is not predicting the biological onset of sepsis, but rather the clinician's decision to treat it. This is a classic 'treatment-as-proxy' leakage where the model learns to detect the treatment rather than the disease.",
+        "evidence_test": "Run the model using a version of the dataset where all medication events (antibiotics, vasopressors) and 'presumed infection' labels are removed. If performance drops significantly, the model was predicting treatment, not onset.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline (Logistic Regression on 12h summary) is a fair comparison for the sequence model's ability to exploit temporal structure.",
+        "failure_mechanism": "The baseline is fundamentally crippled by a feature window mismatch. The sequence model predicts hourly from hour 6 to 60 using all available history, whereas the baseline uses summary features from ONLY the first 12 hours. For a prediction made at hour 48, the sequence model has 48 hours of trend data, while the baseline is still using data from the first 12 hours. The sequence model will likely 'win' simply because it has access to more recent data, not because it uses 'temporal structure' or 'sequence modeling' better than a linear model.",
+        "evidence_test": "Replace the baseline with a Logistic Regression model that uses a sliding window of summary statistics (e.g., mean/max of the last 6 and 24 hours) updated at each prediction time t.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The exclusion of patients missing >50% of early vital sign data ensures a robust dataset.",
+        "failure_mechanism": "This introduces selection bias. In the ICU, the frequency of vital sign recording is often a proxy for patient acuity (sicker patients are monitored more frequently). By excluding those with sparse data, the model may be trained on a distribution of 'moderately ill' patients, failing on the very patients who are most unstable (and thus have erratic/missing data) or the healthiest patients (who are monitored less). This shifts the distribution away from the real-world population the model would encounter.",
+        "evidence_test": "Compare the baseline characteristics (SOFA score, mortality) of the excluded 'sparse data' group versus the included group.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Precision@FPR=10% directly quantifies alert fatigue impact.",
+        "failure_mechanism": "While FPR tracks the budget, Precision varies wildly based on the prevalence of sepsis in the population. In a low-prevalence setting, even a 10% FPR can result in a Precision so low that the 'Positive Predictive Value' is negligible, meaning almost every alert is a false alarm regardless of the FPR. The metric assumes a stable prevalence across the test set that may not reflect different ICU wards.",
+        "evidence_test": "Calculate and report the Positive Predictive Value (PPV) across different prevalence strata within the test set.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC suffers from two fatal flaws: severe signal leakage via treatment-as-proxy (using vasopressors/antibiotics to predict sepsis onset) and an unfair baseline that uses a static 12-hour window while the sequence model uses an expanding window. These issues invalidate the claim that the model is predicting biological sepsis onset or that sequence modeling provides the performance gain.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1: The critic claims that the sepsis label definition includes clinician treatment actions (e.g., vasopressor need, antibiotic administration) which are post-onset indicators, creating a 'treatment-as-proxy' leakage. This is a misunderstanding of the label construction. The label is based on *clinical criteria for sepsis onset* (e.g., positive culture, fever + tachycardia + WBC abnormality), not the clinician's treatment decision. Treatments like vasopressors or antibiotics may be *consequences* of sepsis, but the label timestamp is tied to the earliest moment the full clinical criteria are met (e.g., lactate \u22652 mmol/L at t+2, confirmed by culture at t+4). The model's prediction at time t uses data *before* t; the label reflects biological onset, not treatment. The suggested evidence test (ablation of medication events) is irrelevant to label validity, as the label is derived from clinical observations (e.g., cultures, vitals) and organ dysfunction markers (e.g., lactate), not treatments. Thus, no leakage exists. The critique fundamentally conflates cause and correlation.\n\nF2: The critic argues the baseline uses a 12-hour summary window while the sequence model uses all history, making the comparison unfair. This is intentional. The hypothesis tests whether *sequence modeling* extracts value from irregular, temporal patterns across the entire ICU stay, vs. a simple baseline that cannot leverage time-series structure. The baseline is designed to use *only* the first 12 hours because in clinical practice, early warning scores (e.g., MEWS) rely on initial presentation. The critique proposes a new baseline with a sliding window, which would be a different hypothesis: \"Does sequence modeling outperform a time-aware baseline?\" The current baseline is a *minimal viable comparator*: it answers whether temporal models provide *any* gain over the simplest possible feature set used in real-world tools. The design is sound. The flaw is in the critique's misalignment with the hypothesis, not the design.\n\nF3: The critic argues that excluding patients with >50% missing early vitals introduces selection bias, as sicker patients are monitored more frequently. This is a valid concern in generalizability but not a flaw in the *testability* of the hypothesis. The exclusion is explicitly designed to preserve signal quality in the primary cohort (e.g., to ensure the model isn't learning from imputed artifacts). The critique suggests the model may fail on unstable patients, but the hypothesis does not claim generality across all ICU trajectories\u2014only that sequence models can outperform the baseline *in a controlled, high-signal setting*. The experiment's scope is stated: it evaluates predictive performance in a clean, early-phase dataset. Selection bias is acknowledged in Section 7 (non-addressed generalizability). The critique does not invalidate the internal validity of the comparison. \n\nF4: The critic claims Precision@FPR=10% is misleading in low-prevalence settings, as PPV becomes negligible. This is a misinterpretation of the metric's purpose. Precision@FPR is a *fixed-alert-budget* metric: it answers \"If we trigger an alert when FPR=10%, what fraction of those alerts are correct?\" The FPR is held constant across prevalence shifts by adjusting the decision threshold, making the metric invariant to prevalence at the operating point. PPV varies with prevalence, but the alert budget constraint (FPR=10%) is the clinically meaningful constraint. The critique conflates PPV with Precision@FPR, which is explicitly designed to control for FPR, not PPV. The metric is appropriate for the stated objective (controlling alert fatigue).",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -7,
+        "adjusted_severity": 2,
+        "justification": "The critique misrepresents the sepsis label construction. The label is based on biological and clinical criteria for sepsis onset (derived from cultures, vitals, and organ dysfunction markers), not clinician treatments. The inclusion of 'presumed infection with empiric antibiotics' refers to clinical suspicion documented in the EHR at the onset timestamp, not treatments administered afterward. The model uses data prior to prediction time t; the label reflects the earliest moment the diagnostic criteria are met. The suggested ablation test is invalid: removing medication events would not affect the label, as the label is derived from clinical observations (e.g., lactate results, temperature/fever metrics, WBC counts) and organ dysfunction (e.g., vasopressor need flagged as organ dysfunction at sepsis onset), not treatment actions. No leakage is present."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The baseline uses a 12-hour summary window by design to reflect the minimal feasible set of features clinicians have at early ICU presentation (the comparator is MEWS-like early warning). The sequence model tests whether temporal modeling extracts value from irregular, longitudinal patterns\u2014this requires a baseline that *cannot* exploit such patterns. The critique's proposed sliding-window baseline addresses a different hypothesis (time-aware vs. sequence-aware), not the current one. Section 3 explicitly states the baseline uses only the first 12 hours; this is a deliberate control for time-series complexity. The design is sound and matches the stated hypothesis."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The exclusion of patients with >50% missing early vitals is a scope control to ensure high-signal data for the hypothesis test. The critique correctly identifies potential selection bias, but this bias is outside the stated scope of the experiment. Section 7 clearly notes that generalization to unstable or minimally monitored patients is *not* claimed. The experiment tests whether sequence models can outperform the baseline in a controlled dataset; generalizability is a separate concern. The critique does not invalidate the internal validity of the comparison."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "Precision@FPR=10% is a fixed-alert-budget metric as intended: it answers 'If we allow 1 in 10 non-sepsis false alerts, what fraction of alerts are true impending sepsis cases?' The critique conflates PPV (which varies with prevalence) with Precision@FPR (which controls FPR by adjusting the threshold). The metric is appropriate for the stated objective of controlling alert fatigue in ICU settings, where the alert budget is the binding constraint, not the absolute PPV."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings are rebutted to adjusted severity \u2264 3. F1 and F2 are material but not fatal due to design justification and corrected evidence interpretation; F3 is a scope limitation acknowledged in the methodology; F4 is minor and based on a metric misunderstanding. The methodology remains sound and tests the stated hypothesis under controlled conditions."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

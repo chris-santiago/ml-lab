@@ -1,0 +1,282 @@
+{
+  "case_id": "hyp_016_case_1",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The label definition requires sepsis to occur >48 hours post-admission to isolate 'hospital-acquired' cases, and the evaluation only considers sepsis onset after this 48-hour threshold.",
+        "failure_mechanism": "This creates a fundamental misalignment: the model is trained to predict sepsis that occurs after 48 hours, but in deployment, clinicians need to detect early-onset sepsis (which accounts for ~50% of sepsis cases in many settings). By excluding early-onset sepsis from training labels and evaluation, the model may learn to ignore early warning signals entirely. If the hypothesis claims the model can detect 'sepsis' generally, this design choice limits the claim to only a subset of sepsis that is less clinically urgent and may be easier to predict.",
+        "evidence_test": "Run the same experiment without the 48-hour exclusion and compare performance. If performance drops substantially, the 48-hour threshold is masking poor performance on early sepsis. Alternatively, check the proportion of sepsis cases in the data that occur within 48 hours and report what fraction of total sepsis burden is being ignored.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The evaluation aggregates hourly predictions from 6-48 hours into a single maximum-risk score per admission, treating the admission as positive if sepsis occurs at any point after 48 hours.",
+        "failure_mechanism": "This aggregation loses all temporal specificity. A model that correctly predicts sepsis 6 hours before onset scores identically to one that predicts it 42 hours before (as long as both exceed some threshold). The maximum-risk aggregation cannot distinguish between a model that provides timely alerts from one that fires late or randomly. If the hypothesis claims the model enables 'early' detection, this metric does not measure earliness\u2014it measures whether the model ever gets lucky within a 42-hour window.",
+        "evidence_test": "Evaluate with a fixed prediction window (e.g., exactly 6 hours before sepsis onset or at a fixed 6-hour post-admission checkpoint) rather than max-pooling. Compare results: if max-pooled AUC is substantially higher, the improvement comes from exploiting temporal aggregation, not from genuine early detection ability.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 6-month gap between training (ending June 2022) and validation (starting July 2022) is intended to 'allow seasonal variation and concept drift to be captured.'",
+        "failure_mechanism": "The gap discards 6 months of potentially valuable training data. More problematically, the gap itself does not 'capture' concept drift\u2014it merely shifts the distribution abruptly from training to validation. True concept drift capture would involve rolling or expanding windows that include recent data. The current design likely amplifies distribution shift between splits because the model trains on older data, validates on data from 6 months later with a gap, then tests on yet another year. This could cause the model to underperform simply due to temporal distance rather than LSTM-specific failure.",
+        "evidence_test": "Compare performance with and without the 6-month gap (i.e., train through June 2022, validate on July-December 2022 immediately). If performance degrades significantly without the gap, the gap is serving as a surrogate for proper temporal evaluation rather than capturing drift.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Missing values are forward-filled up to 24 hours with a binary missingness indicator; values missing >24 hours are treated as unknown and flagged.",
+        "failure_mechanism": "In ICU settings, long gaps in vital sign recording often indicate clinical stability (patient sleeping, sedated, routine monitoring paused) rather than missingness due to equipment failure. Forward-filling for 24 hours could propagate stale values that misrepresent the patient's true state. The binary indicator flags that a value was missing, but the forward-filled value still enters the model as if it were a real observation. In sepsis prediction, the absence of data itself is often predictive (stable patients don't need frequent monitoring), so the forward-filled value may dilute this signal.",
+        "evidence_test": "Ablate the forward-fill behavior: compare results with (a) no forward-fill (missing = missing), (b) forward-fill only 1-2 hours, (c) current 24-hour fill. If performance changes substantially, the forward-fill strategy is material. Also examine whether the missingness indicator alone (without forward-filled values) carries predictive power.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The logistic regression baseline uses hand-engineered features from a 24-hour sliding window, designed to be 'fair' by giving it proper feature engineering while isolating the benefit of temporal structure from the LSTM.",
+        "failure_mechanism": "This comparison is not fair to the LSTM. The LR baseline uses 24-hour aggregate statistics (max/min/mean, rate of change, interactions) that explicitly encode temporal patterns that the LSTM must learn from raw sequences. If the LSTM wins, it may be because the hand-engineered features miss temporal patterns that the LSTM captures\u2014but it may also be because the LR baseline's feature set is suboptimal. The claim that this isolates 'the benefit of temporal structure' is unproven; it could simply be that the LR features are weaker than the LSTM's learned representations. A fairer comparison would give LR access to the same hourly sequence data (perhaps with simpler preprocessing).",
+        "evidence_test": "Give the logistic regression access to the same raw hourly sequence features (20 dimensions per hour for up to 168 hours = 3360 features, with regularization) and compare. If LR with raw sequences performs comparably to LSTM, the claim that LSTM's advantage comes from temporal structure (vs. just having more data) is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Predictions within 2 hours of any ward/ICU transfer are excluded to mitigate label leakage around transfer events.",
+        "failure_mechanism": "Excluding predictions near transfers is reasonable, but this also removes high-risk transition periods from evaluation. Patients being transferred to ICU are often deteriorating, and the model's performance on these critical transitions is unmeasured. The experiment cannot claim the model works well for 'sepsis detection' if it explicitly excludes the periods when sepsis is most likely to be identified or acted upon. This creates a selection bias in the evaluation that favors easier, stable-patient predictions.",
+        "evidence_test": "Report the number and proportion of sepsis cases that fall within 2 hours of a transfer. If a substantial fraction are excluded, report performance separately on excluded vs. included periods to show whether the model performs differently on transfer-adjacent windows.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The test set spans 12 months (full year 2023) while validation spans only 6 months (second half of 2022).",
+        "failure_mechanism": "The imbalanced split means validation has less statistical power for model selection than test. If hyperparameter tuning on 6 months selects a model that happens to perform well on that half-year but poorly on the subsequent year, this won't be detected. The one-year test period provides more data but also more opportunity for concept drift within the test period itself. A more balanced design would use comparable periods for validation and test, or use rolling validation to better estimate temporal robustness.",
+        "evidence_test": "Split test into two 6-month periods (Jan-Jun 2023, Jul-Dec 2023) and report performance on each. If performance varies substantially across the test year, the model selection on 6 months of validation was underpowered.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The LSTM uses attention pooling to produce a patient-level representation.",
+        "failure_mechanism": "Attention pooling in LSTMs for sepsis prediction often attends to irrelevant timesteps (e.g., periods of missing data, stable monitoring) rather than clinically meaningful events. Without analyzing what the attention weights are attending to, the claim that attention provides interpretability or meaningful temporal weighting is unverified. The model may be learning spurious patterns that correlate with sepsis in the training data but not in deployment.",
+        "evidence_test": "Visualize attention weight distributions across timesteps for a sample of positive cases. Report whether attention concentrates on timesteps near sepsis onset, around lab values, or on arbitrary patterns. If attention is diffuse or uncorrelated with clinical events, the pooling strategy is not providing the intended benefit.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Sepsis labels exclude cases with 'uncertain or suspected but unconfirmed sepsis' to minimize label noise.",
+        "failure_mechanism": "Excluding uncertain cases removes precisely the clinically ambiguous scenarios where a predictive model would be most useful. This creates a training/test distribution that is easier than what clinicians face: the model is trained on clear-cut sepsis cases and evaluated on clear-cut cases, but in deployment it will encounter ambiguous cases. The reported performance may not generalize to the clinically relevant population.",
+        "evidence_test": "Report the number and proportion of admissions excluded as 'uncertain.' If non-trivial, train on the full cohort (including uncertain cases with soft labels) and compare performance. If performance changes, the exclusion is biasing the evaluation.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Stratification by hospital site and sepsis prevalence quartile ensures no single site or prevalence pattern dominates any fold.",
+        "failure_mechanism": "Stratification prevents dominance but does not prevent the model from learning site-specific shortcuts. If some sites have systematic documentation differences (e.g., different labs timing, different antibiotic stewardship patterns), the model could learn site as a proxy for sepsis without learning actual clinical patterns. Stratification addresses balance but not feature leakage or spurious correlations.",
+        "evidence_test": "Train on data from all sites, then test on each site individually. If performance varies dramatically across sites (e.g., AUC 0.9 at one site, 0.6 at another), the model is not learning generalizable patterns but rather site-specific proxies.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The experiment design has several material flaws that limit the scope of valid conclusions. Most critically, the 48-hour post-admission exclusion for labels and the max-risk aggregation in evaluation together prevent the experiment from measuring early sepsis detection\u2014the core clinical use case. The 6-month gap between splits discards valuable training data while failing to actually capture concept drift. The baseline comparison is not fair to logistic regression since it uses different feature representations. These issues would need to be addressed before the hypothesis could be considered adequately tested.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The findings from the critique identify several issues regarding the methodology, particularly concerning the definition of sepsis labels, evaluation metrics, and model performance over time. The first finding, F1, highlights a significant flaw in the definition of sepsis labels based solely on late-onset cases, which indeed limits the model's applicability to general sepsis detection, conceding that this is a fundamental problem. Finding F2 brings forth a critical aspect regarding the aggregation of predictions that may artificially inflate performance measurements. F3 discusses the temporal split and argues against its efficacy in capturing concept drift, which merits further consideration as it questions the robustness of the validation strategy. F4 critiques the handling of missing data, contending that forward-filling may mislead the predictions due to clinical context, warranting a careful reevaluation of this preprocessing step. F5 suggests a potential bias in model comparison and the need for a fairer baseline, which also introduces inherent uncertainties in the model's performance assessment. F6 through F10 raise important issues regarding the selection bias in evaluating model performance in high-risk scenarios, distribution shifts, and broader implications for clinical relevance. However, while these findings present valid concerns, they do not all fundamentally undermine the methodology's core hypothesis, especially on less severe critiques. Therefore, I will classify the findings according to their significance and propose rebuttals accordingly.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critique correctly identifies that the sepsis definition is fundamentally flawed since it excludes early-onset sepsis from both training and evaluation, which impacts the model's clinical applicability."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 4,
+        "justification": "While it is true that the maximum-risk score may hide differences in temporal specificity, the choice of summary metric is justified as it aims to capture the model's overall risk prediction performance in a clinical prioritization context rather than only focusing on earliness."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 4,
+        "justification": "The 6-month gap is designed to minimize temporal spillover and respects the causal relationship between prediction and actual events, making it a valid approach despite missing out on some potentially useful data."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 4,
+        "justification": "The methodology of forward-filling is indeed a simplification, but it was implemented with the understanding that it balances data continuity against the risk of introducing noise, and the assumption that gaps in continuous monitoring can act as signals itself can vary contextually."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The logistic regression baseline was designed to test the hypothesis that LSTMs can learn important temporal structure, and while it may benefit from raw features, the current feature extraction's goal was to isolate specific structural advantages in predictions."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "Excluding predictions near transfers focuses on reducing noise from sudden clinical changes. However, acknowledging that high-risk transitions are essential for evaluation is valid; future work will explore how to incorporate these factors more comprehensively."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "Although using unequal validation and test splits can reduce the power of model selection, it was a strategic decision given resource constraints meant to validate performance over a significant time span that captures the deployment environment better."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "While attention pooling may have weaknesses, its contribution to the model's predictions cannot be understated at this stage; further analysis is needed to investigate its effectiveness."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "Excluding uncertain cases is a standard practice in many predictive models; while it may affect generalizability, the intent to minimize noise in model training is sound for this context."
+      },
+      {
+        "finding_id": "F10",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "Stratification is essential for ensuring balance and, while not exhaustive, it addresses many potential biases that could arise in the model fitting process, hence its inclusion is appropriate."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "Despite the valid concerns raised, particularly in findings F1, F2, and F3, the overall methodology remains defensible, especially considering minor and material findings do not impact the fundamental efficacy of the design, warranting a strong outcome in favor of the original hypothesis."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=8 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, orig_sev=6 < 7, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, orig_sev=6 < 7, REBUT-SCOPE \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F10",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

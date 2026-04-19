@@ -30,17 +30,25 @@ The critic has been instructed to surface all plausible concerns, including mino
 
 For each advancing finding (FATAL, MATERIAL, or MINOR), select exactly one rebuttal type and record the severity adjustment:
 
-| Rebuttal Type         | When to Use                                                                              | Severity Adjustment |
-|-----------------------|------------------------------------------------------------------------------------------|---------------------|
-| `CONCEDE`             | Finding is correct and significant — the flaw is real and material                       | 0 (accepted at face value) |
-| `REBUT-DESIGN`        | Flaw is real but the design choice was deliberate and justified for this use case         | −3 to −5 |
-| `REBUT-SCOPE`         | Finding is valid in a different context but not within the stated experiment scope        | −4 to −6 |
-| `REBUT-EVIDENCE`      | Critique makes an empirical claim not supported by the PoC output                        | −5 to −7 |
-| `REBUT-IMMATERIAL`    | Finding is real but below significance for the experiment's conclusions                  | −6 to −8 |
-| `DEFER`               | Both parties agree an empirical test is needed — question genuinely cannot be resolved by argument | 0 (unresolved) |
-| `EXONERATE`           | Applied at case level: ALL advancing findings have adjusted severity ≤ 3 after rebuttal  | Resets effective severity to 0 on all findings |
+| Rebuttal Type         | When to Use                                                                              | Severity Adjustment | Applicable To |
+|-----------------------|------------------------------------------------------------------------------------------|---------------------|---------------|
+| `CONCEDE`             | Finding is correct and significant — the flaw is real and material                       | 0 (accepted at face value) | Any severity |
+| `REBUT-DESIGN`        | Flaw is real but the design choice was deliberate and justified for this use case         | −3 to −5 | Any severity |
+| `REBUT-SCOPE`         | Finding is valid in a different context but not within the stated experiment scope        | −3 to −5 | Any severity |
+| `REBUT-EVIDENCE`      | Critique makes an empirical claim not supported by the PoC output                        | −4 to −6 | Any severity |
+| `REBUT-IMMATERIAL`    | Finding is real but below significance for the experiment's conclusions                  | −1 to −2 | **MINOR only (original severity 1–3)** |
+| `DEFER`               | Both parties agree an empirical test is needed — question genuinely cannot be resolved by argument | 0 (unresolved) | Any severity |
+| `EXONERATE`           | Applied at case level: ALL advancing findings have adjusted severity ≤ 3 after rebuttal  | Resets effective severity to 0 on all findings | Case level |
 
 **Adjusted severity floor:** Adjusted score cannot go below 0.
+
+**REBUT-IMMATERIAL restriction:** This type is only valid for MINOR findings (original severity 1–3). Do not apply it to MATERIAL or FATAL findings. If you believe a MATERIAL or FATAL finding is below significance despite its severity label, explain *why* using `REBUT-DESIGN` or `REBUT-SCOPE` with a cited design control — that is a substantive argument, not an immateriality claim. Applying REBUT-IMMATERIAL to a high-severity finding is a calibration error.
+
+**Adjustment proportionality:** Adjustments should reflect how completely the rebuttal resolves the finding. A FATAL finding (sev 7–10) with a complete, evidence-backed rebuttal warrants −4 to −5. A partial rebuttal that addresses only part of the concern warrants −2 to −3. Reserve maximum adjustments for cases where the critic's factual premise is entirely wrong (`REBUT-EVIDENCE`) or the critique categorically misidentifies the experiment scope (`REBUT-SCOPE`). FATAL findings that are genuinely rebutted but not fully resolved should land at adjusted severity 4–6 — the scorer will treat these as requiring empirical verification, not as design failures.
+
+**Before selecting CONCEDE — scan the methodology first:** Before conceding a FATAL or MATERIAL finding, read the methodology sections (look for Confound Controls, Validation, Scope, Ablations, or similar). If the design explicitly addresses the concern with a named control, analysis, or stated rationale, use `REBUT-DESIGN` with a direct citation instead.
+
+**When CONCEDE is appropriate:** If you scan the methodology and find NO explicit control or design rationale addressing a FATAL or MATERIAL finding, AND the concern would materially affect the primary evaluation metric if true, `CONCEDE` is the right call. Do not construct a REBUT-DESIGN justification from vague or tangentially related sections — a speculative defense is a calibration error. However, if the concern is real but whether it matters is genuinely uncertain, `DEFER` is the correct choice over `CONCEDE`. Reserve `CONCEDE` for flaws that are undeniable regardless of context.
 
 **Before selecting DEFER:** Scan the methodology sections of the task_prompt (look for sections titled Confound Controls, Validation, Scope, or similar). If any section explicitly addresses the concern raised — with a named control, analysis, or stated design rationale — use `REBUT-DESIGN` with a direct section citation instead. `DEFER` is only appropriate when no design control exists and the question is genuinely unresolvable by argument. A concern that the design has already anticipated is not a deferral — it is a rebuttal waiting to be cited.
 

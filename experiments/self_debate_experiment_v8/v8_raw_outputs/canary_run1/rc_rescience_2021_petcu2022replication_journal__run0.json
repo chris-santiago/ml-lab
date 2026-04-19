@@ -1,0 +1,167 @@
+{
+  "case_id": "rc_rescience_2021_petcu2022replication_journal",
+  "stratum": "mixed",
+  "flaw_category": "fixable_flaw",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The evaluation metrics (probability of selecting the optimal candidate for Secretary and average value for Prophet) properly measure the intended deployment objectives alongside fairness constraints.",
+        "failure_mechanism": "The paper's fairness constraint requires that selection probability matches the prior probability of a candidate belonging to a group. However, the performance metrics do not explicitly account for the welfare trade-offs across groups nor verify that meeting the fairness constraint does not degrade overall utility when accounting for group-specific utilities. The chosen metrics (probability of selecting the optimal candidate or average value of selected candidate) may mask distributive harm across groups. For example, a model might achieve the required selection probability per group while heavily under-selecting the best candidates within low-prior groups when combined with unbalanced underlying candidate pools. The fairness constraint is structural but not tied to a utility-efficiency tradeoff metric.",
+        "evidence_test": "Run the proposed algorithms and report group-wise utility metrics (e.g., average selected value per group, regret per group, or selection frequency among top-k candidates per group across multiple replications) to verify that meeting the fairness constraint does not systematically exclude high-quality candidates from any group. Also compare against a utilitarian baseline that maximizes total value to quantify trade-offs.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Synthetic and real-data experiments cover representative distribution shifts such that fairness and utility outcomes generalize to production-like conditions where prior group probabilities differ from experimental settings.",
+        "failure_mechanism": "Fairness is defined relative to the prior p \u2014 the probability that the best candidate comes from a group. If p is fixed during training but varies at deployment (e.g., due to demographic shifts or seasonal effects), the proposed algorithm may violate its fairness guarantee or degrade performance without detection. The paper\u2019s experiments do not demonstrate robustness to shifts in p \u2014 only to changes in parameter settings such as threshold rules. The algorithm\u2019s rejection thresholds are calibrated based on the assumed prior p; deviation invalidates both fairness and utility guarantees.",
+        "evidence_test": "Evaluate algorithms under controlled prior shift scenarios: simulate multiple environments where the group priors for the best candidate diverge from training priors by \u00b120%, \u00b150%, and evaluate fairness violation and utility drop. Report worst-case shifts. Alternatively, perform sensitivity analysis in synthetic experiments by sweeping p directly to find where fairness guarantees break.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The fairness guarantee \u2014 that the selection probability of each group matches the prior p \u2014 is empirically attained across all experimental settings.",
+        "failure_mechanism": "The paper provides pseudocode and theoretical guarantees but does not present empirical verification that the fairness constraint is satisfied in implemented code across all test cases. Implementation issues (e.g., incorrect use of priors during decision thresholds, off-by-one errors in threshold indexing, or incorrect tie-breaking) could silently violate fairness in practice even if theory holds. Without empirical audit of observed selection probabilities vs. target p across replications and seeds, the claim remains theoretical, not empirical.",
+        "evidence_test": "For each algorithm and dataset, compute the empirical selection frequency per group across 1000 independent runs and compare to the target prior p with confidence intervals. Report violations and analyze failure modes. Include sensitivity to seed and random number generator implementation details.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The proposed algorithms are compared against strong or state-of-the-art baselines in both fairness and utility for the Multi-Color Secretary and Prophet problems.",
+        "failure_mechanism": "The paper does not enumerate or justify the chosen baselines. In particular, for the Secretary problem, standard baselines include the 1/e rule and its variants, but the paper does not state whether these are included or enhanced versions. For Prophet, state-of-the-art may include threshold policies optimized for specific value distributions. Without naming and motivating the baselines used, the reader cannot assess whether the improvement is meaningful or just reflects a weak comparison set.",
+        "evidence_test": "Expand the \u2018Related Work\u2019 or \u2018Experiments\u2019 sections to explicitly list all baseline algorithms used (e.g., classic Secretary rules, optimal threshold policies for Prophet) and justify their relevance. Add head-to-head on a common objective function.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The use of a mix of synthetic and real-data experiments improves external validity.",
+        "failure_mechanism": "The \u2018real-data\u2019 component\u2019s provenance and inherent biases are not discussed. If real data is drawn from a domain where the prior p does not match deployment (e.g., historical hiring data with underrepresentation), the evaluation may not reflect true generalization despite the presence of real data.",
+        "evidence_test": "Document the source, time span, and demographic breakdown of any real dataset. Show that the observed distribution of group priors matches or is representative of deployment priors.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "N1",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The implementation language is C++.",
+        "failure_mechanism": "C++ is an unconventional choice for ML fairness experimentation, which often relies on Python and NumPy for reproducibility and ecosystem integration.",
+        "evidence_test": "",
+        "flaw_category": null
+      }
+    ],
+    "summary": "The evaluation risks conflating fairness guarantees with utilitarian objectives, fails to test robustness to shifts in the defining prior p, and does not empirically verify the fairness constraint in implemented code. These are FATAL or MATERIAL flaws that compromise the methodology\u2019s ability to substantiate the hypothesis.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 claims the metrics mask distributive harm. However, the core hypothesis of this PoC is the achievement of a specific structural fairness definition (selection probability = prior probability of the best candidate). The claim that it should also track group-wise utility is a request for a different fairness definition (e.g., equity of outcome or utility), which is outside the scope of the stated hypothesis. The chosen metrics (optimal selection probability and average value) are the standard utility measures for these classic problems.\n\nF2 argues that distribution shifts in the prior 'p' are not tested. In the context of the Multi-Color Secretary/Prophet problems, 'p' is typically a parameter of the problem instance/distribution, not a learned weight. Testing robustness to 'p' is essentially testing the algorithm across different problem instances. The methodology already states they use 'multiple parameter settings', which implies varying p. A specific 'shift' test is a production concern, not a proof-of-concept validity concern regarding the algorithm's logic.\n\nF3 claims a lack of empirical verification of the fairness constraint. This is a valid point for a final paper, but for a PoC, the focus is often on the utility-fairness trade-off assuming the theoretical guarantee is implemented. However, since the claim is that the algorithm 'is fair', empirical confirmation that the selection probability actually matches p is a basic requirement for the experiment to be considered successful. This is a material gap in the reporting of results.\n\nF4 complains about the lack of explicit baseline justification. The methodology mentions comparing against 'baseline secretary methods' and 'baseline prophet methods'. While the critic wants a detailed list, the primary goal is to show the proposed fair algorithm doesn't collapse in utility compared to the standard (unfair) versions of these classic problems. This is a matter of documentation/reporting, not a flaw in the experimental design itself.\n\nF5 is a minor point about real-data provenance. Given that this is a PoC focused on the algorithmic property of fairness relative to a prior, the specific source of the real data is less critical than the fact that it provides a non-synthetic distribution to test the algorithm's robustness.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The critic is suggesting a different fairness objective (group-wise utility equity) than the one explicitly defined and tested in the hypothesis (selection probability matching prior p). Measuring distributive harm across groups is a valid research direction but is outside the scope of validating this specific structural fairness guarantee."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The prior 'p' is a parameter of the problem definition. The methodology explicitly states that experiments were run under 'multiple parameter settings'. Testing the algorithm across various values of p is equivalent to testing different distributions; 'distribution shift' in this context is handled by the parametric sweep already mentioned in the methodology."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The critic is correct that while theoretical guarantees exist, the PoC must empirically demonstrate that the implemented code actually achieves the target selection probabilities. Without these results, we cannot verify the 'fairness' part of the fairness-utility trade-off."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The absence of a detailed bibliography of baselines in the summary is a documentation issue. As long as the proposed methods are compared against the standard versions of the Secretary/Prophet problems, the core hypothesis regarding the cost of fairness is testable."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "Provenance of real data is a secondary concern for a PoC focused on the mathematical properties of a new algorithm. The use of real data is intended to provide a sanity check against synthetic distributions, not to serve as a demographic audit."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "While most findings were successfully rebutted as being out of scope or immaterial, F3 identifies a genuine gap: the empirical verification of the fairness constraint itself. This requires an empirical audit of the results, justifying a deferral to an empirical test."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 6,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "adj_sev=6, CONCEDE \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

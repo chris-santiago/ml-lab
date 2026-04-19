@@ -1,0 +1,132 @@
+{
+  "case_id": "eval_scenario_703",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Free-text is screened to exclude outcome-predictive language (e.g., 'poor prognosis', 'comfort care'), preventing leakage.",
+        "failure_mechanism": "Manual or keyword-based screening of 'outcome-predictive language' is insufficient for high-dimensional embeddings (BioBERT/SciBERT). Clinicians often document 'death markers' implicitly through changes in tone, the transition to palliative care language, or specific nursing documentation patterns that occur shortly before death but after the 72h window starts. If the 72h window overlaps with the period where the clinical decision to pivot to comfort care is made, the embeddings will capture this signal, which is a proxy for the outcome, not a predictor of it.",
+        "evidence_test": "Run the model using only the note embeddings (no structured data) and check for an unnaturally high C-index. Additionally, perform an ablation study where notes are truncated to the first 24 hours vs. 72 hours; a sharp increase in performance in the final 48 hours strongly suggests leakage of 'end-of-life' documentation rather than early predictive signals.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Note embeddings are pooled (e.g., mean pooling across all notes) to create a single representation.",
+        "failure_mechanism": "Mean pooling washes out critical, sparse temporal signals. In an ICU setting, a single 'critical' note (e.g., a sudden change in neurological status) is more predictive than the average of ten routine nursing notes. By averaging, the high-signal vector is diluted by the high-volume noise of routine charting, potentially leading to an underestimation of the value of notes or a model that only picks up on 'general' patient state rather than 'acute' changes.",
+        "evidence_test": "Compare mean pooling against max-pooling or a simple attention mechanism (or a GRU/LSTM over the sequence of note embeddings). If max-pooling or sequential modeling significantly outperforms mean pooling, the current PoC's representation is flawed.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The secondary baseline (structured data + note summary statistics) tests whether performance gain is driven by documentation volume.",
+        "failure_mechanism": "The secondary baseline controls for volume (count/length) but not for 'documentation intensity' or 'clinical focus'. A patient with 20 short, generic notes is different from a patient with 20 detailed, multidisciplinary notes. The current baseline cannot distinguish between 'more notes = sicker patient' and 'specific semantic content = sicker patient' because 'intensity' is a latent variable that correlates with both volume and semantics.",
+        "evidence_test": "Include a baseline that uses a 'bag-of-words' or TF-IDF approach with a very limited vocabulary of non-specific clinical terms. If this performs similarly to the BioBERT model, the gain is likely due to documentation patterns (intensity) rather than deep semantic understanding.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Informatively missing laboratory values... are managed via forward-fill within 72 hours and a missing-indicator encoding.",
+        "failure_mechanism": "Forward-filling in the ICU can create artificial stability. If a lab was ordered once at hour 1 and never again because the patient stabilized (or plummeted), filling that value to hour 72 misrepresents the clinical trajectory. While the missing indicator helps, the model may over-rely on the stale value.",
+        "evidence_test": "Compare performance using forward-fill versus a model that treats missing values as a distinct category or uses a decay function for the value of the last observation over time.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC is well-structured regarding temporal splitting and evaluation metrics, but it contains a high risk of signal leakage via implicit clinical documentation of prognosis within the 72-hour window. Additionally, the use of mean pooling for embeddings likely suppresses the very acute signals the hypothesis aims to capture.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Analyzing each finding against the stated design intent and scope of the PoC.\n\nF1 (FATAL, severity 8): The critic raises a legitimate concern about embedding-based leakage of end-of-life signals. However, the PoC explicitly limits its claims in Section 8: 'It does not establish causality (notes do not cause mortality)' and frames the experiment as testing 'whether note embeddings and clinical text... discriminate 30-day mortality better than structured data alone.' The PoC is not claiming clinical deployability or causal inference. The critic's proposed tests (note-only model, 24h vs 72h ablation) would strengthen validation but are beyond the PoC's stated scope of establishing marginal predictive value. This is a valid concern for clinical deployment but not for the PoC's limited purpose.\n\nF2 (MATERIAL, severity 6): Mean pooling is a deliberate design choice stated in Section 3. For a PoC establishing whether note embeddings provide marginal value at all, mean pooling is a standard baseline. The PoC is not claiming optimal architecture - it's testing the hypothesis that 'notes add value,' not that mean pooling is the best pooling strategy. Attention mechanisms or sequential models would be future work, not required for the PoC's validity.\n\nF3 (MATERIAL, severity 4): The PoC addresses documentation intensity concerns in Section 7: 'We report their coefficients and also stratify test performance by note volume quartile.' The secondary baseline tests whether gains are driven by documentation volume (stated goal). The critic's suggestion for bag-of-words baselines is appropriate for a full study but beyond the PoC scope of establishing marginal value. Section 7 also notes that 'significant performance variation' will be reported, addressing intensity concerns through stratification.\n\nF4 (MINOR, severity 2): Forward-fill with missing indicators is explicitly stated in Section 3 and acknowledged as a limitation in Section 7. This is standard EHR preprocessing for PoC. The PoC acknowledges the limitation and proposes examining coefficients on missingness indicators. This is an accepted simplification that doesn't threaten the PoC's conclusions about marginal note value.\n\nOverall: All findings can be rebutted with adjustments that bring severity to \u2264 3. F1 is scoped beyond the PoC's stated purpose. F2 is a deliberate baseline choice. F3 is addressed through stratification. F4 is standard PoC practice with acknowledged limitation. No finding crosses the design-change threshold for this PoC's stated goals.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The PoC's stated scope in Section 8 explicitly limits claims: 'It does not establish causality (notes do not cause mortality)' and only tests whether notes add marginal predictive value over structured data. The critic's concern about outcome-adjacent signal leakage is valid for clinical deployment but exceeds the PoC's stated purpose. The experiment remains valid for its limited goal of demonstrating marginal note value."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "Mean pooling is a deliberate, standard design choice for establishing whether embeddings provide any marginal value at all. Section 3 documents this approach as a baseline to test the note-value hypothesis. Attention/sequential models are future work, not required for the PoC's validity in testing the core hypothesis."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The PoC's stated goal in Section 4 is to 'isolate the marginal value of notes,' not fully characterize documentation effects. Section 7 addresses intensity through coefficient analysis and quartile stratification. Bag-of-words baselines would strengthen a full study but are beyond this PoC's scope of demonstrating marginal value."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "Forward-fill with missing indicators is standard PoC practice, explicitly documented in Section 3 and acknowledged in Section 7. This limitation does not threaten the PoC's conclusions about marginal note value and is within acceptable simplification for proof-of-concept work."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings have been rebutted to adjusted severity \u2264 3 (EXONERATE condition satisfied). The methodology is sound for its stated PoC purpose of testing whether note embeddings provide marginal predictive value over structured data."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

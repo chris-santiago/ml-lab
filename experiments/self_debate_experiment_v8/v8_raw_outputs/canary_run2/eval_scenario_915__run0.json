@@ -1,0 +1,107 @@
+{
+  "case_id": "eval_scenario_915",
+  "stratum": "mixed",
+  "flaw_category": "context_dependent",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The model will be effective in an operational SOC queue reviewing ranked alerts, as the training data reflects the 'data generating process the SOC actually faces'.",
+        "failure_mechanism": "The data curation process explicitly excludes 'host-days near unresolved investigations'. In production, the SOC queue is dominated by active, unresolved investigations. By filtering these out using final resolution status (which is unknown at prediction time), the training distribution excludes the 'Active Suspicion' class. The model learns to distinguish 'Resolved Malicious' vs 'Resolved Benign', not 'Active Malicious' vs 'Active Benign'. This is a form of future-information leakage into the training objective (target leakage via curation) that creates a fatal distribution shift.",
+        "evidence_test": "Re-evaluate the model on a hold-out set of 'Active' host-days (cases where the investigation was not resolved within the 18-month window) to measure performance on the true production distribution. Alternatively, compare the feature distributions of 'Resolved' vs 'Active' cases.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Any performance gain of the GNN over the GBDT baseline is credibly attributable to relational modeling rather than simply using richer metadata or temporal resolution.",
+        "failure_mechanism": "The GBDT baseline is built on 'host-day aggregates' (summarized features). The GNN is built on 'raw signals... as typed node and edge attributes' (sequential/temporal granularity). The GBDT loses temporal autocorrelation and sequence information that the GNN captures implicitly through graph paths. The gain may stem from the GNN's ability to model temporal sequences or raw event detail, not just relational topology.",
+        "evidence_test": "Train a GBDT baseline on a flattened event stream (one row per event) with matched time-window features, rather than host-day aggregates, and compare the performance gap against the current aggregate baseline.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "AUPRC is the appropriate primary metric because it captures concentration of positives over the full ranking under extreme class imbalance.",
+        "failure_mechanism": "While AUPRC is standard for imbalance, the stated operational constraint is 'daily review capacity' (fixed budget). A model can maximize AUPRC but push true positives to the 50th percentile of the ranking (not reviewed), while AUPRC weights them equally with top-ranked positives. AUPRC optimization may not align perfectly with maximizing utility at the fixed Top-K threshold.",
+        "evidence_test": "Analyze the correlation between AUPRC and Precision@TopK on the test set. If the model with highest AUPRC does not have the highest Precision@TopK, the primary metric is misaligned with the deployment objective.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC contains a FATAL methodological flaw where retrospective data curation (excluding unresolved investigations) creates a fatal distribution shift between training and production environments. Additionally, the comparison baseline is confounded by feature granularity differences, weakening the claim that relational inductive bias is the driver of performance gains.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Analyzing F1: The critic claims that excluding 'host-days near unresolved investigations' creates target leakage by training on 'Resolved' cases while the SOC queue contains 'Active' cases. However, this concern conflates the experimental evaluation with production deployment. The test set (months 16-18) applies the same exclusion rule - it evaluates forward-time generalization to unseen campaigns within the same data collection window, not deployment on open-ended active investigations. The methodology explicitly bounds the claim: 'it does not by itself prove transfer to other enterprises with different telemetry coverage or investigation practices.' This is a deliberate design choice to ensure reliable labels - training on uncertain cases would inject label noise. The critic's 'evidence_test' would require genuine future prediction on unresolved cases, which is impossible with confirmed-incident labels. This is a valid concern about scope boundaries but not a fatal flaw.\n\nAnalyzing F2: The critic correctly notes that GBDT uses aggregates while GNN uses raw signals, potentially confounding relational structure with temporal resolution. However, the methodology explicitly includes an ablation control: 'an ablation that removes graph edges while preserving node features to test whether any observed gain comes from structure rather than metadata alone.' This directly addresses the critic's concern. The stated intent is to test 'relational inductive bias' - comparing a flattened baseline against a relational model. The critic's suggested evidence test (GBDT on raw events) would test a different hypothesis about temporal resolution, not the intended comparison.\n\nAnalyzing F3: The critic correctly notes that AUPRC optimizes across all thresholds while operational constraints are typically fixed Top-K. However, the methodology explicitly reports: 'precision at top-K hosts per day... so ranking, low-alert-budget performance, and calibration are all visible.' The Top-K metric the critic wants is already part of the evaluation. This concern is already addressed by the methodology.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The exclusion of unresolved investigations is a deliberate label quality control choice, not target leakage. The test set applies the same exclusion rule - evaluating forward-time generalization within the same data collection window, not open-ended production deployment. The methodology explicitly bounds its claim: it tests generalization to unseen campaigns within the same enterprise, not deployment on active investigations. The critic's evidence_test would require ground truth on genuinely unresolved cases, which is impossible with confirmed-incident labels. This is a known scope limitation, not a fatal flaw - the experiment asks a specific question answerable with available data."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The methodology explicitly includes an ablation control that removes graph edges while preserving node features, directly testing whether gains come from structure rather than metadata. This addresses the critic's concern. The experiment's stated intent is to test 'relational inductive bias' - comparing a flattened baseline against a relational model. The critic's suggested evidence test (GBDT on raw event stream) would test a different hypothesis about temporal resolution, not the relational structure comparison this experiment targets. The design choice is deliberate and justified."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The finding is technically valid - AUPRC optimizes across all thresholds while operational constraints are fixed Top-K. However, the methodology explicitly reports 'precision at top-K hosts per day' as a secondary metric, directly addressing this concern. The experiment reports both the primary metric (AUPRC) and the operational metric (Top-K precision), so the concern is already mitigated. This does not affect the validity of the primary conclusion."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All three findings have been rebutted with appropriate adjustments. F1 (adjusted severity 5) represents a scope boundary clearly stated in the methodology - the experiment tests forward-time generalization to unseen campaigns within the same enterprise, not deployment on active investigations. F2 (adjusted severity 2) is directly addressed by the included ablation control. F3 (adjusted severity 0) is already mitigated by reporting Top-K precision. No finding remains above adjusted severity 5, and the methodology is sound for its stated scope."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

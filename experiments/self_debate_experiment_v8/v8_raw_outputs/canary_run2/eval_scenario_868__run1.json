@@ -1,0 +1,182 @@
+{
+  "case_id": "eval_scenario_868",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The baseline model (logistic regression on reputation/header features) is a sufficient representation of the 'status quo' to compare against the transformer model.",
+        "failure_mechanism": "The baseline is defined using logistic regression with hyperparameter tuning, but the status quo for enterprise email gateways (e.g., SEGs) typically involves complex, multi-stage rule engines, heuristics, and ensemble models (e.g., decision trees, SVMs, or even simpler ML models) that are not equivalent to a single logistic regression. The choice of logistic regression is a significant simplification; it may be suboptimal even for its feature set. The PoC implicitly claims that beating this logistic regression baseline is evidence of superiority over the status quo, but the status quo may already outperform this baseline, making the transformer's improvement less meaningful or even irrelevant in comparison to the actual deployed system.",
+        "evidence_test": "Train a more complex, representative baseline (e.g., a gradient boosting machine like XGBoost or LightGBM) on the same reputation/header features using the same tuning rigor and temporal split. Compare its performance to both the logistic regression baseline and the transformer. If the GBM matches or outperforms the transformer, the claimed improvement is not valid.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Using a snapshot of threat-intelligence reputation scores 'frozen at the end of the training period' for the validation and test sets prevents future data leakage and is a valid simulation of production.",
+        "failure_mechanism": "In production, a real-time system would have access to reputation scores that are updated continuously, often with a latency of minutes to hours. Freezing scores at the training period end for validation/test creates a distributional mismatch: the model is evaluated on historical data using outdated reputation information that would not be available at the time of inference in a real deployment. For the baseline, this artificially deflates its potential performance, as it cannot benefit from timely intelligence that would be available operationally. This misrepresents the comparative advantage of the transformer, which might be less affected by this time lag.",
+        "evidence_test": "Conduct a time-aware evaluation: for each email in validation/test, use the reputation score that would have been available at the email's arrival timestamp (e.g., a daily or hourly snapshot). Re-evaluate the baseline model. If its performance improves significantly relative to the frozen-score baseline, the experiment underestimates the status quo.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The primary metric, PR-AUC, is sufficient to capture the stakeholder's operational objective and is threshold-agnostic.",
+        "failure_mechanism": "PR-AUC, while informative for imbalanced data, integrates over all possible thresholds and can be dominated by regions of the curve that are operationally irrelevant. In a security setting, the cost of a false positive (blocking a legitimate email) is extremely high, so operators typically work at very low false positive rates (e.g., <0.1%). PR-AUC does not emphasize this critical region. A model could achieve a high PR-AUC by performing well at high recall (where FPR is also high) but fail miserably at the low-FPR region where the system must actually operate, leading to a metric that is misaligned with the deployment objective.",
+        "evidence_test": "Plot the precision-recall curve and overlay the operational constraint (e.g., a vertical line at recall corresponding to the maximum tolerable FPR, say 0.1%). Compute the area under the PR curve only up to that recall threshold (partial PR-AUC). Compare models on this partial metric. If the ranking changes, PR-AUC is an insufficient summary.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Deduplicating emails within the training set and tracking near-duplicates in the test set is sufficient to prevent the transformer from exploiting memorization of campaign-specific phrasing.",
+        "failure_mechanism": "The deduplication method is unspecified. Simple exact-deduplication on raw text will miss semantically similar emails with varied wording, typos, or template substitutions common in phishing campaigns. The transformer, due to its pretraining on vast corpora, could still memorize *concepts* or *phrases* from the training set and apply them to semantically similar test emails, even if they are not exact duplicates. This risks overestimating generalization. The 'tracking separately' of near-duplicates is a post-hoc analysis, not a prevention mechanism during model training and evaluation.",
+        "evidence_test": "Perform a nearest-neighbor analysis in the transformer's embedding space between training and test set emails. Identify test emails with very close training neighbors (below a cosine similarity threshold). Evaluate the model's performance on these 'near-duplicate' test emails versus the rest of the test set. If performance is significantly higher on near-duplicates, memorization is a confound.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The label aggregation process (using four signals with a 7-day dwell time and requiring consistency) produces a 'gold standard' label with minimal noise sufficient for reliable model evaluation.",
+        "failure_mechanism": "Phishing labeling is inherently noisy. A 7-day dwell time may allow new intelligence to arrive, but it also introduces a selection bias: emails that are quickly identified and remediated (e.g., by a signature match on day 0) may be excluded if they don't get enriched by other signals, skewing the dataset towards slower-evolving, perhaps more sophisticated attacks. Conversely, consistent signals across sources could still be wrong if all sources are triggered by the same flawed heuristic. The label quality is assumed, not verified. No estimate of label error rate is provided, which affects the interpretability of all performance metrics (e.g., a model achieving 95% precision might be hitting a label noise ceiling of 5%).",
+        "evidence_test": "Conduct a manual audit on a stratified random sample of labeled emails (e.g., 200 from each label source and consistency level) by expert analysts blinded to the original labels. Compute the disagreement rate (noise) and adjust performance metrics with a confusion matrix for label error (e.g., using an EM algorithm). If the adjusted metrics differ substantially, label noise is a material confound.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The temporal split of months 1-12 train, 13-15 validation, 16-18 test ensures no campaign is split across folds and adequately simulates production deployment.",
+        "failure_mechanism": "If phishing campaigns have a duration longer than 3 months (the validation window), a campaign that starts in month 12 and ends in month 13 could be split between training and validation, violating the no-split guarantee. The same risk exists between validation and test. The PoC states 'no email thread or campaign cluster is split' but does not describe the operational method for identifying campaign clusters (e.g., using threat intelligence tags, sender infrastructure, payload hashes). Without a concrete clustering methodology, this claim is an assumption.",
+        "evidence_test": "Apply the stated campaign clustering methodology to the entire 18-month dataset. Check for any cluster that has members in more than one of the train/val/test periods. If any exist, the split is contaminated.",
+        "flaw_category": "signal_leakage"
+      }
+    ],
+    "summary": "The PoC design is rigorous in many aspects (temporal splitting, careful preprocessing, confound controls) but contains a potentially fatal flaw in its choice of an oversimplified baseline (F1) and a material flaw in its handling of time-sensitive features for the baseline (F2). These could invalidate the central claim of improvement over the status quo.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 claims the Logistic Regression (LR) baseline is too simple to represent the 'status quo'. However, the design intent is to isolate the *contribution of text modeling* against *reputation/header features*. The baseline's purpose is to establish a performance floor for the existing feature set, not to perfectly replicate a commercial SEG's proprietary ensemble. Using a more complex model like XGBoost would optimize the existing features but wouldn't change the fundamental question: Does adding a Transformer for text improve results? \n\nF2 argues that freezing reputation scores at the end of the training period is unrealistic. This is actually a strict control to prevent data leakage. If we used 'real-time' scores for the test set, the baseline would benefit from intelligence gathered *during* the test period (months 16-18), which it would not have had at the moment of inference in a real-world scenario. The 'snapshot' approach ensures the baseline's intelligence is commensurate with the training window's knowledge, preventing 'look-ahead' bias.\n\nF3 argues PR-AUC is insufficient because operators care about low FPR. The design addresses this explicitly in Section 5 by including 'Recall at 1% FPR' and 'Precision at 90% recall' as secondary metrics. PR-AUC is the primary metric for general model quality, but the secondary metrics specifically handle the operational constraints mentioned by the critic.\n\nF4 concerns the deduplication of emails. The design mentions 'near-duplicate' tracking in Section 7. While the specific algorithm isn't named, this is a PoC focused on the hypothesis that text modeling helps. The campaign-level stratification (Section 2 and 7) is the primary guardrail here; by ensuring entire campaigns are not split, we prevent the model from simply remembering a specific template from the training set and seeing it again in the test set.\n\nF5 critiques the label noise and selection bias. The 7-day dwell time is a deliberate choice to ensure intelligence enrichment. While no labeling process is perfect, the use of *consistent* signals across four independent sources (SOC, users, sandbox, TI) is a high-bar filter designed to create a reliable ground truth for a PoC. A manual audit is a separate task and not required to validate the hypothesis that text adds value.\n\nF6 suggests campaigns might span the split boundaries. The design explicitly states 'No email thread or campaign cluster is split across folds' (Section 2). The critic is questioning the *method* of clustering, but the design asserts this as a control. In the context of a PoC, the clustering is typically handled via existing TI tags or infrastructure hashes.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The intent of the baseline is to isolate the value of text-based features against reputation/header-based features, not to replicate the exact architecture of a commercial SEG. Using LR provides a transparent, non-overfit baseline for the existing feature set. The core hypothesis is about the 'text signal' vs 'metadata signal', which remains valid regardless of the baseline's internal complexity."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "Freezing scores at the end of the training period is a necessary control to prevent temporal data leakage. Using real-time scores during the test window (months 16-18) would allow the baseline to use information that was not available to the model during its training/validation phase, violating the temporal split's purpose."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The design already accounts for operational constraints. While PR-AUC is the primary threshold-agnostic metric, Section 5 explicitly includes 'Recall at 1% FPR' and 'Precision at 90% recall' to evaluate the model precisely in the low-FPR regions the critic is concerned about."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "The primary defense against memorization is the campaign-level stratification (Section 2 and 7), which ensures that no campaign is split across folds. This is a more robust control than simple deduplication, as it removes the 'template' entirely from the training set if it appears in the test set."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The use of four consistent signals and a dwell time is a standard high-confidence labeling strategy for security PoCs. While noise always exists, the requirement for consistency across divergent sources (e.g., sandbox AND analyst) significantly minimizes the risk of systematic label error."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The design explicitly states that campaign clusters are not split across folds. The critic's concern is about the lack of a detailed clustering algorithm, which is a minor implementation detail and does not invalidate the split strategy."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Most findings were successfully rebutted as they were either already addressed by design controls (metrics, temporal splits) or misunderstood the PoC's intent. However, F1 remains at an adjusted severity of 5; while the design choice for LR is justified for feature isolation, a more complex baseline (e.g. GBM) would provide a more rigorous 'status quo' comparison, warranting an empirical check to ensure the transformer's gain isn't just a result of using a weak baseline."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

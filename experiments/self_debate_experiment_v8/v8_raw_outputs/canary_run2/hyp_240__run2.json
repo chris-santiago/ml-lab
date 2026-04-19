@@ -1,0 +1,182 @@
+{
+  "case_id": "hyp_240",
+  "stratum": "mixed",
+  "flaw_category": "context_dependent",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "x-ai/grok-4.1-fast",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Label quality is sufficient for training and evaluation when supervision cutoff (12 months) is applied and unresolved cases are excluded.",
+        "failure_mechanism": "The PoC assumes that delaying label availability to month 12 introduces no label noise or systematic bias. However, in enterprise security investigations, labels for the most sophisticated attacks may take far longer than 12 months to resolve due to deep forensics, legal hold, or quiet persistence. Excluding unresolved cases may disproportionately remove recent and sophisticated attacks, biasing the label distribution toward easy, quickly closed cases. Additionally, analyst workflow timing features tied to case closure state are explicitly removed, but the timing of closure itself may correlate with label noise or investigator fatigue, not just label delay.",
+        "evidence_test": "Compare label delay distributions for positives vs negatives in the final dataset. If recent positives have systematically longer unresolved periods and are underrepresented after month 12 cutoff, the label pool is biased. Also, re-run labeling with a longer cutoff (e.g., 18 or 24 months) to see if model performance degrades \u2014 if gains disappear, label delay is a critical flaw.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "A chronological split with 12 months of training and 4 months of validation/test windows is sufficient to prevent campaign leakage and capture real-world drift.",
+        "failure_mechanism": "Campaigns in enterprise ATO often span weeks to months with shared infrastructure, and a 2-month test window may accidentally span only the tail end of one campaign or miss the emergence of a new one. Moreover, the temporal grain of 'split by month' assumes stationarity within the month and independence between months, which may not hold. If a campaign spans months 10\u201311, its artifacts could leak across train/validation/test through email contacts, device reuse, or behavioral patterns, even if exact campaign IDs are blocked. The split also does not respect attack cadence \u2014 if attacks cluster weekly, monthly splits may over- or under-estimate drift.",
+        "evidence_test": "Perform campaign-aware temporal cross-validation: split by campaign onset time, not calendar month. Train on campaigns before time T, validate on campaigns between T and T+2 months, test on campaigns after T+2 months. Measure overlap of entities (users, devices, IPs) across splits \u2014 if overlap is high, campaign leakage is likely. Also, test model performance when test window is a rolling 2-month window across 18 months of data to measure drift sensitivity.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Average precision on the validation window is a sufficient proxy for operational utility under analyst triage.",
+        "failure_mechanism": "While average precision measures ranking quality, it does not directly reflect the analyst's workload or real-time load. The operational value depends more on recall at a fixed triage capacity (e.g., 'can we catch 80% of ATOs in the top 500 alerts/week?'), not average precision. If the model ranks many low-signal cases highly, average precision may appear high while daily triage volume surges. Precision at top 100/500 is reported, but the metric still weighs false positives in mid-ranked areas more heavily than analysts do.",
+        "evidence_test": "Simulate analyst triage over multiple weekly snapshots in the validation window. Vary the score threshold to fix weekly alert volume (e.g., 100/week), then measure actual recall and precision in that constrained queue. Compare to AUROC and average precision deltas \u2014 if model rankings align poorly with constrained recall, AP is a poor proxy.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The graph model improves detection over a strong feature-only GBT baseline by exploiting relational structure.",
+        "failure_mechanism": "The PoC claims to focus on relational value but includes historical user risk aggregates in the graph node features \u2014 aggregates that are themselves relational and overlap with the intended mechanism. This conflates 'adding graph edges' with 'adding truly novel relational reasoning'. The baseline may already encode relational structure through these aggregates, so the ablation removing high-cardinality IDs while preserving aggregates may not isolate the graph's contribution. Additionally, no baseline with identical aggregates removed is tested \u2014 only high-cardinality IDs are ablated. Without a baseline that removes aggregates, we cannot claim that graph edges add value beyond engineered relational summaries.",
+        "evidence_test": "Run an ablation where the GBT baseline uses only non-relational, non-aggregate features (e.g., login failures, impossible travel raw counts), and another where it uses the same features plus the historical risk aggregates. Then compare both to the graph model. If graph-only gains disappear when aggregates are removed, the conclusion is invalid.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Validation-based hyperparameter tuning and selection using Average Precision across a 2-month window leads to generalizable choices.",
+        "failure_mechanism": "With only 2 months of validation data, finite-sample noise and drift within the window may lead to overfitting of hyperparameters to that specific period. A 2-month window may not represent the true performance envelope, especially if attacks are sporadic. Moreover, early stopping and model selection using validation AP may encourage models to overfit to validation idiosyncrasies rather than general temporal patterns.",
+        "evidence_test": "Repeat tuning and selection using rolling 2-month validation windows across 6+ months of data (e.g., 10 rolling splits). Measure consistency of hyperparameters and performance across windows. If chosen hyperparameters or model rankings flip frequently, the validation design is unreliable.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The experiment will not prove that every observed gain comes from abstract graph reasoning rather than recurrent entity patterns.",
+        "failure_mechanism": "While the PoC acknowledges this limitation, it treats it as a note rather than a required experiment. However, without a cross-entity zero-shot evaluation (e.g., train on old entities, evaluate on truly new entities never seen in training), we cannot isolate whether gains stem from pattern reuse or abstract reasoning. The ablations for seen vs new users/devices do not perform zero-shot evaluation \u2014 they just report separate metrics. If new entities show similar gains, it supports abstract reasoning; otherwise, gains may stem from patterns tied to specific entities.",
+        "evidence_test": "Hold out a set of entities (users, devices, IPs) that never appear in training, even as attributes. Evaluate zero-shot transfer on these entities using the same graph and non-graph models. If graph model retains gains, evidence supports abstract reasoning; otherwise, gains are entity-specific.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The PoC has three FATAL flaws: critical label delay bias from 12-month cutoff, insufficient campaign-aware temporal splitting leading to potential leakage and poor drift modeling, and AP as a proxy misaligned with operational triage constraints. These invalidate the core conclusion unless addressed via longer label horizons, campaign-aware splits, and triage-constrained evaluation. Two MATERIAL concerns arise: conflation of baseline aggregates with graph relational value, and overconfident validation with small windows. One MINOR concern: lack of zero-shot entity evaluation.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 (FATAL 9, label quality): The critic claims the 12-month supervision cutoff and exclusion of unresolved cases biases labels by underrepresenting sophisticated, slow-to-resolve positive ATO cases, potentially removing recent hard positives while negatives resolve faster. This introduces systematic bias favoring easy cases. The design explicitly excludes unresolved cases to prevent label noise from delayed investigations, which is a deliberate trade-off prioritizing clean supervision over completeness \u2014 a standard control in delayed-label domains like security where noise destroys signal. No evidence is provided that positives systematically take >12mo more than negatives; the critic asserts 'may take far longer' based on general knowledge of forensics/legal holds, but this is unproven for the dataset without empirical label delay distributions by label. The design has no named control (e.g., no stratification or delay analysis), so while the noise avoidance is justified, the bias risk is genuinely uncertain and resolvable only by data inspection (as in the evidence test: delay dist comparison). Thus, cannot fully rebut by argument/design alone \u2014 empirical check needed, but does not invalidate the PoC as-is since bias direction (if any) could even favor graph (hard cases relational). F2 (FATAL 8, chrono split leakage): Critic argues monthly splits fail to prevent campaign leakage as campaigns span months, allowing entity/shared pattern overlap (IPs, devices, contacts) across splits despite blocking exact IDs, and ignores intra-month stationarity or weekly cadence. Design uses chrono splits for deployment-mirroring drift capture, explicitly 'keep exact case or campaign identifiers inside one split' (implying split construction assigns full campaign data to one split or drops crossers, and IDs not featurized), removes analyst timing features, and builds graphs/ feats with strict cutoff (no future data/edges). Entity reuse is intentional and realistic \u2014 new campaigns often reuse infra, testing true generalization. Campaign-aware CV is valuable but changes scope to metadata-dependent splitting, not pure time-respecting as required for deployment sim. Empirical overlap measure feasible but design controls (ID isolation, cutoff) make leakage unlikely; premise of 'high overlap causes leak' not evidenced as material here. F3 (FATAL 7, AP proxy): Critic says AP poorly proxies triage under fixed capacity, overweighing mid-list FPs vs operational top-k recall/prec. Design selects on AP (apt for imbalance/ranking) but reports recall@fixed prec, prec@top100/500 per week, AUROC \u2014 directly addressing triage volume/capacity. Top-k metrics precisely simulate constrained queue, invalidating claim that PoC ignores workload; evidence test redundant as PoC already plans constrained simulation proxies. F4 (MATERIAL 6, relational isolation): Critic notes historical risk aggregates in node feats/baseline are relational summaries, so graph gains may not isolate 'edges' vs 'better reasoning'; wants aggregate-removed baselines. Design intent: test if edges+MPNN add value *beyond strong hand-engineered aggregates* (explicit: 'relational structure adds ... beyond strong hand-engineered aggregates'), using matched feats +edges for fair apple-apple. Ablation removes high-card IDs (leak check) preserves summaries; seen/new splits check pattern reuse. Weaker baseline wouldn't stress graph vs state-of-art tabular. F5 (MATERIAL 5, val tuning generalizes): 2mo val too noisy/sporadic for reliable HP select, risks period-specific overfit. With rare ATOs, 2mo post-8mo train is standard holdout size for drift sim; tuning disciplined (val-search fixed params), single-touch test, bootstrap CIs mitigate. Rolling CV ideal but leaks future (violates chrono) or inflates via leakage; within 12mo data scope, unfeasible without scope change. F6 (MINOR 4, abstract reasoning proof): Critic wants zero-shot entity holdout to prove non-entity-specific gains, beyond seen/new reports. Design explicitly disclaims 'will not by itself prove ... abstract ... rather than specific recurrent entity patterns', positions as improvement test under realistic (w/ reuse) conds; seen/new ablations + disclaimer fully scope it as non-proof-of-mechanism. All findings addressed by design intent/controls or lack evidence; F1 alone truly defers to empirical label audit feasible in PoC run.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "Design deliberately excludes unresolved to control noise (cited rationale), but bias via differential resolution rates is an unaddressed empirical uncertainty requiring label delay distribution by class check; resolvable by PoC data analysis without design change."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "Chrono splits with ID isolation to one split, strict cutoffs, and featurized entity reuse are deliberate for time-respecting drift sim; campaign-spanning leakage speculative without evidence of material overlap effect, as shared infra tests realistic generalization."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "Critic's claim AP ignores triage capacity unsupported \u2014 PoC reports prec@top100/500/week and recall@prec directly measuring fixed-volume utility, contradicting poor proxy assertion."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "Strong baseline with aggregates deliberate to test graph edges beyond hand-engineered relational summaries (explicit intent); matched feats + ablations isolate added value as designed."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "2mo val fits 12mo data scope for chrono holdout; rolling CV out-of-scope as it risks future leakage, violating deployment sim \u2014 standard practice for rare events mitigated by bootstrap."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Zero-shot beyond stated scope \u2014 design explicitly disclaims mechanism proof, uses seen/new ablations for partial check under realistic reuse."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "One FATAL finding (F1) requires deferred empirical verification of label delay bias feasibility without design change; all others rebutted below material threshold with no concessions of high-severity issues."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=9, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=8 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

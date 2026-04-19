@@ -1,0 +1,107 @@
+{
+  "case_id": "hyp_037_stage4",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "deepseek/deepseek-v3.2",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Preprocessing artifacts (categorical vocabularies, merchant-category co-occurrence statistics) are established once from the full modeling corpus before training and then frozen.",
+        "failure_mechanism": "This is a classic case of target/signal leakage. By calculating co-occurrence statistics and vocabularies using the 'full modeling corpus' (which includes the validation and test sets) before training, the model incorporates global distributional information from the future. Specifically, if certain merchant categories or patterns only emerge in the later months (test set), the training set's embeddings are already 'aware' of their existence and relative frequency, allowing the model to implicitly learn patterns that would not be available at inference time in production.",
+        "evidence_test": "Re-run the experiment where vocabularies and co-occurrence statistics are derived exclusively from the Training set (months 1\u201312). If the performance on the test set drops significantly, the original results were inflated by look-ahead bias.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The proposed GBDT model incorporating sequence embeddings will outperform a baseline using only aggregated RFM features.",
+        "failure_mechanism": "The comparison is fundamentally flawed because the baseline (Logistic Regression) is not just a different feature set, but a significantly weaker model architecture (Linear vs. Non-linear). GBDTs can capture complex interactions between the *baseline* RFM features themselves that Logistic Regression cannot. Therefore, any observed improvement cannot be attributed to the 'Proposed Features' (embeddings); it could simply be the result of the GBDT's ability to model non-linearities in the existing RFM data.",
+        "evidence_test": "Introduce a second baseline: a GBDT trained on the Baseline RFM features only. The hypothesis is only validated if (GBDT + RFM + Embeddings) significantly outperforms (GBDT + RFM).",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The primary metric (Precision at top 5% recall/budget) accurately reflects the value of the sequence embeddings.",
+        "failure_mechanism": "The PoC defines churn as '60+ consecutive days of inactivity within 30 days following a prediction date'. This is a logical contradiction: one cannot have 60 days of inactivity within a 30-day window. If the label is actually '60 days of inactivity starting within the 30-day window', the label is not fully observable until 90 days after the prediction date. However, the PoC claims labels are observed after 30 days. This suggests a silent misconfiguration of the target definition that could lead to labeling noise or fundamentally incorrect ground truth.",
+        "evidence_test": "Clarify the exact temporal definition of the churn label. If the window of observation for the label is shorter than the duration required to define the label (e.g., 30 days to observe 60 days of inactivity), the label is mathematically impossible.",
+        "flaw_category": "silent_misconfig"
+      }
+    ],
+    "summary": "The PoC contains two fatal flaws: significant temporal signal leakage via the 'full corpus' preprocessing and a broken baseline comparison that conflates model architecture gains with feature gains. Additionally, the churn label definition is logically inconsistent.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "I will analyze each critique finding against the stated methodology and design intent.\n\n**F1 (Severity 9): Leakage in preprocessing artifacts.** The critic claims that using the 'full modeling corpus' to establish vocabularies and co-occurrence statistics constitutes target/signal leakage. The design states: 'preprocessing artifacts... are established once from the full modeling corpus before training and then frozen.' The intent is to prevent representation drift across time windows, ensuring the feature space is consistent for model comparison. However, the critic is correct: deriving these statistics from data that includes the validation and test sets is a form of look-ahead bias. Even though the model parameters are fit only on training data, the feature representation itself has been informed by future data distributions. This violates the temporal split principle and could inflate performance. This is a genuine methodological flaw. The suggested evidence test (derive stats from training set only) is appropriate. I must concede this finding.\n\n**F2 (Severity 7): Flawed baseline comparison.** The critic claims the comparison is flawed because the proposed model uses a GBDT while the baseline uses logistic regression, confounding the effect of architecture with the effect of the proposed features. The design rationale states: 'The baseline is kept intentionally simple, using a fixed regularization setting selected a priori rather than a full hyperparameter sweep, so it serves as a stable linear reference point for the added value of transaction-sequence information.' The hypothesis is explicitly about whether transaction-sequence embeddings add predictive signal *beyond standard RFM-style summaries*. The chosen baseline is a standard, interpretable model used in business contexts for RFM features. The design deliberately concentrates optimization effort on the proposed model. The critic's proposed test (GBDT on RFM only) is a valid alternative experimental design, but it is not required to test the stated hypothesis. The methodology's comparison is sound for its stated goal: assessing if adding sequence information to a standard RFM model improves predictions. The architecture difference is a known confound, but the design's claim is about the feature set, not an architecture ablation. This finding is based on a misunderstanding of the hypothesis scope. I will rebut using REBUT-SCOPE.\n\n**F3 (Severity 5): Contradiction in churn label definition.** The critic points out a logical contradiction: the label definition '60+ consecutive days of inactivity within 30 days' is impossible. The methodology text states: 'an account is labeled as 1 (churned) if it closes or exhibits 60+ consecutive days of inactivity within 30 days following a prediction date'. This appears to be a typographical or descriptive error. The likely intended definition is '60+ consecutive days of inactivity *starting* within the 30-day window' or 'inactivity observed over a 60-day period that concludes within the 30-day window'. The design also states: 'churn labels are observed only after the full 30-day prediction horizon has elapsed,' which contradicts a 60-day observation need. This is a material silent misconfig because an incorrect label definition undermines the entire experiment's validity. However, this is likely a documentation error, not a fundamental flaw in the executed design. The critic's claim about the logical impossibility is correct, and the evidence test (clarify the definition) is necessary. Because this cannot be resolved by argument alone and the design text is self-contradictory, the appropriate rebuttal is DEFER, pending clarification of the actual label construction used in the PoC.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The critic is correct. Deriving preprocessing artifacts (vocabularies, co-occurrence statistics) from the full modeling corpus, which includes validation and test data, introduces look-ahead bias. The feature representation is informed by future data distributions, violating the temporal split principle. This is a genuine methodological flaw that could inflate reported performance. The evidence test (derive stats from training set only) is the correct remedy."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The critique misidentifies the experiment's scope. The hypothesis tests whether adding transaction-sequence information to a standard RFM feature set improves prediction. The baseline logistic regression on RFM features is a standard, interpretable business reference model. The design deliberately concentrates optimization on the proposed model to test the value of the *new features*, not to perform an architecture ablation. The comparison is valid for the stated goal. Introducing a GBDT-RFM baseline is a different, albeit valid, experimental question."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The label definition in the methodology text contains a logical contradiction ('60+ days of inactivity within 30 days'). This appears to be a documentation error. The actual label construction used in the PoC cannot be inferred from the conflicting statements. The question of whether the label is correctly defined and temporally aligned is genuinely unresolvable by argument and requires empirical clarification, as the critic suggests."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "F1 (signal leakage) was conceded as a FATAL flaw with an adjusted severity of 9, which alone mandates a 'critique_wins' verdict. The methodology contains a material design error that invalidates the comparison."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=9 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

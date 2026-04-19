@@ -1,0 +1,157 @@
+{
+  "case_id": "hyp_155",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The text-only baseline and the hypothesis model are 'identical' in architecture and tuning, differing only in access to features, isolating the performance gap to the new information source.",
+        "failure_mechanism": "A transformer receiving a concatenated feature vector (text + graph/historical) has a different input dimension to its MLP head compared to a model receiving only text features. The architecture is not identical; the hypothesis model's MLP head has more parameters. If the models are not capacity-matched, performance differences could be attributed to the increased model capacity of the hypothesis model, not the intrinsic value of the new features. This is a classic confound in ablation studies.",
+        "evidence_test": "Verify the model architectures (layer counts, hidden dimensions, parameter counts) are exactly equal for the final layers processing the concatenated input. Alternatively, run a third model with the hypothesis architecture but fed random noise (or shuffled versions) of the graph features; if its performance is statistically similar to the hypothesis model, the gain is from capacity, not signal.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Precision at a fixed recall of 80% (or recall at FPR 2%) is a sufficient and stable primary metric for model selection and final evaluation, given the operational objective.",
+        "failure_mechanism": "These point metrics are highly unstable with severe class imbalance (~0.5\u20132% malicious). The operating point (threshold) achieving exactly 80% recall is sensitive to small changes in model scores or data sampling. Selecting a model based on a single, noisy point on the PR/ROC curve can lead to choosing a model that is not robust. Furthermore, the validation set used for model selection (3 months) may have a slightly different prevalence or score distribution than the test set (3 months), causing the chosen threshold to not achieve the target recall on the test set, invalidating the primary performance comparison.",
+        "evidence_test": "Report the variance of the target metric via bootstrapping on the validation set during model selection. Show that the selected model's performance on the test set is evaluated across a *range* of recalls/FPRs (e.g., precision-recall curve) and that the hypothesis model dominates the baseline across a neighborhood of the target operating point, not just at a single threshold.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding messages whose label arrives more than 30 days after the message date ensures 'label quality and temporal consistency' and simulates a realistic real-time detector.",
+        "failure_mechanism": "This filtering creates a survivorship bias. It assumes all malicious emails are detected and labeled within 30 days. Sophisticated spear-phishing (the target of the hypothesis) may lie dormant or be discovered after 30 days. By discarding these late-labeled examples, the training and test data may be systematically missing the hardest, most sophisticated attacks\u2014the very ones the graph model is hypothesized to catch. This could artificially deflate the apparent prevalence of challenging cases and make the problem easier than real deployment.",
+        "evidence_test": "Analyze the distribution of label delay for malicious emails. If a significant portion (e.g., >10%) of confirmed malicious emails have labels >30 days old, the exclusion criterion is removing a material subset of the threat. A sensitivity analysis training/evaluating with a longer (e.g., 90-day) cutoff would test the robustness of the conclusion.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratifying by sender domain (internal vs. external) within each temporal window is sufficient to ensure the train/val/test cohorts reflect the 'realistic operational sender distribution'.",
+        "failure_mechanism": "Stratification on a single binary domain feature does not control for distributional shift in other critical graph and historical features. For example, the graph structure (clustering, degree) of external senders could evolve significantly from the training to test period (e.g., a new vendor ecosystem emerges). The model's performance on graph features is predicated on the training graph being representative of the future graph's statistical properties. If the underlying communication network evolves, the frozen graph features may become less informative or misleading.",
+        "evidence_test": "Measure the distribution shift of key graph features (e.g., mean sender PageRank, degree distribution) between the training period and the test period, segmented by sender domain. A significant shift would indicate the model is being evaluated under a covariate shift not mitigated by simple domain stratification.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 'frozen blocklist' and 'sender domain reputation score (binned, computed at message-time)' for non-text signals do not leak future information into the training period.",
+        "failure_mechanism": "The design states these are 'computed at message-time' and the blocklist is 'updated only at training time'. However, if the reputation score or blocklist incorporates any global threat intelligence that is retrospectively updated (a common practice), then the 'message-time' computation could inadvertently use information that was not available historically. For example, a domain's reputation score at T0+1 month might be derived from a threat feed that was updated after T0+12 months, leaking future attack patterns into the training data.",
+        "evidence_test": "Audit the data generation pipeline for these signals to confirm they are computed using *only* information available on or before the email's timestamp. For the reputation score, this means using a historical snapshot of the reputation database. The experiment must document how this temporal fidelity is enforced.",
+        "flaw_category": "signal_leakage"
+      }
+    ],
+    "summary": "The PoC has a strong temporal split design but contains critical flaws in baseline isolation and metric stability that could invalidate its core comparison, alongside material concerns about label filtering and feature leakage.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Let me analyze each finding systematically.\n\n**F1 (Model Capacity Confound):** The critic correctly notes that input dimension differs between models. However, the core transformer backbone (containing the vast majority of parameters) is identical - only the MLP head input dimension differs. This is a known implementation detail that can be addressed by matching MLP hidden dimensions. The hypothesis model and baseline share the same pretrained DistilBERT weights, same transformer architecture, and same training procedure. The capacity difference is minimal relative to the total parameter count. This is a design choice that does not invalidate the core comparison.\n\n**F2 (Metric Stability):** This is a legitimate concern about point metric instability with severe class imbalance. However, the methodology explicitly includes AUROC, AUPRC, precision-recall curves, and calibration plots as secondary metrics. The design also includes a fallback: if 80% recall is unattainable, they pivot to recall at fixed FPR. The methodology acknowledges the operational context. While point metrics are noisy, the design provides multiple viewing angles. The concern is partially valid but overstated.\n\n**F3 (Survivorship Bias):** The critic raises a valid concern about late-detected attacks being excluded. However, this is an explicit design trade-off documented in the methodology: 'to avoid training on highly delayed or uncertain labels that would not have informed a real-time detector.' The experiment scope is clearly limited to detecting attacks discoverable within 30 days - this is a valid operational constraint, not a flaw. The critic is asking for a different experiment scope, not identifying a flaw in the current scope.\n\n**F4 (Insufficient Stratification):** The critic correctly identifies potential distribution shift in graph features. However, the methodology explicitly acknowledges temporal drift as a concern: 'Chronological split ensures the test set represents the most recent threat landscape, not a convenient random sample. This is a conservative, realistic evaluation setting.' The design controls for the primary temporal confound. The critic is asking for additional analysis, not identifying a flaw in the current controls.\n\n**F5 (Signal Leakage):** The critic speculates about retrospective threat intelligence updates. However, the methodology explicitly states these signals are 'computed at message-time' and the blocklist is 'updated only at training time.' Without evidence of actual leakage in the pipeline, this is speculation about implementation rather than a design flaw. The design intent is clear and sound.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 4,
+        "justification": "The core transformer backbone (containing >95% of parameters) is identical between models. Only the MLP head input dimension differs due to concatenated features. This is a known implementation detail that can be addressed by matching MLP hidden dimensions. The design intent is to isolate feature contribution; capacity matching is an implementation detail, not a design flaw. The hypothesis model does not gain substantial capacity from this difference."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 4,
+        "justification": "Point metrics are indeed unstable with severe imbalance, but the methodology includes AUROC, AUPRC, PR curves, and calibration plots as secondary metrics. The design also includes a fallback pivot to recall at fixed FPR if 80% recall is unattainable. The primary metric is operationally meaningful; the secondary metrics provide robustness checks. This is a known limitation addressed by the multi-metric evaluation design."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The 30-day label cutoff is an explicit design trade-off documented to ensure 'label quality and temporal consistency' for a real-time detector. The experiment scope is limited to attacks discoverable within 30 days - this is a valid operational constraint. The critic asks for a different experiment (longer latency labels), not a flaw in the current scope. The methodology correctly limits claims to this operational context."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "The methodology explicitly acknowledges temporal drift and uses chronological splits as the conservative control: 'This is a conservative, realistic evaluation setting.' Stratification by sender domain addresses the primary distribution concern. The critic asks for additional distribution shift analysis, not a missing control. The design already implements the relevant temporal safeguards."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The critic speculates about retrospective threat intelligence updates without evidence. The methodology explicitly states signals are 'computed at message-time' and blocklist 'updated only at training time.' The design intent is clear and sound. Without evidence of actual leakage in the pipeline, this is an implementation speculation, not a design flaw. The critic provides no evidence that the temporal fidelity is violated."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All five findings have been addressed with appropriate rebuttals. After adjustments, the highest adjusted severity is F1 and F2 at level 4 (MATERIAL range), while F3 is at level 3 and F4/F5 are at level 1-0. All findings are below the threshold for EXONERATE (adjusted severity \u2264 3). The methodology is sound - F1 and F2 are implementation details that can be addressed, F3 and F4 are scope limitations already documented, and F5 lacks evidence. The critic raises several concerns but none constitute a fatal flaw that invalidates the experimental design."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4 (4-6), orig_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "case_id": "eval_scenario_705",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Preprocessing parameters (scaling, encoding, imputation) derived from the full 18\u2011month corpus and then frozen before model fitting do not leak information from validation or test data into training.",
+        "failure_mechanism": "Using future data to compute normalization statistics (means, standard deviations, category mappings, imputation values) allows the model to indirectly access distributional properties of the validation and test sets during training. This biases the learned representations and inflates performance estimates, especially for heavy\u2011tailed flow features and sparse categorical encodings.",
+        "evidence_test": "Re\u2011run the entire pipeline estimating preprocessing parameters **only** on the training window (months\u202f1\u201110) and applying the same transforms to validation and test. Compare the resulting low\u2011FPR pAUC\u2011ROC of both models to the original numbers. A statistically significant drop (especially for the transformer) would confirm leakage; negligible change would refute it.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Removing host IP addresses eliminates identity\u2011based shortcuts, so any performance advantage of the transformer over the baseline can be attributed to packet\u2011level sequence modeling.",
+        "failure_mechanism": "Features such as hashed DNS domain, hashed user agent, and historical alert counts per host remain high\u2011cardinality identifiers (or strong proxies for host identity). Both models receive these features, enabling them to exploit identity\u2011based signals. If the transformer learns to combine sequence information with these identity proxies more effectively than the baseline, the observed advantage may stem from better use of identity\u2011related cues rather than pure sequence modeling.",
+        "evidence_test": "Create ablation datasets where the hashed DNS domain, hashed user agent, and host\u2011specific historical features are either removed or replaced with random values. Retrain both models (with the same tuning protocol) and compare low\u2011FPR pAUC\u2011ROC. If the transformer\u2011baseline gap shrinks substantially, identity leakage via these features is driving the original result.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Both models receive equivalent tuning effort over learning rate, regularization, subsampling, and architecture depth, ensuring a fair comparison.",
+        "failure_mechanism": "The transformer\u2019s architectural hyperparameters (number of encoder blocks, attention heads, hidden dimension, dropout, etc.) are fixed and not included in the hyperparameter search, while the baseline\u2019s depth (number of trees) is tuned. This asymmetry means the transformer may be operating under a sub\u2011optimal (or fortuitously optimal) configuration unrelated to its sequence\u2011modeling capability, confounding any performance difference.",
+        "evidence_test": "Extend the hyperparameter search to include transformer\u2011specific architecture choices (e.g., num_layers \u2208 {2,4,6}, num_heads \u2208 {4,8}, hidden_dim \u2208 {128,256,512}, dropout \u2208 {0.0,0.1,0.2}) using the same temporal cross\u2011validation procedure. Compare the best\u2011found transformer pAUC\u2011ROC to the baseline\u2019s. If performance changes significantly (>0.01 absolute pAUC), the original claim of equivalent tuning effort is invalid.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The PoC contains a critical preprocessing leakage that uses future data to compute normalization parameters, likely inflating results. Additionally, identity\u2011related features remain present in both models, and the transformer architecture is not tuned to the same extent as the baseline, each weakening the causal link between sequence modeling and observed performance gains.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critic raises concerns about preprocessing parameter leakage (F1), identity-based shortcuts (F2), and unequal tuning effort (F3). F1 is valid and requires an empirical test. F2 is partially valid but the design includes controls for identity leakage. F3 is valid but the experiment already involves significant tuning effort for both models.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "An empirical test is needed to determine the impact of preprocessing parameter leakage."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The experiment design includes a control for identity leakage by comparing transformer variants with and without host identifiers."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Both models undergo significant hyperparameter tuning, although the transformer's architecture is fixed."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "One finding (F1) is deferred for empirical testing, and the other two are rebutted with significant severity adjustments, indicating that while some concerns are valid, they do not conclusively invalidate the methodology without further testing."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=9, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

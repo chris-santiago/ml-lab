@@ -1,0 +1,107 @@
+{
+  "case_id": "eval_scenario_862",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The analyst-reviewed labeled dataset (filtered to final review status, excluding uncertain/disputed cases) is representative of the full production ingress traffic distribution the models will defend.",
+        "failure_mechanism": "Analyst reviews are triggered by user reports, auto-quarantines, or heuristics that correlate with model input features (e.g., suspicious sender domains, keywords, or attachments), enriching the labeled set for edge cases and creating selection bias; benign emails may be under- or over-sampled non-randomly, leading both models to optimize on a non-representative distribution where malicious signals are artificially prominent or confounded with triggers.",
+        "evidence_test": "Compare raw feature distributions (e.g., sender rep scores, keyword density, domain age, base rates) between the labeled dataset and a large sample of full unlabeled ingress logs from the same periods; document the exact labeling trigger mechanism (e.g., report-based, heuristic-flagged) and confirm no overlap with engineered features.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Sender reputation score (historical frequency and flagging rate from training data) is correctly imputed for out-of-training senders/domains in validation and test sets, enabling a fair comparison under temporal shift to novel campaigns.",
+        "failure_mechanism": "Fresh senders/domains (prevalent in novel phishing campaigns post-train) receive a default imputation (e.g., zero flags, low frequency interpreted as 'good' reputation), systematically weakening the baseline on the temporal generalization task while the transformer relies less on memorized reputation; this overstates the transformer's text-encoding advantage as arising from novel threats rather than baseline degradation.",
+        "evidence_test": "Explicitly document the imputation policy for unseen senders (e.g., default values used); report the fraction of test set senders/domains unseen in training; evaluate baseline PR-AUC with/without the reputation feature on test set; check if transformer ablation without metadata shows similar drop.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The test set (quarter 16, 1 month) contains sufficient malicious volume and campaign diversity to yield precise performance estimates and distinguish model differences.",
+        "failure_mechanism": "At 0.1\u20135% prevalence, the test set may have too few positives (e.g., <500\u20131000) or campaigns for stable PR-AUC estimation under imbalance, causing wide bootstrap CIs that overlap between models despite true differences; atypical threat landscape in that specific month (e.g., low activity) further amplifies variance.",
+        "evidence_test": "Report exact sample sizes (# total emails, # malicious, # unique campaigns/days) for train/val/test; compute observed 95% CI widths from bootstrap; perform power analysis (e.g., for detecting PR-AUC delta >0.05 at 80% power).",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The design is thoughtful with strong controls like temporal splits and ablations, but relies on critical unverified prerequisites about data representativeness, OOD feature handling, and test set power that could invalidate the core claim of transformer superiority under realistic deployment shifts. Addressing these would require additional data audits and reporting before conclusions can be trusted.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 (FATAL, 8): The critic argues that the labeled dataset is unrepresentative of full production traffic due to selection bias in analyst review triggers. While this is a known risk in security ML (covariate shift between labeled and unlabeled traffic), the experiment's stated scope (Section 7) is to compare model architectures on the *available* labeled test set (Quarter 16), not to validate the model's performance against the entire universe of production email. Both models are trained and evaluated on the same biased distribution, so the relative comparison (Transformer vs. GBM) remains internally valid. The critique targets external validity, which is outside the PoC's scope of establishing the architectural hypothesis.\n\nF2 (FATAL, 7): The critic argues that sender reputation imputation for unseen senders weakens the GBM baseline unfairly during temporal shift. The methodology explicitly defines the GBM metadata features as 'historical frequency and flagging rate from training data' (Section 3 & 4). This design choice intentionally creates a scenario where the GBM lacks context for new campaigns, forcing the Transformer to prove its value via text understanding rather than historical metadata. The imputation policy is a deliberate constraint to isolate the text-encoding advantage. It is not a silent misconfiguration but a core feature of the 'Metadata vs. Text' hypothesis test.\n\nF3 (MATERIAL, 6): The critic argues the test set (1 month) may lack sufficient volume for stable metrics. The methodology Section 6 explicitly mandates reporting '95% confidence intervals (stratified bootstrap...)' to quantify uncertainty. This protocol directly addresses the variance risk: if the sample size is low, the CIs will be wide, and results will be interpreted with that uncertainty. The critique requests data transparency that the design already accommodates via its statistical reporting plan. This is a minor concern regarding precision, not a flaw that invalidates the hypothesis test.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 2,
+        "justification": "The critique targets external validity (representativeness of full production), but the PoC scope (Section 7) is strictly to compare architectures on the temporal test set. Both models face the same data bias, preserving the fairness of the relative comparison."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "justification": "The imputation policy is a deliberate design constraint defined in Section 3 & 4 ('from training data'). It intentionally handicaps the GBM on novel threats to isolate the Transformer's text advantage, rather than being a silent misconfiguration."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "Section 6 mandates reporting 95% confidence intervals to quantify uncertainty. The concern about sample size is addressed by the statistical reporting protocol, and wide CIs would signal variance rather than invalidate the comparison."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings were rebutted to adjusted severity levels <= 3 (F1: 2, F2: 2, F3: 0), satisfying EXONERATE conditions. The methodology is sound for the stated hypothesis test."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

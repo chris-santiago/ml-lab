@@ -1,0 +1,232 @@
+{
+  "case_id": "eval_scenario_852",
+  "stratum": "regular",
+  "flaw_category": "eval_inflation",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "deepseek/deepseek-v3.2",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Sender domain reputation feature computed as 'fraction of emails from this domain labeled malicious in the training set' does not leak target information to the model.",
+        "failure_mechanism": "This feature directly encodes the training-set label into the input representation. If a domain appears in both training and test (which is likely for persistent attackers or legitimate senders), the model can trivially memorize 'domain X was 80% malicious in training' and predict accordingly. This is not a feature - it's a label leak encoded as metadata. The control experiment (metadata-only baseline) actually demonstrates the severity: if it achieves >80% of transformer PR-AUC, this proves sender reputation drives performance, but this is NOT a confounding finding to dismiss \u2014 it reveals the model is exploiting leaked target information rather than learning semantic understanding.",
+        "evidence_test": "Compute the distribution of sender domain reputation scores in test set. If test sender domains have high overlap with training (which they will for persistent threats), this feature becomes a direct lookup of training labels. The control should be reinterpreted: high metadata-only performance indicates target leakage, not 'sender reputation is a strong signal.' A properly isolated experiment would use only forward-looking features (e.g., SPF/DKIM status at test time, attachment sandbox verdicts from test period only).",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 200-email inter-rater reliability sample is sufficient to characterize label noise across 18 months of enterprise email data.",
+        "failure_mechanism": "With enterprise email volumes (likely millions of emails over 18 months), a 200-sample re-review provides insufficient precision to estimate the true disagreement rate. Even assuming 1 million emails, a 200-sample estimate of a ~5% disagreement rate has a margin of error of approximately \u00b11.5 percentage points using binomial confidence intervals. The study cannot reliably detect whether kappa meets the 0.70 threshold, and worse, cannot distinguish between a 10% and 40% disagreement rate due to wide confidence intervals. This means the experiment may proceed with high label noise without detecting it.",
+        "evidence_test": "Compute required sample size for detecting kappa = 0.70 with 80% power at alpha = 0.05 under expected class imbalance. For binary classification with ~5% positive rate, several thousand samples would be needed. Report confidence intervals on kappa, not just point estimates.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The campaign leakage detection mechanism is sufficient to prevent temporal contamination from overlapping attack campaigns.",
+        "failure_mechanism": "The detection only identifies clusters 'appearing in both training and test sets' and flags if >5% of test emails belong to leaked clusters. However, this is reactive \u2014 the model has already been trained on these leaked patterns. More critically, this detection is limited to exact matches (same sender, same subject line). Sophisticated attackers vary subjects while reusing infrastructure, or use lookalike domains (typosquatting) that aren't detected as 'same sender.' The experiment does not account for paraphrased campaigns, infrastructure reuse across different sender identities, or social engineering techniques that evolve within an attack campaign. The 5% threshold is arbitrary and provides no protection against subtle campaign overlap.",
+        "evidence_test": "Perform ablation: train on months 1-12, remove all emails from senders/domains that appear in test (months 16-18), then evaluate on remaining test set. If performance drops dramatically, current results are inflated by campaign memory, not generalization.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The two-random-halves validation strategy provides unbiased final holdout evaluation.",
+        "failure_mechanism": "The experiment uses the first half as 'deployment-readiness confirmation' and the second half for reporting. However, this creates a selection bias: hyperparameters were tuned on validation set (months 13-15), then the model is further validated on half of test data (first half of months 16-18), and only the second half is used for final reporting. This means the reported metrics are on data that has been indirectly 'selected' \u2014 the model's final configuration was chosen because it performed well on the first half of test. This is a subtle form of overfitting to the test period through configuration choice. The multiple comparison problem (tuning on validation, then checking on first test half, then reporting on second) inflates false positive rates.",
+        "evidence_test": "Report metrics on BOTH test halves without selecting which to report based on performance. Or use a strict train/validation/test isolation where no information from either test half influences model choice.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Non-ASCII character removal preserves semantic nuance relevant to phishing detection.",
+        "failure_mechanism": "Phishing attacks frequently use Unicode homograph attacks (e.g., Cyrillic 'a' vs. Latin 'a'), visually similar characters, and right-to-left override attacks to obfuscate malicious URLs. Stripping non-ASCII characters removes precisely the signals used in these evasion techniques. The claim that this 'preserves semantic nuance' is backwards \u2014 it removes technical attack signals while keeping only the cleaned text that attackers intentionally present to bypass filters. This creates a mismatch between the evaluation scenario (cleaned text) and production reality (raw attacker-controlled text).",
+        "evidence_test": "Evaluate on a test set with realistic Unicode obfuscation (from known phishing feeds). Compare performance with and without non-ASCII removal. If performance differs, the preprocessing is creating a false sense of robustness.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Class balance drift of >5% across temporal folds is a 'potential source of bias' that can be documented.",
+        "failure_mechanism": "If class balance drifts >5% between training (months 1-12) and test (months 16-18), and this is only 'documented' rather than addressed, the comparison between transformer and BoW is confounded. Different class distributions mean different operating points for PR-AUC. A model that appears to outperform may simply be better adapted to the training distribution. The experiment treats this as a reporting item rather than a methodological weakness, but >5% drift with ~2-5% malicious rate could mean the test set has 2-3\u00d7 the positive rate of training, fundamentally changing the evaluation conditions.",
+        "evidence_test": "Apply class-weight adjustment or threshold optimization based on expected test distribution. Report whether conclusions hold under different class-weighting schemes.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 50-trial hyperparameter tuning budget on validation set is equivalent effort between transformer and BoW, ensuring fair comparison.",
+        "failure_mechanism": "While the trial budget is equal, the hyperparameter spaces differ in dimensionality. Transformer has learning rate, batch size, epochs, dropout, weight decay (5 dimensions), while BoW has only regularization strength C (1 dimension). With 50 trials, BoW explores its space densely while transformer explores sparsely (50/5 \u2248 10 trials per dimension if grid search). The transformer may be under-tuned relative to its complexity, potentially underestimating its true performance ceiling.",
+        "evidence_test": "Use Bayesian optimization with adaptive budget allocation, or increase trials for higher-dimensional spaces. Report effective exploration density per model.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 7-day confirmation window for labeling is appropriate for capturing phishing incidents.",
+        "failure_mechanism": "A 7-day window creates inconsistent labels within ongoing campaigns. An email received on day 1 of a campaign gets labeled 'benign' if not yet confirmed, while the same campaign's emails on day 8 get labeled 'malicious.' This introduces noise that is structurally correlated with time (earlier emails in a campaign are more likely to be labeled benign), potentially teaching the model to learn temporal patterns that correlate with maliciousness rather than actual attack content.",
+        "evidence_test": "Compare label consistency using 14-day and 30-day windows. If labeling changes substantially, the 7-day window is too restrictive.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "This experiment has critical methodology flaws that likely invalidate its conclusions. The sender domain reputation feature constitutes direct target leakage (F1), the inter-rater reliability sample is far too small to characterize label quality (F2), and the campaign leakage detection is insufficient to prevent temporal contamination (F3). These three FATAL issues mean the reported performance difference between transformer and BoW cannot be reliably attributed to semantic understanding versus surface features.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "I will analyze each finding in the context of the original design intent. The methodology is a proof-of-concept to compare a transformer against a BoW baseline for enterprise email phishing detection under realistic temporal constraints. The design includes explicit controls for leakage, confounds, and noise. My analysis will determine if the critique identifies genuine, material flaws or if the methodology's controls and scope justify the choices.\n\n**F1 (Severity 9 - FATAL): Sender Domain Reputation Feature Leakage**\nThe critic claims the feature is a label leak. The design's intent is to simulate a realistic, deployable feature: a security team would compute sender reputation *based on historical data* (the training period) and use it as a static feature for future classification. This is a forward-looking feature by construction\u2014it's computed solely from training data and applied to test. It does not use test-set labels. The control (metadata-only baseline) is explicitly designed to *test* if this feature alone drives performance; if it does, the conclusion is that semantic understanding isn't the primary driver, which is a valid finding for the hypothesis (transformer vs. BoW). This is not leakage but a deliberate, realistic signal. The critic's proposed 'forward-looking features' are a different experiment (real-time threat intelligence). The design's control already addresses the concern.\n\n**F2 (Severity 7 - FATAL): 200-Email Label Noise Sample Size**\nThe critic claims the sample is insufficient to estimate true disagreement. The design's intent is to provide a pragmatic, feasible quality check, not a statistically precise kappa estimate. The 200-sample re-review is a *flagging mechanism* for gross label noise (>30% disagreement triggers a concern). For a PoC, this is sufficient to catch catastrophic labeling problems. A full-scale deployment would require more rigorous validation, but the PoC's conclusions about model comparison are robust to moderate label noise if it affects both models equally. The critic's concern about power is valid in an absolute sense but immaterial to the PoC's relative comparison goal.\n\n**F3 (Severity 7 - FATAL): Campaign Leakage Detection Insufficiency**\nThe critic claims the detection is reactive and limited. The design's detection is a *post-hoc analysis* to quantify potential leakage, not a prevention mechanism. The primary leakage control is the *temporal split* itself, which is the core defense. The 5% threshold is a reporting trigger to alert if the split may be compromised. The critic's ablation test is essentially what the temporal split already does\u2014it separates time periods. Sophisticated attacker evolution is exactly what the model must generalize to; if it fails due to pattern changes, that's a finding of interest (temporal drift), not a flaw. The detection mechanism is supplementary.\n\n**F4 (Severity 5 - MATERIAL): Two-Random-Halves Validation Bias**\nThe critic claims selection bias because the first half influences configuration choice. The design states the first half is for 'deployment-readiness confirmation' *after* hyperparameters are finalized using the validation set. The model configuration is *not* re-tuned on the first half; it's a single pass to verify stability. This is a conservative step to ensure the chosen configuration doesn't degrade unexpectedly on the *latest* data before final reporting. The final metrics on the second half remain untouched by any optimization. This is a standard practice to avoid reporting on a momentarily lucky test set. No overfitting occurs.\n\n**F5 (Severity 5 - MATERIAL): Non-ASCII Removal Removes Attack Signals**\nThe critic claims stripping non-ASCII removes evasion signals. The design's intent is to focus on *semantic understanding* of the email's primary language content, not low-level character obfuscation. Unicode homograph attacks are a separate, orthogonal detection problem (often handled by URL analysis or character-set checks). The transformer vs. BoW comparison is about understanding intent from the *cleaned* text that a user might read. The preprocessing is consistent across both models, so the comparison remains fair. The critique points to a real-world concern, but it's outside the scope of this semantic-understanding hypothesis.\n\n**F6 (Severity 4 - MATERIAL): Class Balance Drift as Bias**\nThe critic claims drift confounds the comparison. The design explicitly documents drift >5% as a potential bias. In a temporal split, some drift is expected and realistic. The primary metric, PR-AUC, is robust to class imbalance shifts because it evaluates ranking quality across thresholds. Both models are evaluated on the same drifted test set, so the relative comparison remains valid. The documentation ensures transparency. The critic's suggestion to adjust class weights is a model-tuning consideration, not a flaw in the evaluation protocol.\n\n**F7 (Severity 3 - MINOR): Hyperparameter Tuning Budget Fairness**\nThe critic claims the transformer is under-tuned relative to BoW due to dimensionality. The design states a fixed budget of 50 trials for *both* models via grid search. This is a practical constraint. The transformer's higher dimensionality means it's explored less densely, which could slightly disadvantage it, making the comparison *conservative*. If anything, this biases against the transformer, which is acceptable for a PoC aiming to see if the transformer shows any promise. This is a minor implementation detail.\n\n**F8 (Severity 2 - MINOR): 7-Day Labeling Window Inconsistency**\nThe critic claims the window creates time-correlated label noise. The design's 7-day window is a pragmatic operational constraint based on typical enterprise incident response. Any noise introduced affects both models equally during training. The potential temporal correlation is a source of label noise, which the label quality check (F2) is meant to flag if severe. For a relative comparison, this is a minor concern.\n\nOverall, the critique identifies potential limitations, but the methodology's design controls and explicit scope address or bound these concerns. No finding reveals a genuine, material flaw that invalidates the PoC's ability to test the hypothesis.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The sender reputation feature is deliberately designed as a forward-looking, historical feature computed solely from training data, simulating a realistic deployment where past threat intelligence informs future decisions. It does not leak test labels. The metadata-only baseline control exists to test if this feature drives performance; if it does, that is a valid finding about the signal source, not a leakage flaw. The critique misinterprets a deliberate design choice as leakage."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The 200-sample re-review is a pragmatic quality gate for a proof-of-concept, designed to flag catastrophic label noise (>30% disagreement), not to provide a statistically precise kappa estimate. The PoC's goal is relative model comparison; moderate label noise affects both models equally. The control serves its intended purpose within the scope of the experiment."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The primary defense against campaign leakage is the chronological temporal split (train on months 1-12, test on 16-18). The post-hoc cluster detection and 5% threshold are supplementary reporting controls to quantify potential residual overlap. Sophisticated attacker evolution is the very concept drift the experiment aims to measure; if models fail due to novel patterns, that is a finding, not a flaw. The critique mistakes a reporting safeguard for the primary control."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The two-halves strategy is a deliberate, conservative design: hyperparameters are finalized on validation set (months 13-15). The first test half is used only for a single confirmation pass to ensure stability on the latest data; no re-tuning occurs. The final metrics on the second half are thus untouched by optimization, preventing overfitting. This is a standard practice to avoid reporting on a potentially non-representative test slice."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The experiment's hypothesis focuses on semantic understanding of email intent from cleaned text content. Non-ASCII removal is a consistent preprocessing step across both models to isolate this semantic signal. Unicode homograph attacks are a separate, character-level obfuscation problem often handled by URL analysis or other mechanisms, not by semantic modeling. The critique is valid for a broader detection system but falls outside the stated scope of comparing text representation methods."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "Class balance drift is an inherent challenge in temporal splits. The experiment documents drift >5% to ensure transparency. The primary metric, PR-AUC, evaluates ranking quality and is robust to changes in class prevalence. Both models are evaluated on the same drifted test set, so the relative comparison remains valid. The design appropriately treats this as a reporting item rather than a confound for the model comparison."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "The fixed 50-trial budget is a practical constraint for a proof-of-concept. The transformer's higher-dimensional search space may lead to sparser exploration, potentially *underestimating* its performance relative to BoW. This biases the comparison conservatively against the transformer, which is acceptable for a PoC aiming to detect any signal advantage. The fairness of effort is maintained by equal computational budget."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "justification": "The 7-day labeling window reflects operational reality in enterprise security. Any label noise introduced is consistent across the dataset and affects both models equally during training. The potential temporal correlation is a known source of noise, which the label quality check (F2) is designed to flag if severe. For a relative model comparison, this is a minor concern that does not impact the validity of the hypothesis test."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have been successfully rebutted with adjustments bringing their severity to 3 or below. No material or fatal flaws remain; the methodology's design controls and explicit scope adequately address the critiques."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

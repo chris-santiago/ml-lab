@@ -1,0 +1,157 @@
+{
+  "case_id": "eval_scenario_800",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Treating competing risks (death, hospice, long-term care) within 30 days as censoring with label=0 correctly models the clinical objective of 'identifying patients who will return to acute care'.",
+        "failure_mechanism": "This censoring approach introduces systematic bias. Patients who experience a competing event are not 'at risk' of readmission in the same sense as those who remain alive and in the community. Treating them as non-readmissions (label=0) artificially increases the denominator of the non-event class. The model learns that certain high-risk features (associated with mortality/transfer) actually predict *non*-readmission, potentially reversing the true risk relationship and degrading real-world utility. The clinical objective to identify patients for readmission prevention post-discharge cannot be met for patients who are never discharged to community risk.",
+        "evidence_test": "Compare the performance (AUC, net benefit) of the proposed model against a model trained using a proper competing risks framework (e.g., Fine-Gray subdistribution hazard) or one that excludes competing-event patients from the risk set after their event date. A significant performance divergence (e.g., >0.05 AUC difference) in validation would indicate the flaw is material.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The primary evaluation metric (ROC-AUC at 30 days) computed on a test set with censored competing events is an accurate measure of the model's ability to rank-order patients by their risk of readmission.",
+        "failure_mechanism": "ROC-AUC assumes each patient's outcome is known and binary (0/1). In the presence of informative censoring (competing events are not random but correlated with high readmission risk), the derived binary labels are incorrect. Calculating AUC on these inaccurate labels systematically inflates or distorts the metric. The model's apparent discrimination is for a miscalibrated target, not the intended clinical task. This is a fundamental misalignment between the declared objective and its measurement.",
+        "evidence_test": "Calculate the time-dependent AUC/C-index for *hospital readmission* while treating competing events as such (e.g., using the Uno's C-index or AUC^PMC). If this metric differs substantially (>0.03) from the standard binary AUC computed on the flawed labels, the claim is invalidated.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (train: months 1-30, val: 31-36, test: 37-42) is sufficient to prevent all significant leakage and simulate real-world deployment conditions.",
+        "failure_mechanism": "Patients have multiple admissions. A patient with admissions in training months may also have admissions in test months. Features computed from 'prior 6 months' or 'prior utilization' for a test-set admission could incorporate data from that patient's *training-period* admissions. This is a form of patient-level future leakage. The model is trained on a world where it never sees data from patients it will later predict on, but at prediction time, it uses historical data from those same patients that it has already seen in training, violating the IID assumption for the survival process.",
+        "evidence_test": "Audit the test set: calculate the proportion of test admissions where the patient had *any* admission within the training window. If this proportion is high (e.g., >20%), construct a truly 'cold-start' test set containing only patients whose *first ever* admission in the dataset is in the test window. Compare model performance on this pure cold-start set versus the original test set. A performance drop would indicate leakage inflation.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The primary baseline (logistic regression on static features) is a sufficient counterfactual to isolate the value of longitudinal information and the survival framework.",
+        "failure_mechanism": "The baseline architecture is fundamentally incapable of modeling time-to-event, making it an unfair comparison. The survival model's claimed advantage may stem from its ability to weight near-term events more heavily (the 'when' of risk), not just from better features. A fairer baseline would be a conventional ML classifier (e.g., gradient boosting) trained on the same *static* features but also on hand-crafted 'longitudinal summaries' (e.g., mean, slope, count of labs), which is what the survival model's feature engineering pipeline likely produces as inputs. The proposed comparison confounds 'modeling paradigm' with 'feature engineering effort'.",
+        "evidence_test": "Introduce a second baseline: a non-survival ML model (e.g., XGBoost) trained on identical feature vectors (including summarized longitudinal features) as the survival model. If the performance gap between the survival model and this baseline is small (<0.02 AUC) while the gap to the logistic regression is large, the primary claim is weakened; the benefit comes from features, not the survival framework.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Imputation and preprocessing fit on the training set only is sufficient to prevent leakage and is representative of production conditions.",
+        "failure_mechanism": "Clinical measurement protocols change over time (new lab assays, new vital sign monitors). The training-set imputation model learns the joint distribution of features and missingness patterns from the first 2.5 years. If the nature of missingness shifts in the test period (e.g., a new EHR module reduces missingness for certain labs), the imputation model will produce biased estimates, and the missingness indicator will carry a different signal. This is a specific form of distribution shift not captured by simple temporal splitting of the same data.",
+        "evidence_test": "Compare the marginal missingness rate for each major feature category (labs, vitals) between training and test sets. A significant shift (e.g., \u03c7\u00b2 test p < 0.01) for several key features indicates a potential flaw. Further, train a simple classifier to predict the 'test set flag' using only missingness indicators; if it's predictive (AUC > 0.6), missingness pattern has shifted.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The PoC contains two likely fatal flaws related to mishandling of competing risks, which corrupt both the training objective and primary evaluation metric. Additional material concerns exist regarding patient-level temporal leakage and an insufficient baseline comparison.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "## Analysis of Each Finding\n\n**F1 (Severity 7 - Competing Risks as Censoring):** The critic argues that treating death/hospice/LTC within 30 days as censoring with label=0 introduces systematic bias because patients with competing events have different risk profiles than survivors, and the model may incorrectly learn that mortality-predicting features predict non-readmission. This is a valid statistical concern. However, the design explicitly frames the clinical objective as identifying patients in the community who will return to acute care. Patients who die, go to hospice, or enter long-term care are NOT candidates for readmission prevention interventions. This is a deliberate design choice, not an oversight. The critic's evidence test (comparing to Fine-Gray) would identify a different metric, but the current framing answers a valid clinical question. The risk of AUC distortion exists but is bounded for a PoC with moderate competing event rates.\n\n**F2 (Severity 8 - ROC-AUC with Censored Data):** The critic claims ROC-AUC is invalid because censored outcomes produce incorrect binary labels. The design specifies that we predict readmission for patients who survive 30 days and are discharged to the community\u2014this is the risk set. Within this defined population, ROC-AUC is a valid discrimination metric. The design includes the concordance index as a secondary metric, acknowledging the survival context. The evidence test (time-dependent AUC) would show similar values if the model discriminates well, and the binary AUC is interpretable for the stated subpopulation. This is an intentional methodological choice.\n\n**F3 (Severity 5 - Patient-Level Leakage):** The critic correctly identifies that patients with admissions in both training and test windows have features computed from their training-period data influencing test-set predictions. This is a legitimate concern. However, the design explicitly simulates deployment conditions where historical patient data IS available. The 'cold-start' scenario (first admission in test window) is a different clinical question. The design's stratified split and facility-level AUC analysis are controls for this. The critic's evidence test would reveal a different performance characteristic, but not necessarily a flaw in the current design's simulation of deployment.\n\n**F4 (Severity 5 - Insufficient Baseline):** The critic argues the logistic regression baseline lacks longitudinal features, making the comparison unfair. This is technically correct\u2014any performance gap could stem from features rather than the survival framework. However, the design's stated goal is comparing longitudinal survival model vs static logistic regression. The ablation study (survival model on static features) partially addresses this. The critic's suggested second baseline would strengthen the study but is not required for the PoC to test its hypothesis. This is a minor gap, not a fatal flaw.\n\n**F5 (Severity 3 - Imputation Distribution Shift):** The critic raises a valid concern about missingness patterns changing over time. The design acknowledges 'sparse vital signs' and uses missingness indicators precisely to capture this. Training imputation on the training set only is the correct procedure. The evidence test (comparing missingness rates) is appropriate but the design already includes sensitivity analysis on complete-data subsets. This concern is addressed by existing controls.\n\n## Pass 2: Rebuttal Assignment\n\nAll findings are assessed and the methodology holds under scrutiny. Each concern is either a deliberate design choice with valid clinical rationale, or is addressed by existing controls in the methodology.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 4,
+        "justification": "The competing risks treatment is a deliberate design choice reflecting the clinical use case: identifying patients in the community for readmission intervention. Patients who die, enter hospice, or LTC are not candidates for readmission prevention\u2014predicting their readmission risk is clinically meaningless. The design explicitly frames this target population. The bias concern is theoretically valid but bounded in practice for PoC-level competing event rates (typically 5-15%). Fine-Gray would measure a different quantity (subdistribution hazard), not a superior answer to the stated clinical question."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "ROC-AUC is computed on a defined risk set: patients who survive 30 days and are discharged to the community. Within this subpopulation, outcomes are known (readmitted vs. not) and AUC measures discrimination validly. The design explicitly targets this subgroup. The design includes the C-index as a secondary metric, acknowledging the survival context. The evidence test (time-dependent AUC) would yield similar values if discrimination is good, and does not invalidate the binary AUC for the stated target population."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The critic's proposed 'cold-start' test set (patients with first admission in test window) addresses a different clinical scenario than the design simulates. The design explicitly aims to mirror real-world deployment where historical patient data IS available. Using a patient's training-period admissions to compute features for test-period predictions is the intended behavior, not leakage. The stratified split and facility-level AUC analysis are controls for confounding. The evidence test would characterize cold-start performance, not invalidate the current design's simulation of deployment conditions."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The baseline comparison isolates the value of longitudinal features and the survival framework as stated in the design. The critic's proposed second baseline (XGBoost with longitudinal summaries) would strengthen the study but is not required to test the stated hypothesis. The ablation study (survival model on static features) partially controls for methodology differences. The performance gap reflects the combined effect of longitudinal features + survival framework\u2014which is exactly what the experiment tests. The missing baseline is a limitation, not a flaw that invalidates the design."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The design acknowledges 'sparse vital signs' and uses missingness indicators to capture missingness patterns. Training imputation on training data only is the correct procedure. The sensitivity analysis on complete-data subsets directly addresses whether missingness handling drives results. The evidence test (comparing missingness rates) would be informative but the design already has controls for this. Distribution shift in missingness is a deployment concern, not a PoC validity flaw."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have adjusted severity \u2264 5 (maximum is 5 on F2), well below the threshold of 7. All FATAL and MATERIAL findings are successfully rebutted: F1 and F2 are deliberate design choices with valid clinical rationale; F3 addresses a different scope than the design targets; F4 and F5 are limitations that do not invalidate the experiment's core hypothesis. The methodology is sound and the PoC tests its stated hypothesis correctly."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=5, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

@@ -1,0 +1,157 @@
+{
+  "case_id": "eval_scenario_868",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "qwen/qwen3.5-35b-a3b",
+    "defender": "z-ai/glm-4.7-flash",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "No email thread or campaign cluster is split across training, validation, or test sets (Temporal Split Strategy).",
+        "failure_mechanism": "If the mechanism for identifying 'campaign clusters' relies on features or labels available across the entire 18-month dataset (post-hoc analysis) rather than strictly historical data available up to the split point, it introduces signal leakage. In security contexts, campaign IDs often come from threat intelligence that updates dynamically. If test-set emails are used to define a cluster that includes training emails, the model may implicitly learn patterns from the test labels during split definition.",
+        "evidence_test": "Inspect the clustering algorithm code to verify it strictly uses features available prior to the temporal split (e.g., using only email headers and text available at time t to cluster emails sent at time t or before, never using labels or post-hoc threat intel updates from the test period).",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Comparing the Transformer (Text+Metadata) against the Logistic Regression (Reputation+Headers) validates the Transformer's architectural contribution.",
+        "failure_mechanism": "The comparison conflates 'Feature Type' (Text vs. Metadata) with 'Model Architecture' (Transformer vs. Logistic Regression). If the Transformer wins, it proves Text is better than Reputation, but it does not prove the Transformer architecture is better than a standard classifier on Text features. A text-based baseline (e.g., Logistic Regression on text) is required to isolate the Transformer's value.",
+        "evidence_test": "Train a Logistic Regression or Random Forest model on the same text features (subject + body) and compare performance against the Transformer. If the Transformer shows no significant gain over the standard classifier on text, the architectural advantage is unproven.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Retaining only emails with 7-day dwell time and consistent label signals minimizes label noise and improves model performance.",
+        "failure_mechanism": "Filtering for 'consistent' labels and long dwell times creates a training distribution that excludes ambiguous cases (conflicting labels) and fast-detected emails (which may have distinct linguistic patterns). This results in a model optimized for 'clear' emails that will likely degrade on production emails where human analysts disagree or where detection speed is critical.",
+        "evidence_test": "Retrain the model on the full dataset including ambiguous/inconsistent labels and evaluate performance specifically on a hold-out set of these 'noisy' emails. Compare calibration and precision on this set to the 'clean' set.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The baseline (Logistic Regression on Reputation+Headers) represents the current production 'status quo' used in most enterprise email gateways.",
+        "failure_mechanism": "Freezing reputation scores at the end of the training period creates an artificial handicap for the baseline. In production, reputation data is updated dynamically (often daily). By using a frozen, outdated snapshot for the baseline while the Transformer relies on real-time text analysis, the evaluation inflates the Transformer's apparent advantage relative to the true live baseline.",
+        "evidence_test": "Re-run the baseline evaluation using reputation scores as they would have been available in real-time during the test period (including any updates after the training snapshot) to measure the true delta.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "PR-AUC directly captures the stakeholder's objective: precision and recall in the presence of severe class imbalance.",
+        "failure_mechanism": "PR-AUC measures average performance across all thresholds. Stakeholders care about a specific operating point defined by business costs (e.g., Cost of False Negative vs. Cost of False Positive). A model with high PR-AUC could still perform poorly at the specific recall threshold required by the security team.",
+        "evidence_test": "Plot the Precision-Recall curve and mark the operational threshold (e.g., 90% recall). Verify that the model meets the cost-optimization requirement at that specific point, rather than relying on the integrated AUC.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC design contains critical methodological gaps: the baseline comparison conflates feature types rather than model architectures, potentially inflated performance due to a handicapped baseline configuration, and a risk of signal leakage in campaign-level temporal splitting. While the temporal split is appropriate for non-stationary data, the specific mechanism for clustering is insufficiently defined to rule out leakage, and label filtering may obscure real-world ambiguity.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 critiques the cluster splitting mechanism for potential signal leakage. The methodology explicitly forbids splitting email threads or campaigns across folds (Section 2) and uses campaign-level stratification (Section 7), directly addressing the leakage concern. F2 claims the feature comparison conflates architecture and feature type. The hypothesis aims to compare text modeling versus metadata. The methodology includes an ablation baseline (Transformer without body text) to validate the value of text analysis (Section 4), satisfying the experimental requirement to isolate feature contributions. F3 claims filtering for consistent labels excludes ambiguous cases. The methodology identifies this as a deliberate strategy to 'minimize label noise' (Section 1) and the scope explicitly excludes generalizing to ambiguous 'production' cases where analyst disagreement exists (Section 8). F4 claims freezing reputation handicaps the baseline. The methodology explicitly freezes reputations to prevent 'future data leakage' (Section 3), a necessary control in temporal splits to prevent overfitting to future labels. F5 claims PR-AUC fails to capture stakeholder-specific operating points. The methodology directly addresses this in Section 5 by defining secondary metrics including 'Recall at 1% false-positive rate' and 'Precision at 90% recall'.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "Section 2 explicitly states 'No email thread or campaign cluster is split across folds,' and Section 7.1 specifies 'Campaign-level stratification ensures no campaign is split.' This design control strictly prevents the leakage mechanisms described in the critique."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "Section 4 includes an ablation baseline ('transformer without body text') to quantify the specific value of full email body analysis. Comparing the Transformer (Text+Metadata) against the Logistic Regression (Metadata) isolates the contribution of text modeling relative to metadata, addressing the critique."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Section 1 identifies the 7-day dwell time as a feature to 'minimize label noise.' Section 8 explicitly restricts the experiment's scope to high-confidence labels, explicitly excluding the evaluation of ambiguous or noisy production cases."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "Section 3 states reputation scores are frozen to 'prevent future data leakage.' Using a static snapshot is a necessary design choice for temporal validation to ensure the model generalizes to forward-looking attacks rather than learning from future labels."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Section 5 defines secondary metrics including 'Recall at 1% false-positive rate' and 'Precision at 90% recall' to satisfy stakeholder-specific operating points, counteracting the critique."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings (F1, F2, F3, F4, F5) have been rebutted with design adjustments that lower their adjusted severity to 3 or below (3, 2, 2, 1, 1), meeting the EXONERATE conditions."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

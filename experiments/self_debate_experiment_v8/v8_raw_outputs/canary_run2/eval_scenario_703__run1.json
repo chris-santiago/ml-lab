@@ -1,0 +1,217 @@
+{
+  "case_id": "eval_scenario_703",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "x-ai/grok-4.1-fast",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The screening for outcome-predictive language (e.g., 'poor prognosis', 'comfort care') in clinical notes is complete enough to prevent signal leakage.",
+        "failure_mechanism": "The document states only two examples ('poor prognosis', 'comfort care') with no specification of the complete screening vocabulary or method. Clinician notes contain numerous outcome-predictive phrases beyond these two examples (e.g., 'family w/ concerns', 'DNR', 'withdrawal of care', 'terminal', 'palliative', 'moribund', 'poor chance', 'not expected to survive'). An incomplete screening list creates subtle target leakage where the text directly reveals the outcome.",
+        "evidence_test": "Perform a controlled audit: (1) manually annotate a random sample of 500 notes for outcome-predictive language using a comprehensive clinical vocabulary; (2) measure the C-index of a simple bag-of-words model using only these outcome terms as features; (3) if this achieves C > 0.60, leakage is confirmed and screening is insufficient.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Excluding admissions with <50% documentation completeness in their unit-year cohort produces a sample representative of the target ICU population.",
+        "failure_mechanism": "Excluding patients with low documentation completeness introduces selection bias. Patients with incomplete notes may be systematically different: lower acuity patients discharged quickly, patients in understaffed units, or patients who died before extensive documentation occurred. The model is trained on a biased subset and will perform poorly on the excluded population, which is not accounted for in the evaluation.",
+        "evidence_test": "Compare baseline characteristics (mortality rate, length of stay, SOFA scores, demographics) between included and excluded admissions. If excluded admissions have >20% higher mortality or meaningfully different acuity profiles, the selection bias is material.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Forward-fill within 72 hours for laboratory values with binary missingness indicators adequately handles informative missingness.",
+        "failure_mechanism": "Forward-fill assumes missing lab values equal the last observed value, which may not hold in ICU settings where deterioration leads to increased testing. Patients who are stabilizng may have fewer labs; patients deteriorating rapidly may have gaps. The binary indicator captures 'any missing' but not the pattern or timing of missingness, which may carry prognostic information the model could exploit.",
+        "evidence_test": "Train models with and without the missingness indicators and compare coefficients. Additionally, stratify test C-index by the number of missing labs per admission; if performance degrades significantly for patients with many missing labs, the handling is inadequate.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The sample size (15,000-25,000 admissions) provides sufficient positive cases for stable model estimation at 5-10% mortality incidence.",
+        "failure_mechanism": "At the lower bound (15,000 admissions at 5% mortality), there are only 750 positive cases. While technically sufficient for gradient boosting, this is at the threshold where variance in performance estimates becomes high. The experiment design uses a range rather than a defined sample, making it impossible to pre-specify power calculations or guarantee sufficient data for the stated confidence levels.",
+        "evidence_test": "Pre-specify exact sample size with a power calculation: for C-index comparison with baseline, achieve 80% power to detect 0.02 C-index difference at \u03b1=0.05. Report actual N and positive case count in results.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratification by note availability quartile in test set will reveal whether performance gains are driven by documentation volume rather than semantic content.",
+        "failure_mechanism": "The document retains note length and count as features to control for volume, then stratifies test performance by volume quartile. However, this approach conflates correlation with causation\u2014the model may use volume as a proxy for acuity, and the semantic embeddings may still be capturing signal correlated with volume. The stratification does not definitively isolate semantic contribution from volume.",
+        "evidence_test": "Train a third baseline: structured features + randomized note embeddings (embeddings shuffled at the token level within each admission). If the full model outperforms this randomized control by a margin comparable to the structured-only baseline, the semantic contribution is confirmed.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 60/20/20 chronological split provides sufficient data for both training generalization checks and a robust test set.",
+        "failure_mechanism": "With 15,000 admissions at the lower bound, the test set contains only ~3,000 admissions. Stratified analyses by unit, year, note quartile, and SOFA tertile (as specified in evaluation) rapidly fragment into small cells with high variance. Some strata may have too few observations for stable C-index estimation.",
+        "evidence_test": "Report test set size and minimum stratum size for each stratification dimension. If any stratum has <50 observations, note the elevated variance in those cells.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The exclusion criterion of <50% documentation completeness can be reliably applied across all unit-year cohorts.",
+        "failure_mechanism": "Defining completeness as a proportion within a cohort assumes homogeneous documentation standards across units and years. A 50% threshold in one unit may represent very different documentation practices than the same threshold in another unit, creating inconsistent exclusion criteria.",
+        "evidence_test": "Report the distribution of completeness rates across unit-year cohorts and show that the 50% threshold is not trivially met or missed in most cohorts.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 1,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The primary metric (C-index) appropriately captures clinical utility for triage decisions.",
+        "failure_mechanism": "C-index measures pairwise discrimination but is insensitive to calibration and does not account for clinical decision thresholds. A model that ranks pairs correctly but produces poorly calibrated probabilities may still be suboptimal for triage. The design includes secondary calibration metrics, but the primary claim invokes triage utility while using a metric that doesn't directly measure it.",
+        "evidence_test": "None required - this is a minor concern about framing rather than methodology.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The proof-of-concept has one FATAL flaw: incomplete screening for outcome-predictive language creates potential signal leakage from free-text notes to the target. There are four MATERIAL concerns: selection bias from documentation completeness exclusion, potentially inadequate handling of informative missingness in labs, underspecified sample size, and insufficient control for documentation volume confounding. The overall design is sound but requires addressing the leakage risk before conclusions about note semantic value are valid.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Full analysis of each finding before verdict assignment:\n\nF1 (FATAL sev=7): Critic claims the screening for outcome-predictive language is incomplete because only two examples are listed, ignoring many other phrases like 'DNR', 'palliative', etc., potentially causing target leakage via direct outcome signals in text. Design intent in Leakage Prevention (sec 3): explicitly states 'Free-text is screened to exclude outcome-predictive language (e.g., 'poor prognosis', 'comfort care')', indicating a deliberate process to remove known leakage phrases before embedding. This is a standard preprocessing step in clinical NLP PoCs to prevent direct leakage, with examples illustrating the category (end-of-life discussions). Evidence: Design anticipates leakage risks and controls via screening; full exhaustive vocab (hundreds of phrases) is implementation detail, not PoC hypothesis flaw\u2014PoC tests if embeddings add value assuming standard cleaning. Uncertainties: Exact vocab/method unspecified, so empirical audit (as proposed) could confirm zero leakage risk, but design's stated control aligns with best practices (e.g., common in MIMIC-III NLP papers), and C-index baselines will flag if leakage inflates notes model unrealistically. Valid concern but addressed by design intent.\n\nF2 (MATERIAL sev=6): Critic claims excluding admissions from unit-year cohorts with <50% documentation completeness introduces selection bias, as low-doc cohorts may have higher mortality quick-discharge/deaths. Design intent (sec 1): cohort-level exclusion ensures training on representative high-quality data subsets, with 'flagging and stratifying by unit-year cohort' and Confounds sec7 unit/year stratification in eval. This controls for systematic differences by design\u2014exclusion is not individual-level bias but quality filter, preserving population via temporal/unit strata. Evidence: Temporal split (sec2) and stratified eval (sec6/7) directly test representativeness; if bias exists, it would show in unit/year drops. Uncertainties: Actual cohort diffs unknown pre-data, but evidence test (compare baselines) is built-in via stratification\u2014no genuine flaw, as PoC scoped to complete-doc cohorts matching deployment (sec8). Design holds.\n\nF3 (MATERIAL sev=5): Critic claims forward-fill + binary missing indicator inadequately handles informative missingness patterns/timing in labs. Design intent (sec1/3): Explicit handling 'forward-fill within 72h and missing-indicator encoding'; Confounds sec7: 'Model coefficients on missingness indicators are examined to detect if model treats imputed/observed appropriately'. This anticipates the concern\u2014indicator captures missingness signal, coeffs validate no exploitation. Evidence: Stratify by missing labs (critic's test) aligns with design's SOFA/note strata; pattern timing via timestamps implicit in summaries. Uncertainties: Full missing trajectories not modeled (e.g., HMM), but for PoC discrimination on first-72h features, simple imputation standard and controlled. No flaw.\n\nF4 (MATERIAL sev=5): Critic claims lower-bound N=15k (5% mort=750 pos) marginal for stable C-index/CI, no power calc. Design intent (sec1): Range 15-25k based on data span, sufficient positives 'for stable model estimation and reliable test performance estimates'. Evidence: C-index robust at ~500-1000 events (survival ML lit, e.g., MIMIC studies); 60/20/20 yields test ~75-500 pos cases, bootstrap CI handles variance. Uncertainties: Exact N unknown pre-data, but PoC hypothesis tests relative gain, not absolute power\u2014pre-spec power nice-to-have, not required for sound design scoping to single-site (sec8). Not a flaw.\n\nF5 (MATERIAL sev=4): Critic claims stratification by note quartile + volume features doesn't isolate semantic from volume, as embeddings may proxy acuity/volume. Design intent: Secondary baseline 'structured + note summary stats (length, count, ...)' isolates volume; Confounds sec7: 'report coefficients' + 'stratify by quartile; if advantage persists across quartiles, not driven by volume'. Sensitivity retrain excludes notes. Evidence: Multi-controls (baselines + strata + coeffs) definitively parse volume vs semantic\u2014persisting gain across low-volume strata confirms content value. Randomized embeddings gold-standard but orthogonal; design's combo sufficient for PoC claim (sec8: discriminate better via notes). Uncertainties: Correlation present, but controls falsify volume-only hypothesis. Sound.\n\nF6 (MINOR sev=3): Critic claims test ~3k too small for multi-strata (unit/year/note/SOFA), high-variance cells. Design intent (sec6): 'Stratified performance' with explicit reporting; sec5 locks test. Evidence: PoC expects/requires reporting min sizes (as critic tests); C-index stable >50 events/stratum feasible at 20% test, fragments noted as limits. Uncertainties: Actual sizes data-dependent, but minor as primary unstratified C-index powers claim. Expected.\n\nF7 (MINOR sev=2): Critic claims 50% threshold arbitrary/inconsistent across unit-year cohorts. Design intent (sec1): Cohort-relative (per unit-year), not absolute. Evidence: Confounds imply reporting distributions; threshold filters poor-data eras/units deliberately. Uncertainties: Edge distributions, but minor/reportable. Normal for PoC.\n\nOverall: All findings address anticipated risks via named controls (Leakage prev, Confounds sec7, strata). No genuine design flaws changing hypothesis validity\u2014critic surfaces thorough checks, many built-in. Highest concerns (F1) mitigated by stated intent; no concessions needed, all rebuttable.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "Design explicitly controls leakage via preprocessing screen for outcome-predictive language (sec3 Leakage prevention), with examples representing end-of-life category; full vocab is PoC implementation detail, deliberate simplification as standard in clinical NLP (e.g., excludes direct DNR/phrases post-hoc), validated indirectly by baseline C-index\u2014if notes massively outperform unrealistically, leakage flagged."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "Cohort-level exclusion (<50% unit-year completeness) is deliberate quality filter (sec1), with unit/year stratification in eval (sec6/7) directly testing representativeness/bias; temporal split preserves population shifts, scoping PoC to deployable high-doc subsets (sec8)."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Forward-fill + indicators deliberate standard for 72h ICU data (sec1/3); Confounds sec7 examines missingness coeffs and plans stratification-aligned checks, anticipating pattern concerns\u2014adequate for PoC feature summaries."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Range 15-25k (750-2500 pos) sufficient for PoC relative C-index gain (sec1, lit supports ~500 events); power calc orthogonal to hypothesis design scoping single-site temporal eval (sec8), not pre-data requirement."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Volume isolated via secondary baseline (structured + summaries sec4), coeffs + quartile stratification (Confounds sec7: persists across quartiles confirms semantic); sensitivity retrain bounds non-note factors\u2014comprehensive for PoC claim."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 1,
+        "justification": "Stratification variance expected/data-dependent; design requires reporting min sizes (sec6), minor for primary unstratified C-index powering notes hypothesis."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Cohort-relative threshold deliberate (sec1); distributions reportable as implied, immaterial to core validity."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings rebutted with design controls (e.g., Leakage prevention, Confounds sec7 strata/baselines), yielding adjusted severities \u22643; no DEFER/CONCEDE needed, confirming sound methodology for PoC hypothesis."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

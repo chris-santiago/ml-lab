@@ -1,0 +1,182 @@
+{
+  "case_id": "eval_scenario_862",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "A transformer model fine-tuned on the provided text-context window (512 tokens) will learn to extract meaningful phishing language signals from the raw text, providing a performance advantage over a baseline that only receives hand-engineered features and metadata.",
+        "failure_mechanism": "The mechanism for failure is the 'bag of metadata' problem. The transformer's text window (subject + sender + truncated body) may contain highly predictive tokens that are simply metadata proxies (e.g., sender domain names, email addresses, specific file attachment names from the training period). The transformer could achieve high performance by memorizing these spurious, temporally unstable patterns (e.g., attacker domains active during training) rather than learning generalizable linguistic patterns of phishing. The baseline model is explicitly denied raw text, but if the key signal is not linguistic but is instead these metadata proxies present *within* the text, the experiment falsely attributes the transformer's advantage to 'learned text representations.'",
+        "evidence_test": "Perform a counterfactual ablation: Train a third model (e.g., a simple logistic regression or a transformer) on *only* the tokenized sender domain, email address, and attachment filenames extracted from the text, excluding all other body and subject language. Compare its test performance (PR-AUC) to the full transformer and the hand-engineered baseline. If this 'metadata-from-text' model matches the full transformer's performance, the claimed advantage is spurious.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal split (train on Q1-12, validate on Q13-15, test on Q16) is sufficient to prevent model memorization of attack campaigns and force generalization to 'novel, unseen attack patterns.'",
+        "failure_mechanism": "Phishing campaigns often exhibit strong *seasonal* or *quarterly* patterns tied to business cycles, holidays, or tax seasons. If Q16 (the test quarter) shares seasonal characteristics with Q4 or Q8 from the training set, the model may appear to generalize but is actually leveraging seasonal memorization. More critically, if attacker infrastructure (e.g., compromised domains, IP blocks) has a lifespan longer than a single quarter, a model trained on Q1-12 may have seen domains that are *re-activated* in Q16. The temporal split does not guarantee independence if the underlying threat entities (sender domains, IPs) recur.",
+        "evidence_test": "Report the Jaccard similarity or overlap rate of unique sender domains between the training set and the test set. If overlap is high (>5-10%), the temporal split is leaky at the entity level. Additionally, compute performance metrics separately for emails in Q16 from *truly novel* sender domains (not seen in Q1-15) vs. emails from recurring domains. A significant performance drop on novel domains would indicate the model is not generalizing linguistically.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Precision-Recall AUC (PR-AUC) is a sufficient primary metric to evaluate model performance for the security operating regime (low false-positive rates).",
+        "failure_mechanism": "PR-AUC integrates over all recall levels, giving equal weight to high-recall (low-precision) regions that are operationally irrelevant. A model could achieve a high PR-AUC by performing well at high recall (e.g., catching 99% of phishing) but terribly at low recall (e.g., the high-precision region where security teams actually operate, catching 50% of phishing with very few false positives). The metric could be inflated by performance in a regime the deployer does not care about, masking poor performance at the critical low-FPR threshold.",
+        "evidence_test": "Plot the full Precision-Recall curve for both models on the test set and annotate the operating region corresponding to a 1% False Positive Rate (or the equivalent precision level). Report the precision at that specific operating point (P@FPR=0.01) as a key secondary metric. If the model with the higher PR-AUC has significantly lower precision in this critical region, the primary metric is misleading.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The hand-engineered feature set for the gradient-boosted baseline captures all the *actionable* signal available in the metadata, creating a fair 'apples-to-apples' comparison where any transformer advantage must come from text understanding.",
+        "failure_mechanism": "The claim assumes the feature engineering is complete and optimal. However, the process of converting raw metadata (e.g., 'sender reputation score', 'keyword density') into model features involves lossy compression and subjective choices. The gradient-boosted model is limited by these human-designed features. The transformer, processing raw text, could reconstruct a more nuanced, continuous version of these same signals (e.g., inferring sender reputation from the writing style and formatting of the email itself, or detecting urgency not captured by a finite keyword list). Thus, the transformer's advantage might not be in understanding phishing *language* per se, but in doing superior *feature engineering* on metadata-adjacent signals present in the text.",
+        "evidence_test": "Conduct a feature augmentation experiment: provide the gradient-boosted model with *both* the hand-engineered features *and* the bag-of-words or TF-IDF vectors of the same text segments (subject, sender, truncated body) given to the transformer. If the augmented baseline's performance closes the gap with the transformer, the transformer's advantage was in feature representation, not necessarily deep linguistic understanding.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer model's calibration (measured by Expected Calibration Error) is independent of its discrimination performance (PR-AUC), and both are important to report.",
+        "failure_mechanism": "The experimental design tunes and selects models based *solely* on validation PR-AUC. There is no mechanism (e.g., a calibration-aware loss function or post-hoc calibration on the validation set) to ensure the selected model is well-calibrated. It is entirely possible that the model with the best PR-AUC is poorly calibrated. Reporting ECE post-hoc is an observation, not a guarantee. For deployment, a model with good discrimination but terrible calibration is dangerous, as security operators cannot trust the confidence scores.",
+        "evidence_test": "After model selection based on PR-AUC, apply temperature scaling (or Platt scaling) to the selected transformer model using the *validation* set, then report the calibrated model's test ECE and PR-AUC. If calibration significantly improves without harming discrimination, the original tuning protocol was suboptimal for the stated dual objectives.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "N1",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The BPE vocabulary is fit exclusively on the training set to prevent target leakage.",
+        "failure_mechanism": "While fitting the tokenizer on the training set prevents direct leakage, novel phishing terms, misspellings, or emergent jargon in the test set (Q16) will be tokenized into many subword units or an [UNK] token. This could degrade the transformer's ability to process genuinely novel linguistic patterns, artificially disadvantaging it compared to a scenario where the vocabulary is updated with time. This is a trade-off, not a flaw, but it means the experiment is testing the transformer's robustness to vocabulary shift as well as its phishing detection capability.",
+        "evidence_test": "Measure the rate of [UNK] tokens or the average number of subword tokens per word in the test set versus the training set. If there is a significant increase, it indicates vocabulary shift that could impact performance.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The experimental design is methodologically sound in its temporal splitting and metric choice but contains several potential fatal flaws: the transformer may be exploiting metadata within the text rather than learning language, and the temporal split may not guarantee entity-level independence. These issues must be addressed to validate the core hypothesis.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critique raises several valid concerns regarding the experiment design, including the potential for the transformer to memorize metadata proxies, the sufficiency of the temporal split, the adequacy of PR-AUC as a primary metric, the completeness of the hand-engineered feature set, and the calibration of the transformer model. Each of these concerns can be addressed through specific experiments or additional analyses.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The suggested ablation study can help determine if the transformer's performance is driven by metadata proxies."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "justification": "Computing Jaccard similarity and evaluating performance on novel vs. recurring domains can assess the validity of the temporal split."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "While PR-AUC may not perfectly reflect low-FPR performance, it is a standard metric. Reporting additional metrics can complement PR-AUC."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The suggested feature augmentation experiment can help determine if the transformer's advantage is due to superior feature representation."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 4,
+        "justification": "Applying temperature scaling and reporting calibrated ECE and PR-AUC can test if the original tuning protocol was suboptimal for calibration."
+      },
+      {
+        "finding_id": "N1",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The concern represents a trade-off rather than a flaw. Measuring [UNK] tokens can quantify the impact."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Several findings require additional empirical tests to resolve concerns about metadata proxies, temporal split validity, feature representation, and model calibration. Thus, an empirical test is agreed upon."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=8, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 7,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 4,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=4, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "N1",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "4 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

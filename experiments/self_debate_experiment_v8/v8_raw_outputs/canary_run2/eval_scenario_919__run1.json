@@ -1,0 +1,107 @@
+{
+  "case_id": "eval_scenario_919",
+  "stratum": "mixed",
+  "flaw_category": "context_dependent",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A 21-day maturation window prior to extraction ensures that case outcomes are finalized, accurately labeling messages as phishing or non-phishing without later escalations misclassifying benign emails.",
+        "failure_mechanism": "Phishing incidents, especially sophisticated BEC or lure campaigns, may require analyst review or victim reporting weeks or months after receipt, causing labels assigned within 21 days to flip (benign to phishing), introducing systematic label noise that degrades model training and evaluation equally but unverifiably.",
+        "evidence_test": "Report label stability by comparing classifications at 21 days vs longer horizons (e.g., 60/90 days post-receipt), quantifying flip rate (% of messages relabeled phishing) and impact on prevalence per split.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Removing exact duplicates before splitting and grouping near-duplicates by normalized URL sets plus subject hashes ensures variant copies of the same campaign do not span train/validation/test windows, preventing performance inflation from duplication.",
+        "failure_mechanism": "The unspecified grouping procedure (e.g., global clustering vs. per-split) could fail to capture all campaign variants (under-grouping similar emails with altered URLs/subjects, allowing cross-split leakage) or over-remove test data from persistent campaigns (keeping only train instances, biasing test toward entirely novel campaigns and altering distribution shift severity).",
+        "evidence_test": "Document exact deduplication/clustering algorithm (thresholds, linkage method, retention rule per group), report % data retained/removed per split, campaign group sizes/distribution across time windows, and delta in metrics between raw chronological split vs. deduplicated split.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A 3-month validation and 3-month test window on enterprise inbound mail provides sufficient phishing positives for reliable estimation of PR-AUC and secondary metrics, enabling valid model comparison.",
+        "failure_mechanism": "Phishing rarity could yield too few positives in short windows (e.g., <200 in test if prevalence <0.05% on ~1M emails/month), producing high-variance metrics sensitive to random seed or small shifts, overstating confidence in improvements.",
+        "evidence_test": "Report phishing prevalence and absolute counts of positives per split; compute and report bootstrap 95% CIs on PR-AUC for both models on test set to quantify estimation uncertainty.",
+        "flaw_category": "eval_inflation"
+      }
+    ],
+    "summary": "The PoC design is rigorous with chronological splits, anti-leakage measures, strong baselines, and confounds controls, but rests on unverified prerequisites for label stability and deduplication efficacy, plus potential evaluation power issues from rare events.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1: The critic claims the 21-day window introduces label noise because labels might flip (benign to phishing) after the window closes. The methodology explicitly states: 'include only messages whose case outcome is finalized'. This creates an exclusion filter: messages without a finalized outcome by day 21 are dropped from the dataset, not labeled benign. This design intent (explicit in the text) directly mitigates the flip risk the critic describes for the included training data. The critic's mechanism assumes labels are assigned to pending cases, which contradicts the 'finalized only' constraint. Rebuttal: `REBUT-DESIGN` with a citation of the inclusion criteria.\n\nF2: The critic claims the deduplication method is unspecified and risks cross-split leakage. The methodology states a mandatory requirement: 'group near-duplicates using normalized URL sets and subject hashes'. While specific hyperparameters are not detailed, the *design* mandates this grouping as a control to prevent campaign leakage. The critique conflates 'lack of algorithm specification in this summary' with 'lack of leakage control'. The design includes the necessary control; the specific algorithm is a reporting detail, not a validity threat. Rebuttal: `REBUT-DESIGN` citing the explicit grouping requirement.\n\nF3: The critic claims 3 months is insufficient for stable PR-AUC estimation due to phishing rarity. The methodology uses PR-AUC specifically because 'phishing is rare and the security queue operates on a ranked stream'. Enterprise mail volumes (millions of messages over 18 months) ensure sufficient positives even at low prevalence (e.g., >1000 positives in test set). Reporting uncertainty (bootstrap CIs) is standard validation practice, not a design failure. The design metric choice accounts for the rarity. Rebuttal: `REBUT-DESIGN` citing the metric rationale and data volume.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The design explicitly filters for 'messages whose case outcome is finalized'. This inclusion criterion excludes unresolved messages, preventing the label flip risk described by the critic for the retained dataset. The 21-day window applies to finalized outcomes, not pending cases."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "justification": "The methodology mandates grouping near-duplicates via normalized URLs and subject hashes to prevent inflated estimates. This is a hard design control against leakage. Specific algorithmic parameters are reporting details; the existence of the grouping requirement mitigates the leakage risk."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "PR-AUC is selected specifically for rare events. Enterprise-scale data (millions of emails) ensures sufficient positive counts for ranking estimation. Reporting CIs is standard validation practice that does not invalidate the design."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings were rebutted via design intent and constraints, reducing adjusted severities to 2, 2, and 3 respectively. No material flaws remain that would invalidate the hypothesis comparison."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

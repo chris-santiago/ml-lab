@@ -1,0 +1,192 @@
+{
+  "case_id": "eval_scenario_801",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Stratified splitting by course ID, term, and failure label prevents train/validation/test leakage and ensures fair model comparison.",
+        "failure_mechanism": "If the stratification unit (student-course instance) is not independent across splits, temporal leakage can occur. For example, multiple courses taken by the same student in different terms could be distributed across splits. This violates the IID assumption because a student's behavior patterns are consistent across courses. The transformer, which models sequential patterns, can learn student-specific behavioral signatures in training and see the same student's patterns in validation/test through different courses, artificially inflating performance relative to the aggregated-feature baseline.",
+        "evidence_test": "Check for overlapping student IDs across splits. If >5% of students appear in multiple splits (e.g., student A in train, student A in test via different course), this constitutes leakage. A permutation test comparing model performance when splitting by student versus by student-course instance would show inflated performance for the latter if leakage exists.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Precision at 80% recall is the primary actionable metric for stakeholder needs.",
+        "failure_mechanism": "The threshold is selected on the validation set to achieve 80% recall, then applied to the test set. However, the model's precision-recall trade-off may shift under distribution shift between validation and test (even with stratification). If the shift occurs, the fixed threshold may yield different recall on test (not 80%), making the reported precision incomparable to the stakeholder's requirement. The metric becomes uninterpretable if the operational recall target isn't met in deployment.",
+        "evidence_test": "Report actual recall on test set at the validation-selected threshold. If recall deviates significantly from 80% (e.g., <75% or >85%), the primary metric is invalid. A bootstrap analysis of threshold stability across validation folds would quantify sensitivity.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Aggregated baseline features capture all relevant non-sequence information, so any transformer improvement is attributable to sequence modeling.",
+        "failure_mechanism": "The baseline uses aggregated statistics (e.g., total interactions by type, mean assignment grade). These aggregates discard temporal ordering within the first two weeks. The transformer, via positional embeddings, captures relative timing. However, the baseline could be augmented with simple temporal features (e.g., interaction rate decay, day-of-week patterns, time between submissions) that are not sequence-structured but capture timing signals. Without these, the comparison conflates 'sequence modeling' with 'any temporal feature engineering.'",
+        "evidence_test": "Benchmark against an enhanced baseline with engineered temporal features (e.g., standard deviation of time between events, slope of interaction count over days). If the gap between transformer and logistic regression narrows significantly, the claimed sequence advantage is overstated.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Standardization and vocabulary are established once from the complete corpus, preventing split-specific variance.",
+        "failure_mechanism": "Using the complete corpus (train+validation+test) to determine standardization parameters (mean/std) and vocabulary leaks global distribution information into training preprocessing. While this reduces variance, it gives both models access to test-distribution statistics during training, which is a form of preprocessing leakage. In production, new data would require re-estimation or cause distribution shift.",
+        "evidence_test": "Compare performance when standardization/vocabulary are fit on training-only versus complete corpus. A material performance drop with training-only fitting indicates the experiment overestimates production performance.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Stratification by course ID, term, and failure label ensures each split preserves course-level failure rates and term composition.",
+        "failure_mechanism": "Stratification on three variables jointly may produce splits with very few instances for rare courses or terms, leading to high variance in per-course evaluation. More critically, if a course is offered only once (single term), it must appear entirely in one split, preventing generalization to unseen courses. The design implicitly assumes all courses appear multiple times across terms.",
+        "evidence_test": "Check the number of unique courses with instances in only one split. If >10% of courses are single-split, report performance separately for these courses. A large performance drop would indicate poor generalization to new course offerings.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The sensitivity analysis on students with no recorded prior interventions rules out confounding by selection bias.",
+        "failure_mechanism": "Prior interventions (e.g., tutoring flags) may be missing not at random. Students who receive interventions might differ systematically in unobserved ways (motivation, help-seeking behavior) that affect both their event sequences and outcomes. Excluding them does not fully address confounding; it merely restricts analysis to a potentially non-representative subgroup.",
+        "evidence_test": "Compare event sequence patterns (e.g., entropy, regularity) between students with and without prior interventions. If patterns differ significantly, the subgroup analysis may not generalize to the full population.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "Transformer's concatenation of course metadata to final output is an optimal integration method.",
+        "failure_mechanism": "Simple concatenation may not effectively fuse sequential and static features; alternative architectures (e.g., cross-attention) could perform better. However, this is an architectural choice, not a methodology flaw.",
+        "evidence_test": "Ablation study comparing concatenation versus feature-wise modulation.",
+        "flaw_category": "below_threshold"
+      }
+    ],
+    "summary": "The design contains one likely fatal leakage flaw (student-course splitting) and several material weaknesses in metric interpretation and baseline comparison. The core claim about sequence modeling advantage is threatened by potential data leakage and incomplete baselines.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 claims temporal leakage because students appearing in multiple courses could be split across train/test. This is a valid point for a production model, but for this hypothesis (Does sequence modeling improve prediction?), the unit of analysis is the student-course interaction. However, since the transformer learns behavioral signatures, seeing the same student in both splits could indeed inflate performance. I must evaluate if this is a fatal flaw. In this context, the goal is to see if sequence structure helps; if the model is just memorizing student IDs, the result is invalid. I will concede this as it is a genuine risk in student-level data.\n\nF2 discusses the stability of the 80% recall threshold. The critic argues that a fixed threshold from validation might not yield 80% recall on test. This is the standard way to evaluate a model (fixed threshold on held-out data). The 'metric' is Precision at 80% Recall; if the recall on test is 78% or 82%, it's a measurement of the model's stability, not a flaw in the methodology. The secondary metrics (AUC-PR) explicitly account for this. This is immaterial to the hypothesis testing.\n\nF3 suggests the baseline is too simple because it lacks engineered temporal features (slopes, decay). The design intent was to compare sequence modeling (Transformers) against aggregated statistics (Logistic Regression). While a stronger baseline is always nice, the 'aggregated' vs 'sequential' dichotomy is the core of the hypothesis. Adding complex manual feature engineering to the baseline shifts the experiment from 'Can a Transformer do this?' to 'Is a Transformer better than a human engineer?'. This is a scope issue; the current baseline is sufficient to prove if sequence structure provides any value over simple counts.\n\nF4 claims leakage because the vocabulary and standardization were fit on the complete corpus. This is a common PoC simplification to ensure the transformer doesn't crash on unknown tokens in the test set. While technically leakage, for a PoC focusing on architectural advantage, this affects both the baseline and the transformer identically. It does not give the transformer a relative advantage over the baseline, which is the primary goal of the experiment. I will rebut this as immaterial to the relative comparison.\n\nF5 concerns the variance of rare courses. The design already uses stratified sampling by course ID and term to mitigate this. The claim that single-term courses must be in one split is actually a feature of stratification (preserving the course's internal failure rate), not a flaw. This is a minor observation that doesn't impact the validity of the overall performance gain.\n\nF6 argues that the sensitivity analysis on interventions is a restriction of the population. The intent of the sensitivity analysis was specifically to 'rule out confounding by selection bias'\u2014meaning it was designed to be a subgroup analysis. The critic is essentially arguing that a subgroup analysis doesn't describe the whole population, which is a tautology and not a flaw in the control methodology.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic is correct that splitting by student-course instance rather than student ID allows the model to potentially memorize individual student behavioral signatures across different courses, which would artificially inflate the transformer's performance."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -7,
+        "adjusted_severity": 0,
+        "justification": "A fixed threshold from the validation set is the standard protocol for estimating production performance. The use of AUC-PR as a secondary metric specifically mitigates the risk of threshold instability."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "The experiment's scope is to compare aggregated statistics against sequence modeling. Manually engineering complex temporal features into the baseline transforms the experiment into a comparison of 'automated sequence learning' vs 'manual feature engineering', which is outside the stated goal."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "Preprocessing leakage from the complete corpus affects both the baseline and the transformer identically. Since the hypothesis tests the relative advantage of the transformer over the baseline, this does not bias the result in favor of one model."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Stratification by course ID and term was explicitly chosen to preserve the failure rate distribution; the behavior of single-term courses is a known constraint of this stratification and does not invalidate the aggregate result."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The sensitivity analysis is by definition a subgroup analysis intended to check for confounding; the critic's claim that it is non-representative is a misunderstanding of the purpose of a control subgroup."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "While most findings were successfully rebutted, F1 identifies a fatal flaw in the splitting strategy (student-course vs student-level split) that allows for behavioral leakage. Because this could fundamentally inflate the transformer's results, it must be conceded."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=8 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

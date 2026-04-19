@@ -1,0 +1,1109 @@
+{
+  "case_id": "eval_scenario_777",
+  "stratum": "regular",
+  "flaw_category": "distribution_shift",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived",
+    "critics": [
+      "google/gemma-4-31b-it",
+      "minimax/minimax-m2.5",
+      "mistralai/mistral-small-2603"
+    ]
+  },
+  "critic_outputs": [
+    {
+      "findings": [
+        {
+          "finding_id": "F1",
+          "severity": 8,
+          "severity_label": "FATAL",
+          "suppressed": false,
+          "claim": "The temporal-stratified split (60/20/20) prevents information leakage and respects the deployment scenario.",
+          "failure_mechanism": "The PoC restricts the cohort to patients with at least 12 months of history. In a chronological split, patients who had admissions in the training period (first 60%) and then had an index admission in the test period (final 20%) will have their 'training-period' data used as input features (prior utilization/sequences) for their 'test-period' prediction. While the label is not leaked, the model is exposed to the specific clinical trajectories and baseline characteristics of the test patients during the training phase, leading to 'patient-level' leakage that inflates performance via memorization of patient-specific patterns rather than generalizable clinical signals.",
+          "evidence_test": "Compare the test set PR-AUC of the current split against a 'Strict Patient Split' where any patient appearing in the test set is entirely removed from the training set (including their historical encounters). A significant drop in performance would confirm the leakage.",
+          "flaw_category": "signal_leakage"
+        },
+        {
+          "finding_id": "F2",
+          "severity": 6,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "The comparison between the Transformer and Logistic Regression is 'apples-to-apples'.",
+          "failure_mechanism": "The Transformer is given the baseline features PLUS temporal sequences, while the Logistic Regression is given only baseline features. If the Transformer outperforms the baseline, it is impossible to determine if the gain is due to the Transformer's architecture (attention/non-linearity) or simply the addition of more data (the temporal sequences). The baseline is not a true baseline for the hypothesis 'Transformer > LR' because the input spaces are different.",
+          "evidence_test": "Implement a third model: a Logistic Regression (or Random Forest) trained on the baseline features PLUS aggregated summaries of the temporal sequences (e.g., counts, means, and most recent values of the sequence data). If this 'Augmented LR' matches the Transformer, the architecture is not the driver of performance.",
+          "flaw_category": "missing_baselines"
+        },
+        {
+          "finding_id": "F3",
+          "severity": 4,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "The model will generalize across clinical contexts via unit-level stratification.",
+          "failure_mechanism": "Stratification ensures representation in the splits, but it does not prevent the model from overfitting to unit-specific coding patterns (e.g., a specific unit's tendency to over-code certain comorbidities). Without a 'leave-one-unit-out' validation or a specific check for unit-level variance in predictions, the model may achieve high aggregate PR-AUC by overfitting to the most populous unit's patterns while failing on smaller, high-risk units.",
+          "evidence_test": "Calculate the variance of PR-AUC across different discharge units. A high variance suggests the model is relying on unit-specific artifacts rather than general clinical signals.",
+          "flaw_category": "eval_inflation"
+        },
+        {
+          "finding_id": "F4",
+          "severity": 2,
+          "severity_label": "MINOR",
+          "suppressed": false,
+          "claim": "The 12-month history requirement ensures comparable utilization features.",
+          "failure_mechanism": "By excluding patients with <12 months of history, the PoC introduces a selection bias. In production, many high-risk readmission candidates are 'new' patients or those with sporadic care. The model's performance on this 'filtered' cohort may not reflect its performance on the actual inpatient population, potentially overestimating the utility of the temporal sequences which are only available for long-term patients.",
+          "evidence_test": "Evaluate the model on a small hold-out set of patients with <12 months of history (using padded sequences) to quantify the performance degradation on the excluded population.",
+          "flaw_category": "synthetic_data_assump"
+        }
+      ],
+      "summary": "The PoC contains a critical signal leakage flaw where historical data of test patients is present in the training set, and a baseline flaw where the Transformer is given more data than the Logistic Regression, confounding the results.",
+      "no_material_findings": false
+    },
+    {
+      "findings": [
+        {
+          "finding_id": "F1",
+          "severity": 6,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "The temporal split (60/20/20 chronologically) combined with patient-level stratification ensures no patient appears in both train and test sets while maintaining chronological ordering.",
+          "failure_mechanism": "These two requirements are in direct conflict. If split chronologically (earliest 60%, middle 20%, latest 20%), patients with admissions spanning multiple time periods will appear in multiple splits. To enforce 'no patient in both train and test,' either: (1) patients with any admission in test period are excluded from train entirely (violating chronological principle), or (2) the temporal ordering is compromised. The design does not clarify which constraint is relaxed.",
+          "evidence_test": "Examine the data split implementation to determine: (a) how many patients are excluded to achieve patient-level separation, (b) whether any patients with admissions in train period also have admissions in test period, (c) the effective sample sizes per split after all exclusions.",
+          "flaw_category": "signal_leakage"
+        },
+        {
+          "finding_id": "F2",
+          "severity": 8,
+          "severity_label": "FATAL",
+          "suppressed": false,
+          "claim": "The transformer model is compared fairly against logistic regression to determine if temporal sequences provide additional predictive value.",
+          "failure_mechanism": "The transformer receives BOTH baseline features AND temporal sequences, while logistic regression receives baseline features ONLY. This is not an apples-to-apples comparison of model architectures on equivalent information. Any performance gain by the transformer could simply be due to having more input features (the sequences), not due to the transformer's architecture or attention mechanism. The experiment cannot distinguish whether temporal sequences add value or whether the transformer is simply a larger model with more data.",
+          "evidence_test": "Run a controlled comparison: (a) logistic regression WITH temporal sequences (embedded via simple averaging or PCA), (b) transformer WITHOUT baseline features (only temporal sequences), (c) current setup. Only (a) vs transformer isolates architectural benefit of attention.",
+          "flaw_category": "missing_baselines"
+        },
+        {
+          "finding_id": "F3",
+          "severity": 7,
+          "severity_label": "FATAL",
+          "suppressed": false,
+          "claim": "Temporal sequences capture 'prior admissions' and 'prior utilization history' to predict readmission.",
+          "failure_mechanism": "The sequence definition is ambiguous: does 'sequence of discharge diagnoses from prior admissions' include the index admission's diagnosis? If the transformer sees the index admission's ICD codes in the sequence, it has direct access to the primary diagnosis driving readmission risk \u2014 this is direct label leakage. The design states sequences are 'padded to 12 months' but does not explicitly exclude the index admission from the sequence.",
+          "evidence_test": "Verify that temporal sequences explicitly exclude any events from the index admission (the admission being predicted on). The sequence should only contain events strictly prior to the index discharge timestamp.",
+          "flaw_category": "signal_leakage"
+        },
+        {
+          "finding_id": "F4",
+          "severity": 5,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "The transformer learns meaningful temporal patterns from clinical sequences.",
+          "failure_mechanism": "The design mentions 'sequence of prior admission/discharge dates (encoded as time deltas)' but does not specify the time encoding mechanism. Without explicit time encoding (e.g., sinusoidal positional encoding or learned time embeddings), the transformer cannot distinguish a diagnosis from 1 month ago versus 11 months ago \u2014 both appear as adjacent tokens. Since readmission risk decays non-linearly with time, this is a critical missing mechanism.",
+          "evidence_test": "Verify the time encoding implementation. Test whether the model can distinguish recent vs. distant events by examining attention patterns or probing tests on synthetic data with known time gaps.",
+          "flaw_category": "unverified_prereqs"
+        },
+        {
+          "finding_id": "F5",
+          "severity": 4,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "Hyperparameter tuning on the validation set produces generalizable hyperparameters.",
+          "failure_mechanism": "The validation set represents a specific temporal window (the middle 20% of the timeline). Hyperparameters optimized for this period may overfit to temporal artifacts specific to that window (seasonal patterns, hospital policy changes, staffing changes). This creates optimistic validation metrics but may not transfer to the test period.",
+          "evidence_test": "Report validation performance variance across temporal quarters within the validation period. If validation performance is unstable across quarters, the hyperparameter selection is unreliable.",
+          "flaw_category": "eval_inflation"
+        },
+        {
+          "finding_id": "F6",
+          "severity": 4,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "Permutation importance verifies that the transformer's performance gain comes from temporal sequences.",
+          "failure_mechanism": "Permutation importance shuffles input features to measure their contribution. However, since the transformer has BOTH baseline features AND sequences while logistic regression only has baseline features, permutation importance on the transformer cannot isolate the 'incremental' value of sequences. The baseline features in the transformer are the same as logistic regression's input \u2014 the comparison is confounded by the unequal feature sets.",
+          "evidence_test": "Compare: (a) transformer with all features, (b) transformer without sequences (baseline features only), (c) logistic regression with baseline features. The difference (a)-(b) isolates sequence value; (b)-(c) isolates architecture value.",
+          "flaw_category": "eval_inflation"
+        },
+        {
+          "finding_id": "F7",
+          "severity": 3,
+          "severity_label": "MINOR",
+          "suppressed": false,
+          "claim": "Bootstrap resampling by patient preserves temporal structure for confidence intervals.",
+          "failure_mechanism": "Resampling by patient treats all a patient's admissions as independent draws, but admissions within a patient are temporally correlated (a patient readmitted once is more likely to be readmitted again). This underestimates the true variance. Additionally, if the temporal split issue (F1) exists, bootstrap by patient may not preserve the chronological train/val/test structure.",
+          "evidence_test": "Use block bootstrap that preserves temporal ordering (sample temporal windows rather than patients), or report variance across temporal quarters in addition to bootstrap CIs.",
+          "flaw_category": "metric_limitations"
+        },
+        {
+          "finding_id": "F8",
+          "severity": 2,
+          "severity_label": "MINOR",
+          "suppressed": false,
+          "claim": "5% manual chart review validates label accuracy.",
+          "failure_mechanism": "With 5-15% readmission rate, a 5% sample yields very few positive labels (~0.25-0.75% of total dataset). This provides insufficient precision to estimate error rate reliably. A 5% error rate threshold is also arbitrary \u2014 even 3% error rate on positives could significantly affect model evaluation.",
+          "evidence_test": "Increase validation sample to achieve at least 50-100 positive label confirmations, or use statistical power calculation to determine required sample size for error rate estimation.",
+          "flaw_category": "unverified_prereqs"
+        },
+        {
+          "finding_id": "F9",
+          "severity": 4,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "PR-AUC is the primary metric because readmission is rare (5-15%).",
+          "failure_mechanism": "PR-AUC is appropriate for imbalanced settings, but the design also mentions 'fixed alert budget (e.g., 20% of discharges)' as operational context. PR-AUC does not directly optimize for fixed-alert-budget operation. Precision at fixed recall (or vice versa) or precision-recall curves would be more aligned. The primary metric choice should match the operational decision framework.",
+          "evidence_test": "Report precision at the operating threshold (e.g., precision when recalling top 20% of risk scores) as the primary metric, with PR-AUC as secondary.",
+          "flaw_category": "metric_limitations"
+        },
+        {
+          "finding_id": "F10",
+          "severity": 1,
+          "severity_label": "MINOR",
+          "suppressed": false,
+          "claim": "The experiment establishes whether the transformer can outperform logistic regression on this specific hospital's data.",
+          "failure_mechanism": "Even this limited claim assumes the comparison is fair (F2) and without leakage (F3). Without those being verified, the experiment establishes neither 'can' nor 'cannot' \u2014 it produces an uninterpretable number.",
+          "evidence_test": "Address F2 and F3 first; the scope of inference is only meaningful if the comparison is valid.",
+          "flaw_category": "ambiguous_evidence"
+        }
+      ],
+      "summary": "The PoC has three FATAL-level flaws: (1) the comparison between transformer and logistic regression is unfair because the transformer receives baseline features PLUS temporal sequences while logistic regression receives only baseline features \u2014 this invalidates the core hypothesis test; (2) temporal sequences may include the index admission's data, creating direct label leakage; (3) the temporal split and patient-level stratification requirements are mutually exclusive, creating ambiguity about actual data separation. These must be addressed before the experiment can produce interpretable results.",
+      "no_material_findings": false
+    },
+    {
+      "findings": [
+        {
+          "finding_id": "F1",
+          "severity": 9,
+          "severity_label": "FATAL",
+          "suppressed": false,
+          "claim": "The transformer model receives the same baseline features as logistic regression plus temporal sequences, ensuring a fair apples-to-apples comparison.",
+          "failure_mechanism": "The transformer's input includes the same baseline features *plus* temporal sequences, but the baseline features are not equivalent in their temporal context. For example, the baseline features include 'prior utilization' (e.g., number of admissions in past year) and 'recent labs (within 48 hours of discharge)', which are derived from temporal sequences but are aggregated into a single vector. The transformer, by contrast, receives the raw temporal sequences (e.g., sequence of discharge diagnoses, medications with timestamps, lab values with timestamps). This means the transformer has access to more granular and temporally structured information than the baseline, violating the 'apples-to-apples' assumption. The baseline features are not equivalent to the transformer's input; they are a compressed, lossy representation of the same data.",
+          "evidence_test": "To verify this, compare the performance of the transformer when given only the baseline features (aggregated vector) to the logistic regression baseline. If the transformer's performance drops to match logistic regression, this flaw is confirmed. Alternatively, retrain the logistic regression on the raw temporal sequences (if feasible) to see if it matches transformer performance.",
+          "flaw_category": "signal_leakage"
+        },
+        {
+          "finding_id": "F2",
+          "severity": 8,
+          "severity_label": "FATAL",
+          "suppressed": false,
+          "claim": "The label 'unplanned readmission within 30 calendar days of index discharge' is deterministic and accurately measured from administrative encounter data.",
+          "failure_mechanism": "The label definition relies on administrative data (ICD codes, encounter types) to classify readmissions as 'planned' or 'unplanned.' However, administrative coding is known to be imperfect, and 'planned' vs. 'unplanned' classification is often ambiguous in practice (e.g., chemotherapy may be 'planned' but still result in an unplanned readmission due to complications). The PoC acknowledges a 5% error rate in label validation but does not address the systematic bias introduced by using administrative data for this purpose. For example, hospitals may upcode readmissions as 'planned' to avoid penalties, or misclassify unplanned readmissions as planned due to incomplete documentation. This can lead to label noise that disproportionately affects the minority class (readmissions), inflating or deflating performance metrics.",
+          "evidence_test": "Conduct a manual chart review on a larger sample (e.g., 200-300 cases) to quantify the systematic error rate in label classification. If the error rate is >5% or biased toward specific conditions (e.g., oncology), the label is unreliable. Alternatively, compare model performance on a subset of cases where the label is manually verified to see if performance metrics change significantly.",
+          "flaw_category": "metric_limitations"
+        },
+        {
+          "finding_id": "F3",
+          "severity": 7,
+          "severity_label": "FATAL",
+          "suppressed": false,
+          "claim": "The temporal-stratified split by patient prevents information leakage and ensures the model generalizes to deployment conditions.",
+          "failure_mechanism": "While the temporal-stratified split by patient is a good practice, it does not fully prevent information leakage in the transformer's case. The transformer receives sequences of prior admissions, medications, labs, etc., which inherently contain information about the patient's future (e.g., a readmission within 30 days may be hinted at by a lab result or medication administered shortly before discharge). Even though the split is temporal, the transformer can indirectly learn patterns that correlate with future readmissions by observing sequences that include events close to the discharge date. This is a form of 'soft leakage' where the model is not directly exposed to test labels but is exposed to features that are highly predictive of those labels due to their proximity in time. The logistic regression baseline is less affected because its features are aggregated and less temporally granular.",
+          "evidence_test": "Train the transformer on a subset of the training data where sequences are truncated to exclude events within 7 days of discharge (or another clinically meaningful window). If performance drops significantly, this flaw is confirmed. Alternatively, compare the transformer's performance on patients with very short prior sequences (e.g., first admission) to see if it still outperforms logistic regression.",
+          "flaw_category": "signal_leakage"
+        },
+        {
+          "finding_id": "F4",
+          "severity": 6,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "The primary metric, Precision-Recall AUC (PR-AUC), is aligned with the operational goal of maximizing high-precision alerts within a fixed care team capacity.",
+          "failure_mechanism": "PR-AUC is a reasonable choice for imbalanced data, but it does not directly measure the operational goal of 'maximizing high-precision alerts within a fixed care team capacity.' PR-AUC summarizes performance across all thresholds, but the operational goal implies a fixed alert budget (e.g., 20% of discharges). The secondary metric (recall at a fixed threshold) partially addresses this, but it is not the primary metric. Moreover, PR-AUC does not account for the cost of false positives in a way that aligns with clinical workflows (e.g., alert fatigue, clinician trust). The metric also does not incorporate the temporal aspect of the problem (e.g., whether alerts are generated early enough to intervene).",
+          "evidence_test": "Conduct a decision curve analysis to compute the net benefit of the model at the fixed alert budget (e.g., 20% of discharges). Compare this to the net benefit of the logistic regression baseline. If the transformer's net benefit is not superior at the operational threshold, the metric choice is not aligned with the hypothesis.",
+          "flaw_category": "metric_limitations"
+        },
+        {
+          "finding_id": "F5",
+          "severity": 5,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "The transformer's gain comes from temporal sequences, not just baseline features.",
+          "failure_mechanism": "The PoC plans to use permutation importance to verify that the transformer's gain comes from temporal sequences. However, permutation importance is a post-hoc analysis and may not isolate the effect of temporal sequences cleanly. For example, the baseline features include 'prior utilization' and 'recent labs,' which are derived from temporal sequences. If the transformer's performance is driven by these features (which are also available to the baseline model in aggregated form), permutation importance may incorrectly attribute gains to the temporal sequences. Additionally, the transformer's architecture (e.g., attention mechanisms) may implicitly learn to compress temporal sequences into features that resemble the baseline's aggregated features, making it difficult to disentangle the contributions.",
+          "evidence_test": "Retrain the transformer with only the baseline features (aggregated vector) and compare its performance to the baseline logistic regression. If the transformer's performance drops to match logistic regression, this flaw is confirmed. Alternatively, retrain the logistic regression on the raw temporal sequences (if feasible) to see if it matches transformer performance.",
+          "flaw_category": "missing_baselines"
+        },
+        {
+          "finding_id": "F6",
+          "severity": 4,
+          "severity_label": "MATERIAL",
+          "suppressed": false,
+          "claim": "The model generalizes across clinical contexts (discharge units) and temporal quarters.",
+          "failure_mechanism": "The PoC plans to report performance stratified by discharge unit and temporal quarter to detect drift or unit-specific bias. However, this does not guarantee generalization across contexts. For example, the transformer may perform well in medical units but poorly in surgical units due to differences in patient trajectories or coding practices. The stratification analysis is descriptive but does not test whether the model's performance is robust to these differences. The PoC does not include a formal test for interaction effects between model type (transformer vs. logistic regression) and discharge unit or temporal quarter, which could reveal that the transformer's gains are concentrated in specific contexts.",
+          "evidence_test": "Fit a statistical model (e.g., logistic regression) with terms for model type, discharge unit, temporal quarter, and their interactions. Test whether the interaction between model type and discharge unit or temporal quarter is significant. If the interaction is significant, the transformer's gains are context-dependent, and the hypothesis is weakened.",
+          "flaw_category": "distribution_shift"
+        },
+        {
+          "finding_id": "F7",
+          "severity": 3,
+          "severity_label": "MINOR",
+          "suppressed": false,
+          "claim": "The transformer model is trained to the same convergence criterion as logistic regression.",
+          "failure_mechanism": "The PoC does not specify the convergence criterion for the transformer (e.g., number of epochs, early stopping patience, or loss threshold). Transformers are sensitive to training duration, and stopping too early or too late can lead to underfitting or overfitting. The logistic regression baseline likely uses a simple convergence criterion (e.g., loss plateau), but the transformer may require a different approach (e.g., validation loss-based early stopping). Without a clear criterion, the comparison is not fair.",
+          "evidence_test": "Replicate the experiment with a fixed training duration for the transformer (e.g., 100 epochs) and compare performance to logistic regression. If performance changes significantly, the convergence criterion is a confounding factor.",
+          "flaw_category": "silent_misconfig"
+        }
+      ],
+      "summary": "The PoC has critical flaws that invalidate its core hypothesis: the transformer has access to more granular temporal information than the logistic regression baseline, and the label definition may be unreliable due to administrative coding ambiguities. These issues introduce signal leakage and metric misalignment, respectively. Additional material flaws include the choice of primary metric and the lack of a clean test for the transformer's reliance on temporal sequences.",
+      "no_material_findings": false
+    }
+  ],
+  "pooled_findings": [
+    {
+      "finding_id": "EF1",
+      "severity": 8,
+      "severity_label": "FATAL",
+      "suppressed": false,
+      "claim": "The temporal-stratified split (60/20/20) prevents information leakage and respects the deployment scenario.",
+      "failure_mechanism": "The PoC restricts the cohort to patients with at least 12 months of history. In a chronological split, patients who had admissions in the training period (first 60%) and then had an index admission in the test period (final 20%) will have their 'training-period' data used as input features (prior utilization/sequences) for their 'test-period' prediction. While the label is not leaked, the model is exposed to the specific clinical trajectories and baseline characteristics of the test patients during the training phase, leading to 'patient-level' leakage that inflates performance via memorization of patient-specific patterns rather than generalizable clinical signals.",
+      "evidence_test": "Compare the test set PR-AUC of the current split against a 'Strict Patient Split' where any patient appearing in the test set is entirely removed from the training set (including their historical encounters). A significant drop in performance would confirm the leakage.",
+      "flaw_category": "signal_leakage",
+      "_source_critic": 0,
+      "_original_finding_id": "F1"
+    },
+    {
+      "finding_id": "EF2",
+      "severity": 6,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "The comparison between the Transformer and Logistic Regression is 'apples-to-apples'.",
+      "failure_mechanism": "The Transformer is given the baseline features PLUS temporal sequences, while the Logistic Regression is given only baseline features. If the Transformer outperforms the baseline, it is impossible to determine if the gain is due to the Transformer's architecture (attention/non-linearity) or simply the addition of more data (the temporal sequences). The baseline is not a true baseline for the hypothesis 'Transformer > LR' because the input spaces are different.",
+      "evidence_test": "Implement a third model: a Logistic Regression (or Random Forest) trained on the baseline features PLUS aggregated summaries of the temporal sequences (e.g., counts, means, and most recent values of the sequence data). If this 'Augmented LR' matches the Transformer, the architecture is not the driver of performance.",
+      "flaw_category": "missing_baselines",
+      "_source_critic": 0,
+      "_original_finding_id": "F2"
+    },
+    {
+      "finding_id": "EF3",
+      "severity": 4,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "The model will generalize across clinical contexts via unit-level stratification.",
+      "failure_mechanism": "Stratification ensures representation in the splits, but it does not prevent the model from overfitting to unit-specific coding patterns (e.g., a specific unit's tendency to over-code certain comorbidities). Without a 'leave-one-unit-out' validation or a specific check for unit-level variance in predictions, the model may achieve high aggregate PR-AUC by overfitting to the most populous unit's patterns while failing on smaller, high-risk units.",
+      "evidence_test": "Calculate the variance of PR-AUC across different discharge units. A high variance suggests the model is relying on unit-specific artifacts rather than general clinical signals.",
+      "flaw_category": "eval_inflation",
+      "_source_critic": 0,
+      "_original_finding_id": "F3"
+    },
+    {
+      "finding_id": "EF4",
+      "severity": 2,
+      "severity_label": "MINOR",
+      "suppressed": false,
+      "claim": "The 12-month history requirement ensures comparable utilization features.",
+      "failure_mechanism": "By excluding patients with <12 months of history, the PoC introduces a selection bias. In production, many high-risk readmission candidates are 'new' patients or those with sporadic care. The model's performance on this 'filtered' cohort may not reflect its performance on the actual inpatient population, potentially overestimating the utility of the temporal sequences which are only available for long-term patients.",
+      "evidence_test": "Evaluate the model on a small hold-out set of patients with <12 months of history (using padded sequences) to quantify the performance degradation on the excluded population.",
+      "flaw_category": "synthetic_data_assump",
+      "_source_critic": 0,
+      "_original_finding_id": "F4"
+    },
+    {
+      "finding_id": "EF5",
+      "severity": 6,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "The temporal split (60/20/20 chronologically) combined with patient-level stratification ensures no patient appears in both train and test sets while maintaining chronological ordering.",
+      "failure_mechanism": "These two requirements are in direct conflict. If split chronologically (earliest 60%, middle 20%, latest 20%), patients with admissions spanning multiple time periods will appear in multiple splits. To enforce 'no patient in both train and test,' either: (1) patients with any admission in test period are excluded from train entirely (violating chronological principle), or (2) the temporal ordering is compromised. The design does not clarify which constraint is relaxed.",
+      "evidence_test": "Examine the data split implementation to determine: (a) how many patients are excluded to achieve patient-level separation, (b) whether any patients with admissions in train period also have admissions in test period, (c) the effective sample sizes per split after all exclusions.",
+      "flaw_category": "signal_leakage",
+      "_source_critic": 1,
+      "_original_finding_id": "F1"
+    },
+    {
+      "finding_id": "EF6",
+      "severity": 8,
+      "severity_label": "FATAL",
+      "suppressed": false,
+      "claim": "The transformer model is compared fairly against logistic regression to determine if temporal sequences provide additional predictive value.",
+      "failure_mechanism": "The transformer receives BOTH baseline features AND temporal sequences, while logistic regression receives baseline features ONLY. This is not an apples-to-apples comparison of model architectures on equivalent information. Any performance gain by the transformer could simply be due to having more input features (the sequences), not due to the transformer's architecture or attention mechanism. The experiment cannot distinguish whether temporal sequences add value or whether the transformer is simply a larger model with more data.",
+      "evidence_test": "Run a controlled comparison: (a) logistic regression WITH temporal sequences (embedded via simple averaging or PCA), (b) transformer WITHOUT baseline features (only temporal sequences), (c) current setup. Only (a) vs transformer isolates architectural benefit of attention.",
+      "flaw_category": "missing_baselines",
+      "_source_critic": 1,
+      "_original_finding_id": "F2"
+    },
+    {
+      "finding_id": "EF7",
+      "severity": 7,
+      "severity_label": "FATAL",
+      "suppressed": false,
+      "claim": "Temporal sequences capture 'prior admissions' and 'prior utilization history' to predict readmission.",
+      "failure_mechanism": "The sequence definition is ambiguous: does 'sequence of discharge diagnoses from prior admissions' include the index admission's diagnosis? If the transformer sees the index admission's ICD codes in the sequence, it has direct access to the primary diagnosis driving readmission risk \u2014 this is direct label leakage. The design states sequences are 'padded to 12 months' but does not explicitly exclude the index admission from the sequence.",
+      "evidence_test": "Verify that temporal sequences explicitly exclude any events from the index admission (the admission being predicted on). The sequence should only contain events strictly prior to the index discharge timestamp.",
+      "flaw_category": "signal_leakage",
+      "_source_critic": 1,
+      "_original_finding_id": "F3"
+    },
+    {
+      "finding_id": "EF8",
+      "severity": 5,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "The transformer learns meaningful temporal patterns from clinical sequences.",
+      "failure_mechanism": "The design mentions 'sequence of prior admission/discharge dates (encoded as time deltas)' but does not specify the time encoding mechanism. Without explicit time encoding (e.g., sinusoidal positional encoding or learned time embeddings), the transformer cannot distinguish a diagnosis from 1 month ago versus 11 months ago \u2014 both appear as adjacent tokens. Since readmission risk decays non-linearly with time, this is a critical missing mechanism.",
+      "evidence_test": "Verify the time encoding implementation. Test whether the model can distinguish recent vs. distant events by examining attention patterns or probing tests on synthetic data with known time gaps.",
+      "flaw_category": "unverified_prereqs",
+      "_source_critic": 1,
+      "_original_finding_id": "F4"
+    },
+    {
+      "finding_id": "EF9",
+      "severity": 4,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "Hyperparameter tuning on the validation set produces generalizable hyperparameters.",
+      "failure_mechanism": "The validation set represents a specific temporal window (the middle 20% of the timeline). Hyperparameters optimized for this period may overfit to temporal artifacts specific to that window (seasonal patterns, hospital policy changes, staffing changes). This creates optimistic validation metrics but may not transfer to the test period.",
+      "evidence_test": "Report validation performance variance across temporal quarters within the validation period. If validation performance is unstable across quarters, the hyperparameter selection is unreliable.",
+      "flaw_category": "eval_inflation",
+      "_source_critic": 1,
+      "_original_finding_id": "F5"
+    },
+    {
+      "finding_id": "EF10",
+      "severity": 4,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "Permutation importance verifies that the transformer's performance gain comes from temporal sequences.",
+      "failure_mechanism": "Permutation importance shuffles input features to measure their contribution. However, since the transformer has BOTH baseline features AND sequences while logistic regression only has baseline features, permutation importance on the transformer cannot isolate the 'incremental' value of sequences. The baseline features in the transformer are the same as logistic regression's input \u2014 the comparison is confounded by the unequal feature sets.",
+      "evidence_test": "Compare: (a) transformer with all features, (b) transformer without sequences (baseline features only), (c) logistic regression with baseline features. The difference (a)-(b) isolates sequence value; (b)-(c) isolates architecture value.",
+      "flaw_category": "eval_inflation",
+      "_source_critic": 1,
+      "_original_finding_id": "F6"
+    },
+    {
+      "finding_id": "EF11",
+      "severity": 3,
+      "severity_label": "MINOR",
+      "suppressed": false,
+      "claim": "Bootstrap resampling by patient preserves temporal structure for confidence intervals.",
+      "failure_mechanism": "Resampling by patient treats all a patient's admissions as independent draws, but admissions within a patient are temporally correlated (a patient readmitted once is more likely to be readmitted again). This underestimates the true variance. Additionally, if the temporal split issue (F1) exists, bootstrap by patient may not preserve the chronological train/val/test structure.",
+      "evidence_test": "Use block bootstrap that preserves temporal ordering (sample temporal windows rather than patients), or report variance across temporal quarters in addition to bootstrap CIs.",
+      "flaw_category": "metric_limitations",
+      "_source_critic": 1,
+      "_original_finding_id": "F7"
+    },
+    {
+      "finding_id": "EF12",
+      "severity": 2,
+      "severity_label": "MINOR",
+      "suppressed": false,
+      "claim": "5% manual chart review validates label accuracy.",
+      "failure_mechanism": "With 5-15% readmission rate, a 5% sample yields very few positive labels (~0.25-0.75% of total dataset). This provides insufficient precision to estimate error rate reliably. A 5% error rate threshold is also arbitrary \u2014 even 3% error rate on positives could significantly affect model evaluation.",
+      "evidence_test": "Increase validation sample to achieve at least 50-100 positive label confirmations, or use statistical power calculation to determine required sample size for error rate estimation.",
+      "flaw_category": "unverified_prereqs",
+      "_source_critic": 1,
+      "_original_finding_id": "F8"
+    },
+    {
+      "finding_id": "EF13",
+      "severity": 4,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "PR-AUC is the primary metric because readmission is rare (5-15%).",
+      "failure_mechanism": "PR-AUC is appropriate for imbalanced settings, but the design also mentions 'fixed alert budget (e.g., 20% of discharges)' as operational context. PR-AUC does not directly optimize for fixed-alert-budget operation. Precision at fixed recall (or vice versa) or precision-recall curves would be more aligned. The primary metric choice should match the operational decision framework.",
+      "evidence_test": "Report precision at the operating threshold (e.g., precision when recalling top 20% of risk scores) as the primary metric, with PR-AUC as secondary.",
+      "flaw_category": "metric_limitations",
+      "_source_critic": 1,
+      "_original_finding_id": "F9"
+    },
+    {
+      "finding_id": "EF14",
+      "severity": 1,
+      "severity_label": "MINOR",
+      "suppressed": false,
+      "claim": "The experiment establishes whether the transformer can outperform logistic regression on this specific hospital's data.",
+      "failure_mechanism": "Even this limited claim assumes the comparison is fair (F2) and without leakage (F3). Without those being verified, the experiment establishes neither 'can' nor 'cannot' \u2014 it produces an uninterpretable number.",
+      "evidence_test": "Address F2 and F3 first; the scope of inference is only meaningful if the comparison is valid.",
+      "flaw_category": "ambiguous_evidence",
+      "_source_critic": 1,
+      "_original_finding_id": "F10"
+    },
+    {
+      "finding_id": "EF15",
+      "severity": 9,
+      "severity_label": "FATAL",
+      "suppressed": false,
+      "claim": "The transformer model receives the same baseline features as logistic regression plus temporal sequences, ensuring a fair apples-to-apples comparison.",
+      "failure_mechanism": "The transformer's input includes the same baseline features *plus* temporal sequences, but the baseline features are not equivalent in their temporal context. For example, the baseline features include 'prior utilization' (e.g., number of admissions in past year) and 'recent labs (within 48 hours of discharge)', which are derived from temporal sequences but are aggregated into a single vector. The transformer, by contrast, receives the raw temporal sequences (e.g., sequence of discharge diagnoses, medications with timestamps, lab values with timestamps). This means the transformer has access to more granular and temporally structured information than the baseline, violating the 'apples-to-apples' assumption. The baseline features are not equivalent to the transformer's input; they are a compressed, lossy representation of the same data.",
+      "evidence_test": "To verify this, compare the performance of the transformer when given only the baseline features (aggregated vector) to the logistic regression baseline. If the transformer's performance drops to match logistic regression, this flaw is confirmed. Alternatively, retrain the logistic regression on the raw temporal sequences (if feasible) to see if it matches transformer performance.",
+      "flaw_category": "signal_leakage",
+      "_source_critic": 2,
+      "_original_finding_id": "F1"
+    },
+    {
+      "finding_id": "EF16",
+      "severity": 8,
+      "severity_label": "FATAL",
+      "suppressed": false,
+      "claim": "The label 'unplanned readmission within 30 calendar days of index discharge' is deterministic and accurately measured from administrative encounter data.",
+      "failure_mechanism": "The label definition relies on administrative data (ICD codes, encounter types) to classify readmissions as 'planned' or 'unplanned.' However, administrative coding is known to be imperfect, and 'planned' vs. 'unplanned' classification is often ambiguous in practice (e.g., chemotherapy may be 'planned' but still result in an unplanned readmission due to complications). The PoC acknowledges a 5% error rate in label validation but does not address the systematic bias introduced by using administrative data for this purpose. For example, hospitals may upcode readmissions as 'planned' to avoid penalties, or misclassify unplanned readmissions as planned due to incomplete documentation. This can lead to label noise that disproportionately affects the minority class (readmissions), inflating or deflating performance metrics.",
+      "evidence_test": "Conduct a manual chart review on a larger sample (e.g., 200-300 cases) to quantify the systematic error rate in label classification. If the error rate is >5% or biased toward specific conditions (e.g., oncology), the label is unreliable. Alternatively, compare model performance on a subset of cases where the label is manually verified to see if performance metrics change significantly.",
+      "flaw_category": "metric_limitations",
+      "_source_critic": 2,
+      "_original_finding_id": "F2"
+    },
+    {
+      "finding_id": "EF17",
+      "severity": 7,
+      "severity_label": "FATAL",
+      "suppressed": false,
+      "claim": "The temporal-stratified split by patient prevents information leakage and ensures the model generalizes to deployment conditions.",
+      "failure_mechanism": "While the temporal-stratified split by patient is a good practice, it does not fully prevent information leakage in the transformer's case. The transformer receives sequences of prior admissions, medications, labs, etc., which inherently contain information about the patient's future (e.g., a readmission within 30 days may be hinted at by a lab result or medication administered shortly before discharge). Even though the split is temporal, the transformer can indirectly learn patterns that correlate with future readmissions by observing sequences that include events close to the discharge date. This is a form of 'soft leakage' where the model is not directly exposed to test labels but is exposed to features that are highly predictive of those labels due to their proximity in time. The logistic regression baseline is less affected because its features are aggregated and less temporally granular.",
+      "evidence_test": "Train the transformer on a subset of the training data where sequences are truncated to exclude events within 7 days of discharge (or another clinically meaningful window). If performance drops significantly, this flaw is confirmed. Alternatively, compare the transformer's performance on patients with very short prior sequences (e.g., first admission) to see if it still outperforms logistic regression.",
+      "flaw_category": "signal_leakage",
+      "_source_critic": 2,
+      "_original_finding_id": "F3"
+    },
+    {
+      "finding_id": "EF18",
+      "severity": 6,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "The primary metric, Precision-Recall AUC (PR-AUC), is aligned with the operational goal of maximizing high-precision alerts within a fixed care team capacity.",
+      "failure_mechanism": "PR-AUC is a reasonable choice for imbalanced data, but it does not directly measure the operational goal of 'maximizing high-precision alerts within a fixed care team capacity.' PR-AUC summarizes performance across all thresholds, but the operational goal implies a fixed alert budget (e.g., 20% of discharges). The secondary metric (recall at a fixed threshold) partially addresses this, but it is not the primary metric. Moreover, PR-AUC does not account for the cost of false positives in a way that aligns with clinical workflows (e.g., alert fatigue, clinician trust). The metric also does not incorporate the temporal aspect of the problem (e.g., whether alerts are generated early enough to intervene).",
+      "evidence_test": "Conduct a decision curve analysis to compute the net benefit of the model at the fixed alert budget (e.g., 20% of discharges). Compare this to the net benefit of the logistic regression baseline. If the transformer's net benefit is not superior at the operational threshold, the metric choice is not aligned with the hypothesis.",
+      "flaw_category": "metric_limitations",
+      "_source_critic": 2,
+      "_original_finding_id": "F4"
+    },
+    {
+      "finding_id": "EF19",
+      "severity": 5,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "The transformer's gain comes from temporal sequences, not just baseline features.",
+      "failure_mechanism": "The PoC plans to use permutation importance to verify that the transformer's gain comes from temporal sequences. However, permutation importance is a post-hoc analysis and may not isolate the effect of temporal sequences cleanly. For example, the baseline features include 'prior utilization' and 'recent labs,' which are derived from temporal sequences. If the transformer's performance is driven by these features (which are also available to the baseline model in aggregated form), permutation importance may incorrectly attribute gains to the temporal sequences. Additionally, the transformer's architecture (e.g., attention mechanisms) may implicitly learn to compress temporal sequences into features that resemble the baseline's aggregated features, making it difficult to disentangle the contributions.",
+      "evidence_test": "Retrain the transformer with only the baseline features (aggregated vector) and compare its performance to the baseline logistic regression. If the transformer's performance drops to match logistic regression, this flaw is confirmed. Alternatively, retrain the logistic regression on the raw temporal sequences (if feasible) to see if it matches transformer performance.",
+      "flaw_category": "missing_baselines",
+      "_source_critic": 2,
+      "_original_finding_id": "F5"
+    },
+    {
+      "finding_id": "EF20",
+      "severity": 4,
+      "severity_label": "MATERIAL",
+      "suppressed": false,
+      "claim": "The model generalizes across clinical contexts (discharge units) and temporal quarters.",
+      "failure_mechanism": "The PoC plans to report performance stratified by discharge unit and temporal quarter to detect drift or unit-specific bias. However, this does not guarantee generalization across contexts. For example, the transformer may perform well in medical units but poorly in surgical units due to differences in patient trajectories or coding practices. The stratification analysis is descriptive but does not test whether the model's performance is robust to these differences. The PoC does not include a formal test for interaction effects between model type (transformer vs. logistic regression) and discharge unit or temporal quarter, which could reveal that the transformer's gains are concentrated in specific contexts.",
+      "evidence_test": "Fit a statistical model (e.g., logistic regression) with terms for model type, discharge unit, temporal quarter, and their interactions. Test whether the interaction between model type and discharge unit or temporal quarter is significant. If the interaction is significant, the transformer's gains are context-dependent, and the hypothesis is weakened.",
+      "flaw_category": "distribution_shift",
+      "_source_critic": 2,
+      "_original_finding_id": "F6"
+    },
+    {
+      "finding_id": "EF21",
+      "severity": 3,
+      "severity_label": "MINOR",
+      "suppressed": false,
+      "claim": "The transformer model is trained to the same convergence criterion as logistic regression.",
+      "failure_mechanism": "The PoC does not specify the convergence criterion for the transformer (e.g., number of epochs, early stopping patience, or loss threshold). Transformers are sensitive to training duration, and stopping too early or too late can lead to underfitting or overfitting. The logistic regression baseline likely uses a simple convergence criterion (e.g., loss plateau), but the transformer may require a different approach (e.g., validation loss-based early stopping). Without a clear criterion, the comparison is not fair.",
+      "evidence_test": "Replicate the experiment with a fixed training duration for the transformer (e.g., 100 epochs) and compare performance to logistic regression. If performance changes significantly, the convergence criterion is a confounding factor.",
+      "flaw_category": "silent_misconfig",
+      "_source_critic": 2,
+      "_original_finding_id": "F7"
+    }
+  ],
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "EF1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal-stratified split (60/20/20) prevents information leakage and respects the deployment scenario.",
+        "failure_mechanism": "The PoC restricts the cohort to patients with at least 12 months of history. In a chronological split, patients who had admissions in the training period (first 60%) and then had an index admission in the test period (final 20%) will have their 'training-period' data used as input features (prior utilization/sequences) for their 'test-period' prediction. While the label is not leaked, the model is exposed to the specific clinical trajectories and baseline characteristics of the test patients during the training phase, leading to 'patient-level' leakage that inflates performance via memorization of patient-specific patterns rather than generalizable clinical signals.",
+        "evidence_test": "Compare the test set PR-AUC of the current split against a 'Strict Patient Split' where any patient appearing in the test set is entirely removed from the training set (including their historical encounters). A significant drop in performance would confirm the leakage.",
+        "flaw_category": "signal_leakage",
+        "_source_critic": 0,
+        "_original_finding_id": "F1"
+      },
+      {
+        "finding_id": "EF2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The comparison between the Transformer and Logistic Regression is 'apples-to-apples'.",
+        "failure_mechanism": "The Transformer is given the baseline features PLUS temporal sequences, while the Logistic Regression is given only baseline features. If the Transformer outperforms the baseline, it is impossible to determine if the gain is due to the Transformer's architecture (attention/non-linearity) or simply the addition of more data (the temporal sequences). The baseline is not a true baseline for the hypothesis 'Transformer > LR' because the input spaces are different.",
+        "evidence_test": "Implement a third model: a Logistic Regression (or Random Forest) trained on the baseline features PLUS aggregated summaries of the temporal sequences (e.g., counts, means, and most recent values of the sequence data). If this 'Augmented LR' matches the Transformer, the architecture is not the driver of performance.",
+        "flaw_category": "missing_baselines",
+        "_source_critic": 0,
+        "_original_finding_id": "F2"
+      },
+      {
+        "finding_id": "EF3",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The model will generalize across clinical contexts via unit-level stratification.",
+        "failure_mechanism": "Stratification ensures representation in the splits, but it does not prevent the model from overfitting to unit-specific coding patterns (e.g., a specific unit's tendency to over-code certain comorbidities). Without a 'leave-one-unit-out' validation or a specific check for unit-level variance in predictions, the model may achieve high aggregate PR-AUC by overfitting to the most populous unit's patterns while failing on smaller, high-risk units.",
+        "evidence_test": "Calculate the variance of PR-AUC across different discharge units. A high variance suggests the model is relying on unit-specific artifacts rather than general clinical signals.",
+        "flaw_category": "eval_inflation",
+        "_source_critic": 0,
+        "_original_finding_id": "F3"
+      },
+      {
+        "finding_id": "EF4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 12-month history requirement ensures comparable utilization features.",
+        "failure_mechanism": "By excluding patients with <12 months of history, the PoC introduces a selection bias. In production, many high-risk readmission candidates are 'new' patients or those with sporadic care. The model's performance on this 'filtered' cohort may not reflect its performance on the actual inpatient population, potentially overestimating the utility of the temporal sequences which are only available for long-term patients.",
+        "evidence_test": "Evaluate the model on a small hold-out set of patients with <12 months of history (using padded sequences) to quantify the performance degradation on the excluded population.",
+        "flaw_category": "synthetic_data_assump",
+        "_source_critic": 0,
+        "_original_finding_id": "F4"
+      },
+      {
+        "finding_id": "EF5",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The temporal split (60/20/20 chronologically) combined with patient-level stratification ensures no patient appears in both train and test sets while maintaining chronological ordering.",
+        "failure_mechanism": "These two requirements are in direct conflict. If split chronologically (earliest 60%, middle 20%, latest 20%), patients with admissions spanning multiple time periods will appear in multiple splits. To enforce 'no patient in both train and test,' either: (1) patients with any admission in test period are excluded from train entirely (violating chronological principle), or (2) the temporal ordering is compromised. The design does not clarify which constraint is relaxed.",
+        "evidence_test": "Examine the data split implementation to determine: (a) how many patients are excluded to achieve patient-level separation, (b) whether any patients with admissions in train period also have admissions in test period, (c) the effective sample sizes per split after all exclusions.",
+        "flaw_category": "signal_leakage",
+        "_source_critic": 1,
+        "_original_finding_id": "F1"
+      },
+      {
+        "finding_id": "EF6",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The transformer model is compared fairly against logistic regression to determine if temporal sequences provide additional predictive value.",
+        "failure_mechanism": "The transformer receives BOTH baseline features AND temporal sequences, while logistic regression receives baseline features ONLY. This is not an apples-to-apples comparison of model architectures on equivalent information. Any performance gain by the transformer could simply be due to having more input features (the sequences), not due to the transformer's architecture or attention mechanism. The experiment cannot distinguish whether temporal sequences add value or whether the transformer is simply a larger model with more data.",
+        "evidence_test": "Run a controlled comparison: (a) logistic regression WITH temporal sequences (embedded via simple averaging or PCA), (b) transformer WITHOUT baseline features (only temporal sequences), (c) current setup. Only (a) vs transformer isolates architectural benefit of attention.",
+        "flaw_category": "missing_baselines",
+        "_source_critic": 1,
+        "_original_finding_id": "F2"
+      },
+      {
+        "finding_id": "EF7",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Temporal sequences capture 'prior admissions' and 'prior utilization history' to predict readmission.",
+        "failure_mechanism": "The sequence definition is ambiguous: does 'sequence of discharge diagnoses from prior admissions' include the index admission's diagnosis? If the transformer sees the index admission's ICD codes in the sequence, it has direct access to the primary diagnosis driving readmission risk \u2014 this is direct label leakage. The design states sequences are 'padded to 12 months' but does not explicitly exclude the index admission from the sequence.",
+        "evidence_test": "Verify that temporal sequences explicitly exclude any events from the index admission (the admission being predicted on). The sequence should only contain events strictly prior to the index discharge timestamp.",
+        "flaw_category": "signal_leakage",
+        "_source_critic": 1,
+        "_original_finding_id": "F3"
+      },
+      {
+        "finding_id": "EF8",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer learns meaningful temporal patterns from clinical sequences.",
+        "failure_mechanism": "The design mentions 'sequence of prior admission/discharge dates (encoded as time deltas)' but does not specify the time encoding mechanism. Without explicit time encoding (e.g., sinusoidal positional encoding or learned time embeddings), the transformer cannot distinguish a diagnosis from 1 month ago versus 11 months ago \u2014 both appear as adjacent tokens. Since readmission risk decays non-linearly with time, this is a critical missing mechanism.",
+        "evidence_test": "Verify the time encoding implementation. Test whether the model can distinguish recent vs. distant events by examining attention patterns or probing tests on synthetic data with known time gaps.",
+        "flaw_category": "unverified_prereqs",
+        "_source_critic": 1,
+        "_original_finding_id": "F4"
+      },
+      {
+        "finding_id": "EF9",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Hyperparameter tuning on the validation set produces generalizable hyperparameters.",
+        "failure_mechanism": "The validation set represents a specific temporal window (the middle 20% of the timeline). Hyperparameters optimized for this period may overfit to temporal artifacts specific to that window (seasonal patterns, hospital policy changes, staffing changes). This creates optimistic validation metrics but may not transfer to the test period.",
+        "evidence_test": "Report validation performance variance across temporal quarters within the validation period. If validation performance is unstable across quarters, the hyperparameter selection is unreliable.",
+        "flaw_category": "eval_inflation",
+        "_source_critic": 1,
+        "_original_finding_id": "F5"
+      },
+      {
+        "finding_id": "EF10",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Permutation importance verifies that the transformer's performance gain comes from temporal sequences.",
+        "failure_mechanism": "Permutation importance shuffles input features to measure their contribution. However, since the transformer has BOTH baseline features AND sequences while logistic regression only has baseline features, permutation importance on the transformer cannot isolate the 'incremental' value of sequences. The baseline features in the transformer are the same as logistic regression's input \u2014 the comparison is confounded by the unequal feature sets.",
+        "evidence_test": "Compare: (a) transformer with all features, (b) transformer without sequences (baseline features only), (c) logistic regression with baseline features. The difference (a)-(b) isolates sequence value; (b)-(c) isolates architecture value.",
+        "flaw_category": "eval_inflation",
+        "_source_critic": 1,
+        "_original_finding_id": "F6"
+      },
+      {
+        "finding_id": "EF11",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Bootstrap resampling by patient preserves temporal structure for confidence intervals.",
+        "failure_mechanism": "Resampling by patient treats all a patient's admissions as independent draws, but admissions within a patient are temporally correlated (a patient readmitted once is more likely to be readmitted again). This underestimates the true variance. Additionally, if the temporal split issue (F1) exists, bootstrap by patient may not preserve the chronological train/val/test structure.",
+        "evidence_test": "Use block bootstrap that preserves temporal ordering (sample temporal windows rather than patients), or report variance across temporal quarters in addition to bootstrap CIs.",
+        "flaw_category": "metric_limitations",
+        "_source_critic": 1,
+        "_original_finding_id": "F7"
+      },
+      {
+        "finding_id": "EF12",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "5% manual chart review validates label accuracy.",
+        "failure_mechanism": "With 5-15% readmission rate, a 5% sample yields very few positive labels (~0.25-0.75% of total dataset). This provides insufficient precision to estimate error rate reliably. A 5% error rate threshold is also arbitrary \u2014 even 3% error rate on positives could significantly affect model evaluation.",
+        "evidence_test": "Increase validation sample to achieve at least 50-100 positive label confirmations, or use statistical power calculation to determine required sample size for error rate estimation.",
+        "flaw_category": "unverified_prereqs",
+        "_source_critic": 1,
+        "_original_finding_id": "F8"
+      },
+      {
+        "finding_id": "EF13",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "PR-AUC is the primary metric because readmission is rare (5-15%).",
+        "failure_mechanism": "PR-AUC is appropriate for imbalanced settings, but the design also mentions 'fixed alert budget (e.g., 20% of discharges)' as operational context. PR-AUC does not directly optimize for fixed-alert-budget operation. Precision at fixed recall (or vice versa) or precision-recall curves would be more aligned. The primary metric choice should match the operational decision framework.",
+        "evidence_test": "Report precision at the operating threshold (e.g., precision when recalling top 20% of risk scores) as the primary metric, with PR-AUC as secondary.",
+        "flaw_category": "metric_limitations",
+        "_source_critic": 1,
+        "_original_finding_id": "F9"
+      },
+      {
+        "finding_id": "EF14",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The experiment establishes whether the transformer can outperform logistic regression on this specific hospital's data.",
+        "failure_mechanism": "Even this limited claim assumes the comparison is fair (F2) and without leakage (F3). Without those being verified, the experiment establishes neither 'can' nor 'cannot' \u2014 it produces an uninterpretable number.",
+        "evidence_test": "Address F2 and F3 first; the scope of inference is only meaningful if the comparison is valid.",
+        "flaw_category": "ambiguous_evidence",
+        "_source_critic": 1,
+        "_original_finding_id": "F10"
+      },
+      {
+        "finding_id": "EF15",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The transformer model receives the same baseline features as logistic regression plus temporal sequences, ensuring a fair apples-to-apples comparison.",
+        "failure_mechanism": "The transformer's input includes the same baseline features *plus* temporal sequences, but the baseline features are not equivalent in their temporal context. For example, the baseline features include 'prior utilization' (e.g., number of admissions in past year) and 'recent labs (within 48 hours of discharge)', which are derived from temporal sequences but are aggregated into a single vector. The transformer, by contrast, receives the raw temporal sequences (e.g., sequence of discharge diagnoses, medications with timestamps, lab values with timestamps). This means the transformer has access to more granular and temporally structured information than the baseline, violating the 'apples-to-apples' assumption. The baseline features are not equivalent to the transformer's input; they are a compressed, lossy representation of the same data.",
+        "evidence_test": "To verify this, compare the performance of the transformer when given only the baseline features (aggregated vector) to the logistic regression baseline. If the transformer's performance drops to match logistic regression, this flaw is confirmed. Alternatively, retrain the logistic regression on the raw temporal sequences (if feasible) to see if it matches transformer performance.",
+        "flaw_category": "signal_leakage",
+        "_source_critic": 2,
+        "_original_finding_id": "F1"
+      },
+      {
+        "finding_id": "EF16",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The label 'unplanned readmission within 30 calendar days of index discharge' is deterministic and accurately measured from administrative encounter data.",
+        "failure_mechanism": "The label definition relies on administrative data (ICD codes, encounter types) to classify readmissions as 'planned' or 'unplanned.' However, administrative coding is known to be imperfect, and 'planned' vs. 'unplanned' classification is often ambiguous in practice (e.g., chemotherapy may be 'planned' but still result in an unplanned readmission due to complications). The PoC acknowledges a 5% error rate in label validation but does not address the systematic bias introduced by using administrative data for this purpose. For example, hospitals may upcode readmissions as 'planned' to avoid penalties, or misclassify unplanned readmissions as planned due to incomplete documentation. This can lead to label noise that disproportionately affects the minority class (readmissions), inflating or deflating performance metrics.",
+        "evidence_test": "Conduct a manual chart review on a larger sample (e.g., 200-300 cases) to quantify the systematic error rate in label classification. If the error rate is >5% or biased toward specific conditions (e.g., oncology), the label is unreliable. Alternatively, compare model performance on a subset of cases where the label is manually verified to see if performance metrics change significantly.",
+        "flaw_category": "metric_limitations",
+        "_source_critic": 2,
+        "_original_finding_id": "F2"
+      },
+      {
+        "finding_id": "EF17",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal-stratified split by patient prevents information leakage and ensures the model generalizes to deployment conditions.",
+        "failure_mechanism": "While the temporal-stratified split by patient is a good practice, it does not fully prevent information leakage in the transformer's case. The transformer receives sequences of prior admissions, medications, labs, etc., which inherently contain information about the patient's future (e.g., a readmission within 30 days may be hinted at by a lab result or medication administered shortly before discharge). Even though the split is temporal, the transformer can indirectly learn patterns that correlate with future readmissions by observing sequences that include events close to the discharge date. This is a form of 'soft leakage' where the model is not directly exposed to test labels but is exposed to features that are highly predictive of those labels due to their proximity in time. The logistic regression baseline is less affected because its features are aggregated and less temporally granular.",
+        "evidence_test": "Train the transformer on a subset of the training data where sequences are truncated to exclude events within 7 days of discharge (or another clinically meaningful window). If performance drops significantly, this flaw is confirmed. Alternatively, compare the transformer's performance on patients with very short prior sequences (e.g., first admission) to see if it still outperforms logistic regression.",
+        "flaw_category": "signal_leakage",
+        "_source_critic": 2,
+        "_original_finding_id": "F3"
+      },
+      {
+        "finding_id": "EF18",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The primary metric, Precision-Recall AUC (PR-AUC), is aligned with the operational goal of maximizing high-precision alerts within a fixed care team capacity.",
+        "failure_mechanism": "PR-AUC is a reasonable choice for imbalanced data, but it does not directly measure the operational goal of 'maximizing high-precision alerts within a fixed care team capacity.' PR-AUC summarizes performance across all thresholds, but the operational goal implies a fixed alert budget (e.g., 20% of discharges). The secondary metric (recall at a fixed threshold) partially addresses this, but it is not the primary metric. Moreover, PR-AUC does not account for the cost of false positives in a way that aligns with clinical workflows (e.g., alert fatigue, clinician trust). The metric also does not incorporate the temporal aspect of the problem (e.g., whether alerts are generated early enough to intervene).",
+        "evidence_test": "Conduct a decision curve analysis to compute the net benefit of the model at the fixed alert budget (e.g., 20% of discharges). Compare this to the net benefit of the logistic regression baseline. If the transformer's net benefit is not superior at the operational threshold, the metric choice is not aligned with the hypothesis.",
+        "flaw_category": "metric_limitations",
+        "_source_critic": 2,
+        "_original_finding_id": "F4"
+      },
+      {
+        "finding_id": "EF19",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transformer's gain comes from temporal sequences, not just baseline features.",
+        "failure_mechanism": "The PoC plans to use permutation importance to verify that the transformer's gain comes from temporal sequences. However, permutation importance is a post-hoc analysis and may not isolate the effect of temporal sequences cleanly. For example, the baseline features include 'prior utilization' and 'recent labs,' which are derived from temporal sequences. If the transformer's performance is driven by these features (which are also available to the baseline model in aggregated form), permutation importance may incorrectly attribute gains to the temporal sequences. Additionally, the transformer's architecture (e.g., attention mechanisms) may implicitly learn to compress temporal sequences into features that resemble the baseline's aggregated features, making it difficult to disentangle the contributions.",
+        "evidence_test": "Retrain the transformer with only the baseline features (aggregated vector) and compare its performance to the baseline logistic regression. If the transformer's performance drops to match logistic regression, this flaw is confirmed. Alternatively, retrain the logistic regression on the raw temporal sequences (if feasible) to see if it matches transformer performance.",
+        "flaw_category": "missing_baselines",
+        "_source_critic": 2,
+        "_original_finding_id": "F5"
+      },
+      {
+        "finding_id": "EF20",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The model generalizes across clinical contexts (discharge units) and temporal quarters.",
+        "failure_mechanism": "The PoC plans to report performance stratified by discharge unit and temporal quarter to detect drift or unit-specific bias. However, this does not guarantee generalization across contexts. For example, the transformer may perform well in medical units but poorly in surgical units due to differences in patient trajectories or coding practices. The stratification analysis is descriptive but does not test whether the model's performance is robust to these differences. The PoC does not include a formal test for interaction effects between model type (transformer vs. logistic regression) and discharge unit or temporal quarter, which could reveal that the transformer's gains are concentrated in specific contexts.",
+        "evidence_test": "Fit a statistical model (e.g., logistic regression) with terms for model type, discharge unit, temporal quarter, and their interactions. Test whether the interaction between model type and discharge unit or temporal quarter is significant. If the interaction is significant, the transformer's gains are context-dependent, and the hypothesis is weakened.",
+        "flaw_category": "distribution_shift",
+        "_source_critic": 2,
+        "_original_finding_id": "F6"
+      },
+      {
+        "finding_id": "EF21",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The transformer model is trained to the same convergence criterion as logistic regression.",
+        "failure_mechanism": "The PoC does not specify the convergence criterion for the transformer (e.g., number of epochs, early stopping patience, or loss threshold). Transformers are sensitive to training duration, and stopping too early or too late can lead to underfitting or overfitting. The logistic regression baseline likely uses a simple convergence criterion (e.g., loss plateau), but the transformer may require a different approach (e.g., validation loss-based early stopping). Without a clear criterion, the comparison is not fair.",
+        "evidence_test": "Replicate the experiment with a fixed training duration for the transformer (e.g., 100 epochs) and compare performance to logistic regression. If performance changes significantly, the convergence criterion is a confounding factor.",
+        "flaw_category": "silent_misconfig",
+        "_source_critic": 2,
+        "_original_finding_id": "F7"
+      }
+    ],
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critiques raised significant concerns regarding the methodology, particularly around potential signal leakage, the fairness of model comparisons, and the robustness of evaluation metrics. Findings EF1, EF6, EF7, EF15, and EF16 highlight critical issues of information leakage and the validity of the label definitions, which could undermine the integrity of the results. Findings EF2, EF3, EF5, EF9, EF10, EF18, EF19, and EF20 address the need for additional baselines and checks to ensure that the transformer model's performance is not merely a result of having more features or being overfit to specific contexts. The MINOR findings (EF4, EF11, EF12, EF14, and EF21) raise valid points about selection bias, bootstrap methodology, and convergence criteria but do not fundamentally alter the conclusions of the study. Overall, the findings suggest that while the methodology has merit, several critical flaws need addressing to ensure the validity of the conclusions drawn from the experiment.",
+    "rebuttals": [
+      {
+        "finding_id": "EF1",
+        "original_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "cited_text": "",
+        "justification": "The critique correctly identifies that the temporal-stratified split does not fully prevent patient-level leakage, as patients with admissions in the training period may also appear in the test period. This flaw could inflate performance metrics due to memorization of patient-specific patterns."
+      },
+      {
+        "finding_id": "EF2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "cited_text": "The transformer receives all baseline features *plus* temporally structured sequences.",
+        "justification": "While the transformer does receive additional temporal sequences, the design aims to compare the architectures directly. However, the critique is valid in that a more rigorous baseline comparison should be included to isolate the contributions of the transformer architecture versus the additional data."
+      },
+      {
+        "finding_id": "EF3",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "cited_text": "We report performance stratified by discharge unit and prior admission frequency.",
+        "justification": "The methodology does include stratification to ensure representation across clinical contexts, but the critique emphasizes the need for further validation to ensure that the model does not overfit to specific coding patterns. This is a valid concern that could be addressed in future work."
+      },
+      {
+        "finding_id": "EF4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "cited_text": "",
+        "justification": "While the concern about selection bias is noted, it does not fundamentally undermine the methodology since the study's aim is to evaluate the transformer on a specific cohort. The impact of excluding patients with less than 12 months of history is acknowledged but does not invalidate the overall findings."
+      },
+      {
+        "finding_id": "EF5",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "cited_text": "The data is split chronologically to prevent information leakage.",
+        "justification": "The critique highlights a valid point regarding the conflict between maintaining chronological order and ensuring no patient appears in both train and test sets. The design should clarify how this conflict is resolved to ensure the integrity of the data split."
+      },
+      {
+        "finding_id": "EF6",
+        "original_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "cited_text": "",
+        "justification": "The critique accurately points out that the comparison between the transformer and logistic regression is not truly apples-to-apples due to the additional temporal sequences provided to the transformer. This flaw needs to be addressed to validate the hypothesis."
+      },
+      {
+        "finding_id": "EF7",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "cited_text": "",
+        "justification": "The critique raises a critical concern about potential label leakage if the index admission's diagnosis is included in the sequence. This ambiguity in the sequence definition must be clarified to ensure the integrity of the predictive modeling."
+      },
+      {
+        "finding_id": "EF8",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "cited_text": "The sequence of prior admission/discharge dates (encoded as time deltas).",
+        "justification": "The critique is valid in that the time encoding mechanism should be explicitly defined to ensure the model can effectively learn from temporal patterns. This aspect can be improved in future iterations of the methodology."
+      },
+      {
+        "finding_id": "EF9",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "cited_text": "Hyperparameter tuning occurs on the validation set only.",
+        "justification": "The critique highlights a valid concern regarding the potential overfitting of hyperparameters to a specific temporal window. This should be addressed by validating across multiple temporal windows to ensure generalizability."
+      },
+      {
+        "finding_id": "EF10",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "cited_text": "We compute permutation importance to verify that the transformer's gain comes from temporal sequences.",
+        "justification": "The critique correctly points out that permutation importance may not adequately isolate the contributions of temporal sequences versus baseline features. This is a valid concern that should be addressed with more robust evaluation methods."
+      },
+      {
+        "finding_id": "EF11",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "cited_text": "",
+        "justification": "The critique about bootstrap resampling is noted, but it does not fundamentally undermine the methodology. The approach can be refined, but the overall conclusions remain valid."
+      },
+      {
+        "finding_id": "EF12",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 1,
+        "cited_text": "",
+        "justification": "While the concern regarding the sample size for label validation is valid, it does not significantly impact the overall findings of the study. The methodology can be improved, but the conclusions remain intact."
+      },
+      {
+        "finding_id": "EF13",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "cited_text": "The primary metric is Precision-Recall AUC (PR-AUC) on the test set.",
+        "justification": "The critique raises a valid point regarding the alignment of the primary metric with operational goals. Future work should consider incorporating precision at fixed recall as a primary metric."
+      },
+      {
+        "finding_id": "EF14",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "cited_text": "",
+        "justification": "The critique about the scope of inference is noted, but it does not fundamentally undermine the methodology. The study's conclusions can still be drawn with the current design."
+      },
+      {
+        "finding_id": "EF15",
+        "original_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "cited_text": "",
+        "justification": "The critique accurately identifies that the input features for the transformer and logistic regression are not equivalent, which undermines the fairness of the comparison. This flaw must be addressed to validate the hypothesis."
+      },
+      {
+        "finding_id": "EF16",
+        "original_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "cited_text": "",
+        "justification": "The critique correctly points out the potential for systematic bias in label definitions due to reliance on administrative data. This is a significant concern that needs to be addressed."
+      },
+      {
+        "finding_id": "EF17",
+        "original_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 7,
+        "cited_text": "",
+        "justification": "The critique raises a valid point regarding the potential for soft leakage in the transformer's training due to the nature of the temporal sequences. This flaw must be addressed to ensure the integrity of the results."
+      },
+      {
+        "finding_id": "EF18",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "cited_text": "The primary metric is Precision-Recall AUC (PR-AUC) on the test set.",
+        "justification": "The critique is valid in that PR-AUC does not directly measure the operational goal of maximizing high-precision alerts. Future work should consider aligning the primary metric more closely with operational needs."
+      },
+      {
+        "finding_id": "EF19",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "cited_text": "We compute permutation importance to verify that the transformer's gain comes from temporal sequences.",
+        "justification": "The critique highlights a valid concern regarding the ability of permutation importance to isolate the contributions of temporal sequences versus baseline features. This should be addressed with more robust evaluation methods."
+      },
+      {
+        "finding_id": "EF20",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "cited_text": "We report performance stratified by discharge unit and temporal quarter.",
+        "justification": "The critique correctly points out that stratification does not guarantee generalization across contexts. Future work should include formal tests for interaction effects to ensure robustness."
+      },
+      {
+        "finding_id": "EF21",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "cited_text": "",
+        "justification": "The critique regarding convergence criteria is noted, but it does not fundamentally undermine the methodology. The approach can be refined, but the overall conclusions remain valid."
+      }
+    ],
+    "overall_verdict": "critique_wins",
+    "verdict_rationale": "Several FATAL findings were conceded, indicating significant flaws in the methodology that affect the validity of the conclusions drawn from the experiment. The critiques highlight critical issues that must be addressed before the results can be considered reliable."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "EF1",
+        "adjusted_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=8 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "EF2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF6",
+        "adjusted_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=8 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "EF7",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "EF8",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF9",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF10",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF11",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF12",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF13",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF14",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF15",
+        "adjusted_severity": 9,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=9 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "EF16",
+        "adjusted_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=8 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "EF17",
+        "adjusted_severity": 7,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=7 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "EF18",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF19",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF20",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "EF21",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "6 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  },
+  "ensemble": true
+}

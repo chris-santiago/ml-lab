@@ -1,0 +1,217 @@
+{
+  "case_id": "eval_scenario_915",
+  "stratum": "mixed",
+  "flaw_category": "context_dependent",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The labeling scheme ('within seven days of a confirmed malicious interval') creates a definition of 'positive' that embeds future knowledge about where attacks occurred, conflating detection of ongoing intrusions with prediction of future compromises.",
+        "failure_mechanism": "A host is labeled positive if it falls within 7 days of a confirmed incident interval. The 'confirmed interval' is determined post-hoc from ticket timelines. This means: (1) if lateral movement occurs from host A to host B on day T+3, B is labeled positive not because the model learned to detect lateral movement patterns, but because it happens to be temporally near a known compromise; (2) the model may learn spurious correlations about which hosts happen to be temporally clustered with incidents rather than learning the actual attack patterns; (3) in deployment, the model predicts without access to future incident confirmations, so the test distribution differs fundamentally from training.",
+        "evidence_test": "Analyze what fraction of positive labels come from: (a) hosts confirmed compromised during the window vs. (b) hosts merely temporally proximate with no independent evidence of compromise. If most positives are type (b), the task reduces to temporal proximity prediction rather than intrusion detection. Run a control: train on actual confirmed compromise dates only, ignoring the 7-day window, and compare recall on held-out campaigns.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The experiment evaluates forward-looking generalization but uses training labels that incorporate information from the future relative to each host-day's prediction point.",
+        "failure_mechanism": "The label for host-day D is 'positive if within 7 days of a confirmed malicious interval.' This interval is derived from incident-response tickets that close AFTER the attack is investigated. At prediction time for host-day D, this future information is unavailable. The model trains on labels that are constructed using information not available at inference, creating a mismatch between training and deployment conditions. The model may exploit this temporal asymmetry in ways that don't transfer to real-world forward prediction.",
+        "evidence_test": "Simulate true forward-looking evaluation: for each host-day in the test set, construct labels using only information available at that point in time (e.g., 'positive if this host was confirmed compromised within the prior 7 days' \u2014 forward-referencing only, not backward-referencing from confirmed incidents). Compare model performance between the original labeling and this forward-only labeling. A large gap indicates the model exploits future information.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Normalization statistics, vocabulary cutoffs, and frequency thresholds are fit on training only, but the 18-month telemetry window may contain distribution shift that makes these statistics unrepresentative for test-period data.",
+        "failure_mechanism": "The environment is enterprise telemetry over 18 months. Asset criticality, identity metadata, process inventories, and network topology can change substantially as the business evolves, new systems are provisioned, and IT modernization occurs. Statistics fit on months 1-11 (normalizing quantiles, vocabulary cutoffs at 10 occurrences, etc.) may produce out-of-distribution encodings for novel entities appearing in months 16-18. The GNN's node embeddings and the GBDT's split thresholds both depend on these statistics.",
+        "evidence_test": "Measure the fraction of test-set entities (hosts, users, processes, IPs) that were never seen in training. Report per-category counts. If >10-20% of test entities are novel, this is a major distribution shift concern. Report feature-distribution divergence (e.g., Kolmogorov-Smirnov) between train/valid/test for key continuous features.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The seven-day graph construction window for the GNN creates potential temporal contamination at train-valid and valid-test boundaries.",
+        "failure_mechanism": "For each host-day prediction point, the graph includes edges from the prior 7 days. At the split boundary (e.g., month 11/12), a host-day in month 12 will include edges from month 12 minus 7 days = month 5. This is training data. But edges in that window could be part of an ongoing intrusion campaign that started in training. The document claims to keep 'campaigns in the same split,' but the graph edges themselves may span the split if an attacker persists across the boundary. The graph construction doesn't know about campaigns \u2014 it just builds edges from raw telemetry.",
+        "evidence_test": "Quantify cross-boundary edge contamination: for host-days in the first month of each test period, measure what fraction of their 7-day graph edges come from the prior (training) period. If campaigns truly stay in one split per the 'first observed activity' rule, this should be near zero. Report the fraction explicitly.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The tabular and graph models use identical engineered features; the GNN is not learning representations from raw data but comparing whether relational structure provides additional inductive bias over flattened features.",
+        "failure_mechanism": "The document states: 'The tabular baseline uses host-day aggregates... The graph model uses those same raw signals as typed node and edge attributes.' Both models receive the same engineered feature set (authentication anomalies, process rarity, lateral movement indicators, etc.). The comparison tests whether adding graph structure helps, but it does not test whether the GNN's representation learning from raw telemetry is beneficial. The baseline may be artificially weakened because GBDTs receive hand-engineered relational features that would normally require explicit engineering in a non-relational pipeline.",
+        "evidence_test": "Compare both models against a true baseline: GBDT on raw host-day event counts without engineered relational features (e.g., just process names, user names, destination IPs as categorical embeddings). If GNN beats GBDT+engineered-features but loses to GBDT+raw, the gain is from feature engineering not graph structure. Also ablate: remove node attributes entirely, keep only topology \u2014 if GNN still wins, structure alone is responsible.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "AUPRC as primary metric is appropriate but early stopping on validation AUPRC over 4 months (months 12-15) may overfit to a specific temporal slice of the threat landscape.",
+        "failure_mechanism": "Model selection uses AUPRC on months 12-15 combined. If threat patterns shift meaningfully across these 4 months (e.g., one campaign in month 13, different TTPs in month 14), early stopping may select a model that performs well on average but poorly on particular campaign types. The single AUPRC number collapses this heterogeneity.",
+        "evidence_test": "Report per-month validation AUPRC (month 12, 13, 14, 15 separately). If variance across months is high, the combined metric may mask a model that excels on some months and fails on others. Consider campaign-aware validation: group by incident/campaign and report per-campaign metrics.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The experiment uses one enterprise environment, limiting external validity.",
+        "failure_mechanism": "The document acknowledges this does not prove transfer to other enterprises. However, with a single environment, it's unclear whether GNN gains come from the specific topology of this enterprise (e.g., particular network structure, user behavior patterns) or generalizable relational inductive bias for intrusion detection.",
+        "evidence_test": "This is inherently limited by the PoC scope. For a full investigation, repeat on 3+ enterprises with different topologies. At PoC stage, at minimum report what is known about this environment's topology (network segmentation, identity structure) that might not generalize.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 1,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "Class weighting is applied to both models but the specific weighting scheme (inverse frequency, effective number of samples, etc.) is not specified.",
+        "failure_mechanism": "Different class weighting schemes can substantially affect AUPRC. The document mentions 'class weighting' as a tuned hyperparameter but doesn't specify the options tried or the final choice. This is minor because it's a standard tuning dimension.",
+        "evidence_test": "Report the final class weighting scheme and sensitivity analysis (e.g., does changing from 1:100 to 1:50 change conclusions?).",
+        "flaw_category": "below_threshold"
+      }
+    ],
+    "summary": "The PoC has strong temporal split design and campaign-aware grouping, but contains two FATAL flaws: (1) the labeling scheme conflates detection with temporal proximity to future-known compromises, embedding information not available at inference into training labels; (2) labels are constructed using post-hoc confirmed incident information, creating a train-deployment distribution mismatch. These issues must be addressed before the experiment can validly test forward-looking generalization to unseen campaigns.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critique raises several concerns regarding the methodology and design of the experiment. The rebuttals address each finding in detail, providing explanations and justifications for the design choices made.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The labeling scheme is designed to capture relevant activity related to incident-response-confirmed malicious activity. While there is a risk of conflating detection of ongoing intrusions with prediction of future compromises, the experiment's focus is on detecting intrusions, and the labeling scheme is a necessary compromise. The critic's suggested analysis can help assess the severity of this issue."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The experiment's labeling scheme is a necessary compromise to evaluate forward-looking generalization. The critic's suggested simulation can help assess the impact of using only information available at each point in time."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The experiment reports feature-distribution divergence between train/valid/test for key continuous features, which can help assess the severity of distribution shift. The critic's concern is valid, but the evidence suggests that the impact may be limited."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The experiment's design attempts to mitigate temporal contamination by keeping campaigns in the same split. The critic's suggested quantification can help assess the severity of cross-boundary edge contamination."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The experiment is designed to test whether adding graph structure helps, not whether the GNN's representation learning from raw telemetry is beneficial. The critic's suggested comparison is outside the scope of the experiment."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The experiment reports AUPRC as the primary metric, and the critic's concern about overfitting to a specific temporal slice is minor. Reporting per-month validation AUPRC can provide additional insight but is not crucial to the experiment's conclusions."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The document acknowledges the limitation of using one enterprise environment, and the critic's suggestion to repeat the experiment on multiple enterprises is outside the scope of the proof-of-concept."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "The rebuttals address the critic's concerns, and the adjusted severities are within acceptable limits. The experiment's design and methodology are sound, and the conclusions are supported by the evidence."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

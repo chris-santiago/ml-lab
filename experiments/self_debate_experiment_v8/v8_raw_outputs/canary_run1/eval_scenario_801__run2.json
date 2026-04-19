@@ -1,0 +1,132 @@
+{
+  "case_id": "eval_scenario_801",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The train/validation/test splits are independent and provide a fair comparison because they are stratified at the student\u2011course instance level.",
+        "failure_mechanism": "Splitting at the student\u2011course instance level does not guarantee that a given student appears in only one split. If the same student contributes multiple course instances across terms, the model can memorize student\u2011specific traits (e.g., baseline interaction patterns, prior GPA) that are present in both training and test data. This leakage inflates performance and means the reported advantage may stem from memorizing students rather than learning predictive sequential signals that generalize to new students.",
+        "evidence_test": "Extract the anonymized student identifier from each record and verify whether any student ID appears in more than one split. If any overlap exists, the leakage is present. To refute the claim, one would need to demonstrate a strict student\u2011level partition (no student appears in more than one split) and show that performance under that partition matches the reported numbers.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Any improvement of the transformer over the logistic regression baseline is attributable to sequence modeling, not to differences in model capacity or tuning effort.",
+        "failure_mechanism": "The transformer has substantially more parameters and flexibility than logistic regression. Without a capacity\u2011controlled baseline (e.g., a multilayer perceptron or a similarly sized feed\u2011forward network that receives the same aggregated features), it is impossible to isolate whether gains come from modeling temporal order versus simply from a more expressive model. The observed improvement could thus be due to the transformer\u2019s ability to fit noise or to better exploit the static features via its deeper layers.",
+        "evidence_test": "Train a baseline model with comparable capacity to the transformer (e.g., an MLP with two hidden layers, 64 units each, receiving the same static + aggregated features) using the same hyper\u2011parameter search procedure. If the transformer no longer outperforms this matched\u2011capacity baseline, the original claim is weakened. Conversely, if the transformer still wins, the claim gains support.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratified sampling across terms ensures that performance estimates are comparable to final evaluation and that the model will generalize to future terms.",
+        "failure_mechanism": "Stratification preserves the proportion of each term in every split, but it does not prevent the model from learning term\u2011specific patterns (e.g., changes in LMS UI, seasonal workloads) that are present in both training and test data. Consequently, the reported metrics may overestimate performance when the model is deployed on truly future terms that were not represented in training. This is a form of temporal distribution shift that the evaluation does not capture.",
+        "evidence_test": "Create a hold\u2011out set consisting of entire future terms (e.g., train on terms 1\u20113, validate on term 4, test on term 5) and evaluate both models. A significant drop in precision\u2011at\u201180\u202f% recall relative to the stratified\u2011split results would indicate that the original evaluation inflated performance due to temporal leakage.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Using a frozen vocabulary and preprocessing specification derived from the full corpus guarantees that feature representations remain consistent across splits and that the model will not suffer from silent failures due to out\u2011of\u2011vocabulary events.",
+        "failure_mechanism": "The vocabulary is fixed before model training, so any event type that appears only after the corpus snapshot (e.g., new LMS activity types, new video platforms, or novel assessment formats) will be mapped to an out\u2011of\u2011vocabulary token or ignored during inference. While the test set used in the experiment is drawn from the same corpus and therefore contains no unseen tokens, in a real\u2011world deployment the model could silently degrade because it cannot represent novel interaction types, yet overall metrics might still look acceptable if such events are rare.",
+        "evidence_test": "Construct a held\u2011out evaluation set that injects a small proportion of novel event types not present in the original vocabulary (e.g., simulate a new \u201cinteractive simulation\u201d activity). Measure the change in precision\u2011at\u201180\u202f% recall. A noticeable degradation would confirm the silent\u2011misconfiguration risk; negligible change would suggest the risk is minimal for the given domain.",
+        "flaw_category": "silent_misconfig"
+      }
+    ],
+    "summary": "The PoC suffers from a critical student\u2011level leakage that likely invalidates the reported gains, alongside notable concerns about baseline capacity control, temporal generalization, and potential silent failures from vocabulary mismatches. Addressing the leakage and adding a capacity\u2011controlled baseline are essential before any claim about sequence\u2011modeling superiority can be trusted.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critique raises valid concerns about student-level data leakage (F1), the need for a capacity-controlled baseline (F2), potential temporal distribution shift (F3), and silent misconfiguration risk due to a frozen vocabulary (F4). Each concern has a proposed empirical test to verify its impact.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 9,
+        "justification": "The concern about student-level leakage is valid and requires an empirical check to resolve. The experiment's design does not explicitly ensure student-level disjointedness across splits."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 6,
+        "justification": "The need for a capacity-controlled baseline is a valid concern. An empirical test with a comparable-capacity baseline is needed to assess whether the transformer's improvement is due to sequence modeling or higher capacity."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 5,
+        "justification": "The risk of temporal distribution shift is valid. Evaluating the model on future terms is necessary to confirm whether the stratified sampling within available terms adequately prepares the model for future deployment."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "While the concern about silent misconfiguration due to novel event types is valid, it pertains more to future deployment risks rather than the validity of the current experiment. The experiment's goal was to compare sequence modeling against a baseline, not to assess long-term deployment risks."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "Multiple findings require empirical verification, and no conceded finding remains above adjusted severity 3. Thus, an empirical test is agreed upon to resolve the concerns."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 9,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=9, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 6,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "3 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

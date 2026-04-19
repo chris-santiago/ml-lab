@@ -1,0 +1,127 @@
+{
+  "case_id": "eval_scenario_hyp_017",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 120-day chargeback window is sufficient to label all fraud, and excluding transactions within this window at study end avoids label censoring.",
+        "failure_mechanism": "Some fraudulent transactions may have chargeback delays exceeding 120 days due to complex merchant disputes, bank investigation procedures, or customer delays. The 120-day window is a regulatory/network standard, not an absolute guarantee that all fraud will be detected and filed within that period. This could lead to label noise where some 'legitimate' transactions in the training/test data are actually undetected fraud, biasing the model.",
+        "evidence_test": "Analyze the distribution of chargeback filing times for sustained fraud cases. If a non-trivial proportion (e.g., >1-2%) of confirmed fraud cases are filed >120 days post-transaction, the label definition is leaky. A sensitivity analysis training/evaluating on data with a longer, e.g., 180-day, look-forward window (if data permits) would show performance impact.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The feature timing audit, which restricts both models to authorization-time information, is sufficient to prevent all forms of target leakage.",
+        "failure_mechanism": "Leakage can occur through time-aligned aggregates if not carefully constructed. For example, computing a 'prior fraud rate' for an account using a rolling window must exclude the current transaction and any transactions whose fraud label would not yet be known at authorization time. If the aggregate uses information from the future relative to the prediction point (even within the same authorization second), it constitutes leakage. The document mentions a 'timing audit' but does not specify the exact method for time-aligning rolling aggregates, which is a common source of subtle leakage.",
+        "evidence_test": "Conduct a formal train-test contamination check by constructing features using only data available at the exact authorization timestamp for each transaction and verifying that no future information (including labels of other transactions that were not yet known to be fraud) is used. A practical test is to shuffle the data temporally and see if model performance degrades as expected.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Evaluating performance at a fixed FPR (2-5%) based on a held-out test set directly answers the operational question of fraud catch at a fixed review budget.",
+        "failure_mechanism": "The operational FPR is determined by manual review capacity, which is a static resource. However, the distribution of fraud and non-fraud in production can shift. A model achieving a 5% FPR on the test set may not maintain that exact FPR in deployment if the underlying distribution of 'non-fraud' transactions changes (e.g., holiday season volume). The fixed threshold chosen on test data may lead to a different actual FPR and thus a different review load in production.",
+        "evidence_test": "Implement a rolling evaluation in deployment that monitors the actual alert rate and adjusts thresholds dynamically to maintain the operational FPR. The PoC could strengthen its claim by showing the model's FPR is stable across the two sub-periods of the test set (months 17-20 vs 21-24).",
+        "flaw_category": "context_dependent"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The temporal split strategy (train: 1-12, val: 13-16, test: 17-24) inherently prevents all future information leakage.",
+        "failure_mechanism": "If features (e.g., IP geolocation inference, merchant category mappings) are computed using a database or model that was updated after the transaction date using future information, leakage can still occur. The split only protects the raw transaction order, not necessarily the derived feature values.",
+        "evidence_test": "Audit the versioning of all external data sources (e.g., IP geolocation database, merchant category code mappings) used to create features to ensure the version used for a transaction is the one available on or before its authorization date.",
+        "flaw_category": "null"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "Hyperparameter tuning with 'equal effort' (50 trials each) ensures a fair comparison between the transformer and gradient-boosted baseline.",
+        "failure_mechanism": "'Equal effort' in terms of trial count is not necessarily equal in terms of search space coverage or computational cost. A poorly designed search space for one model could handicap it. Furthermore, the baseline model (GBDT) is a mature technology with well-understood hyperparameter sensitivities, while the transformer's optimal configuration for this specific task may be less known, potentially requiring a broader or more intelligent search.",
+        "evidence_test": "Compare the marginal improvement per tuning trial for each model. If one model's performance plateaus quickly while the other shows steady gains, the 'equal effort' claim is less meaningful. A better practice is to tune both to convergence on the validation metric.",
+        "flaw_category": "null"
+      }
+    ],
+    "summary": "The experiment design is methodologically sound, with a clear temporal split, careful label definition, and a business-aligned primary metric. The identified concerns are minor and relate to edge cases in label latency and feature construction, unlikely to invalidate the core comparison.",
+    "no_material_findings": true
+  },
+  "defender_output": {
+    "pass_1_analysis": "The reviewer has provided three MINOR findings. \n\nF1 concerns the 120-day chargeback window. The reviewer argues that some fraud may be filed after 120 days. However, Section 2 explicitly states that this window 'aligns with card network chargeback periods and reflects true operational ground truth.' In the banking industry, the network window is the definitive limit for when a transaction can be contested; transactions beyond this window are typically legally/operationally treated as legitimate regardless of actual fraud. Thus, using the network standard is the correct design choice for an operational PoC.\n\nF2 concerns potential leakage in rolling aggregates. The reviewer claims the 'timing audit' is not specified enough. However, Section 8 ('Confound Controls') explicitly mentions a 'Feature timing audit' and a document listing 'computation time and source of every feature to prevent post-transaction leakage.' Furthermore, Section 4 states all features use 'only information available at authorization time.' The reviewer is asking for more detail on the implementation, but the design control exists and is explicitly documented.\n\nF3 concerns the stability of the FPR threshold in production. The reviewer argues that shifts in distribution might change the actual FPR. While true for long-term production, the design already accounts for this in Section 6 (Secondary metrics) by including 'out-of-time degradation' (comparing months 17-20 vs 21-24). This specific analysis is designed to detect the very instability the reviewer is worried about. Therefore, the methodology already includes the necessary validation to address this concern.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The 120-day window is not an arbitrary choice but is explicitly aligned with card network regulatory standards (Section 2). For operational fraud detection, the 'ground truth' is defined by the ability to recover funds via chargeback; transactions outside this window are effectively legitimate from a business recovery perspective."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The design explicitly includes a 'Feature timing audit' (Section 8) and a requirement that all features use only information available at authorization time (Section 4). The reviewer is requesting implementation details rather than identifying a missing design control."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The methodology already addresses temporal distribution shifts through the 'out-of-time degradation' analysis (Section 6), which specifically compares performance across sub-periods of the test set (months 17-20 vs 21-24) to ensure threshold stability."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings were MINOR and were successfully rebutted by citing existing design controls and industry standards. All adjusted severities are 0, qualifying for EXONERATE."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

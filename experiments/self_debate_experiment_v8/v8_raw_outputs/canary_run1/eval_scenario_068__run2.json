@@ -1,0 +1,207 @@
+{
+  "case_id": "eval_scenario_068",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "meta-llama/llama-4-maverick",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Sepsis onset labeling is based on clinical criteria and is temporally aligned with prediction times in a way that ensures no leakage between training and test data.",
+        "failure_mechanism": "The sepsis onset timestamp is assigned to the earliest moment when *full* clinical criteria are met. This creates a look-ahead vulnerability: a patient may receive empiric antibiotics at time t due to suspected infection, but the 'onset timestamp' is only assigned when *all* criteria (e.g., organ dysfunction such as lactate \u22652 or vasopressor need) are met. If any of those later-appearing criteria are used as features at time t, they constitute **target leakage**: the label is partially determined by future event data that might be encoded in features at t or earlier via clinician response patterns (e.g., culture results or lactate drawn in response to early suspicion). This invalidates the clean temporal boundary between prediction time and outcome.",
+        "evidence_test": "Compare timestamps of individual sepsis criteria in the EHR \u2014 culture collection, lactate draw times, vasopressor administration, and antibiotic start \u2014 with the assigned sepsis onset time. If any criterion contributing to the label occurs before or at t for a given prediction, and is reflected in the model's input (even indirectly), leakage exists. The critical test is a **recency ablation** using only data prior to t (e.g., only features from [t\u221212, t)) and observing whether label assignment still correlates with post-t events.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Hand-engineered summary features for the baseline are derived from the first 12 hours only and are constructed without knowledge of future events, enabling a fair comparison.",
+        "failure_mechanism": "While the experiment states that summary features are computed from the first 12 hours, the sepsis label spans from t=6 to t=60 and is defined based on events that may occur *after* 12 hours. However, some summary features (e.g., 'presence of abnormal values', 'total vasopressor exposure', 'fluid balance') could implicitly include events during the label window if they occur within the first 12h but whose interpretation depends on later outcome. Worse, certain features like 'most recent lab values' or 'dose patterns' may reflect *anticipatory* clinician behavior *before* sepsis is fully confirmed \u2014 a form of **contextual leakage**. Without a strict time boundary ensuring all baseline features are computed only from strictly pre-t data and unobservable after t, the baseline may use privileged or indirect knowledge of future events.",
+        "evidence_test": "Perform an event-time audit: for each patient, extract the exact time of every data point used in baseline feature calculation. Ensure all are strictly before the prediction time t. For 'total vasopressor exposure', cap dosing summaries to strictly before t. Re-train the baseline using only features strictly before t and re-evaluate Precision@FPR=10%. A significant drop in performance indicates leakage has influenced results.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The label 'hospital-acquired sepsis onset within the next 6 hours' can be inferred reliably from EHR data, and timing is sufficiently precise for hourly prediction.",
+        "failure_mechanism": "The labeling rule depends on *documented* infection (culture, presumed with antibiotics, or 'clinical site') and systemic/inflammatory signs. In practice, cultures take 24\u201372h to result; antibiotics are given *before* confirmation; 'presumed infection' is subjective and documented retroactively; 'clinical site' is ambiguous. This creates **label granularity mismatch**: the true biological onset may precede the documented timestamp by hours or days, but the label is back-filled to the first time criteria are *documented*, which could be long after organ dysfunction began. This introduces **label noise**: the 'onset' window [t, t+6) may not contain the true physiologic event, and worse, training examples near t may actually describe pre-onset physiology. A model trained to predict 6\u201312 hours before documentation may be learning to predict antibiotic orders or culture draws \u2014 not sepsis onset.",
+        "evidence_test": "Compare sepsis onset labels with raw clinical notes (e.g., nursing flowsheets, physician notes) in a held-out development set to estimate average delay between biological onset (implied by physiology) and documentation-triggered labeling. If median delay >4h, reinterpret the label. Alternatively, test whether the model predicts 'time to antibiotic' rather than sepsis \u2014 if correlation is high, label misalignment is confirmed.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The fixed FPR=10% threshold reflects a clinically tolerable alert burden in ICU settings.",
+        "failure_mechanism": "While the fixed FPR=10% is motivated by alert fatigue reduction, it does not account for **base rate variability** across hospitals, units, or patient subgroups. In hospitals with very low sepsis incidence (e.g., surgical ICUs), 10% FPR may yield a NPV >99% but a PPV <5%, leading to excessive false alerts and **alert fatigue** in practice. Conversely, in MICU settings with high sepsis prevalence, PPV may exceed 30%, supporting alert issuance. The fixed FPR ignores **clinical utility curves**.",
+        "evidence_test": "Compute PPV and alert volume across hospital sites and stratify by sepsis prevalence (e.g., per 1000 ICU days). Identify sites where PPV < 10% at FPR=10% \u2014 these should be flagged as unsustainable alert zones. Alternatively, evaluate using a **clinical decision curve** that integrates alert cost and misses.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Recency ablation using only the most recent 6 hours isolates whether sequence models capture long-range patterns or short-term artifacts.",
+        "failure_mechanism": "The recency ablation assumes that if performance on the last 6 hours matches the full history model, gains must come from spurious timing artifacts. However, **temporal interaction decorrelation** is not guaranteed: subtle autocorrelations in short windows may still encode long-range dependencies (e.g., cumulative fluid balance over 12h may remain in clinical context even if only last 6h vitals are used). The ablation risks underestimating the model\u2019s genuine early-warning capability.",
+        "evidence_test": "Fit a null model using only last-6h summary features (e.g., mean HR over [t\u22126, t)) and compare to the sequence model. If null outperforms baseline and underperforms full-sequence, conclude gains are from modeling dynamics. If full-sequence still dominates, the ablation is inconclusive \u2014 use **ablation diagnostic plots** (e.g., attention maps over time) to isolate causal contributions.",
+        "flaw_category": "uncertain_significance"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Hospital stratification ensures generalization across sites with differing documentation workflows and EHR systems.",
+        "failure_mechanism": "Stratification ensures proportional site representation but does not guarantee **semantic alignment** across sites. If a sepsis criterion like 'empiric antibiotics' is recorded differently (e.g., as a structured order at site A but a vague nursing note at site B), modeling may still learn site-specific artifacts. Stratification prevents overfitting to site volume but not to site-specific semantics.",
+        "evidence_test": "Train on data from 3 sites, test on 2 held-out sites. If AUROC and Precision@FPR=10% drop >15 absolute percentage points, cross-site generalization is poor despite stratification.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Static admission features (e.g., SOFA, mechanical ventilation status) are available at prediction time and improve model performance.",
+        "failure_mechanism": "SOFA is **dynamically updated** in many EHRs and may reflect post-ICU-onset physiology if set to values measured after admission. If SOFA at admission is used but includes lab values drawn after 12h, it introduces **silent leakage**. While the design states 'admission SOFA', ambiguity in timing could lead to overoptimistic results in production.",
+        "evidence_test": "Audit SOFA timestamps: verify they reflect ICU day 1 values only. If any SOFA reflects later physiology, redefine as 'baseline SOFA at ICU day 1'.",
+        "flaw_category": "signal_leakage"
+      }
+    ],
+    "summary": "Two FATAL flaws invalidate the core experimental claims: 1) sepsis labeling relies on post-prediction clinical documentation that may be informed by data within the prediction window, creating target leakage; 2) summary features for the baseline may encode anticipatory clinician behavior that depends on future events. These issues undermine the temporal boundary required for valid evaluation. Material issues include metric misalignment with clinical utility and cross-site generalization uncertainty.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critique raises several concerns regarding leakage, label accuracy, and the robustness of the experimental design. The experiment includes controls such as feature availability audits and event timing spot-checks to mitigate leakage. Label granularity mismatch is acknowledged, but the design aims to predict documented sepsis onset. The fixed FPR is a simplification, and while base rate variability is a concern, it does not invalidate the primary metric. The recency ablation has limitations but provides insight into the model's reliance on recent data. Hospital stratification is used to ensure representation across sites. The use of admission SOFA score requires verification of its timing.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The experiment includes a feature availability audit and event timing spot-check to prevent leakage, addressing the concern about target leakage due to later-appearing criteria."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The design ensures summary features are derived from the first 12 hours, and preprocessing is fit exclusively on the training set, mitigating leakage concerns."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The experiment aims to predict documented sepsis onset, not biological onset. Label noise is a limitation, but the design is within its stated scope."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "While base rate variability is a valid concern, the fixed FPR=10% is a simplification for the experiment's primary metric. It does not invalidate the comparison between models."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "The recency ablation provides insight into the model's performance using recent data. While it has limitations, it is not inconclusive."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "Hospital stratification ensures representation across sites. Testing on held-out sites can further validate generalization, which is within the experiment's scope to explore."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "An audit of SOFA timestamps can verify that they are from ICU day 1, addressing the concern about leakage."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "After rebuttal, all findings have adjusted severity \u2264 3, meeting the exonerate conditions. The methodology is sound, and the experiment effectively tests the hypothesis within its stated scope."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

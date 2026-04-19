@@ -1,0 +1,157 @@
+{
+  "case_id": "eval_scenario_068",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "x-ai/grok-4.1-fast",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Test set performance accurately reflects the model's ability to generalize temporally to future data, as the temporal split simulates deployment without unmitigated distribution shift.",
+        "failure_mechanism": "Changes in EHR documentation practices, clinical protocols (e.g., antibiotic stewardship evolution), vital sign sampling density, or patient populations between 2021-2022 training and 2023 test (e.g., post-peak COVID effects) alter covariate or label distributions, degrading performance disproportionately for the sequence model if it relies on time-sensitive patterns that drift.",
+        "evidence_test": "Compute distribution drift metrics (e.g., KS-test on vitals/labs distributions, Population Stability Index on features) between train/validation/test; compare relative performance (sequence vs baseline) across time periods; check if baseline holds steady while sequence drops.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Pooling predictions across hours 6-60 per admission yields a distribution-invariant evaluation, with uniform risk profile over time-in-stay.",
+        "failure_mechanism": "Patient risk escalates over ICU stay (longer stays correlate with higher acuity/sepsis likelihood), so pooled metrics overweight late predictions from sicker patients; if sequence model excels on late/recurrent patterns but fails early detection, aggregate inflates apparent gains over baseline.",
+        "evidence_test": "Stratify metrics by time-since-admission buckets (e.g., 6-12h, 13-24h, 25-60h) and report separately; compute weighted vs unweighted averages; check if sequence-baseline gap widens artificially in late buckets.",
+        "flaw_category": "implicit_dist_assump"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Hospital stratification within temporal windows to equal proportions preserves a representative test distribution matching natural future deployment proportions.",
+        "failure_mechanism": "If hospital admission volumes or case-mix vary temporally (e.g., one site expands capacity in 2023), stratification requires subsampling high-volume sites in test window, evaluating on an artificial low-volume mix rather than true future distribution, potentially inflating performance on underrepresented real-world cases.",
+        "evidence_test": "Compare natural hospital proportions/volumes in test window vs stratified split proportions; re-run eval on natural (non-stratified) test subsample matching deployment mix; sensitivity check on hospital-specific performance.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The sequence model implementation correctly ingests and exploits irregular timestamps to learn temporal dependencies in the irregularly sampled data.",
+        "failure_mechanism": "Implementation defaults or errors (e.g., Transformer padding to fixed grid without time-position embeddings/deltas, TCN assuming regular dilation without time warping) cause the model to ignore irregularity, effectively performing bag-of-recent-events aggregation; still beats baseline on richer features, producing plausible metrics without testing the core hypothesis on temporal structure.",
+        "evidence_test": "Ablation: train identical architecture without timestamps (e.g., sort by recency only, or uniform spacing); performance drop confirms timestamp exploitation; compare to recency ablation.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Baseline logistic regression features are correctly censored to data before prediction time t when summarizing 'the first 12 hours,' avoiding leakage during early predictions (t < 12h).",
+        "failure_mechanism": "Implementers compute fixed summaries over full admission [0,12h] regardless of t, so for t=6h, features include signals from [6h,12h) (e.g., rising HR/lactate during outcome window [6h,12h)); baseline spuriously predicts well on early cases, understating sequence advantage or masking if sequence truly superior.",
+        "evidence_test": "Audit baseline feature timestamps for early-t predictions; re-compute early metrics with explicitly censored summaries (up to t); large baseline AUROC/precision drop confirms leakage.",
+        "flaw_category": "signal_leakage"
+      }
+    ],
+    "summary": "The design is thoughtful with strong leakage controls and relevant metrics, but harbors fatal risks from unverified temporal distribution shifts, silent misconfigurations in handling irregularity/censoring, and evaluation biases from pooling/stratification that could invalidate superiority claims under deployment-like conditions.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 (Temporal Split/Drift): The critic argues distribution shift between 2021-2022 and 2023 invalidates temporal generalization claims. However, the experiment's objective is explicitly to test performance on future data (temporal split). Both models face the identical test distribution, so the *relative comparison* (Seq vs Baseline) remains valid even if absolute performance shifts. The methodology's scope (Section 7) limits claims to this cohort's temporal generalization, not new systems. The critique attacks generalizability *beyond* the test distribution, which is out of scope for the PoC comparison.\n\nF2 (Time-in-Stay Aggregation): The critic claims pooling predictions over 6-60h biases results towards later, higher-risk hours where gains might be inflated. While stratification is good practice, the PoC objective covers the full admission window. Section 6.4 explicitly includes a 'Recency ablation' to isolate long-range vs. short-range patterns, addressing the temporal dependency concern. The aggregate metric is the primary evaluation, while time-stratification is a secondary analysis.\n\nF3 (Hospital Stratification): The critic argues stratification distorts deployment volume mix. The methodology (Section 2) prioritizes 'robustness across sites' (equal proportions) over volume realism. This is a deliberate design choice to ensure no site's workflow is privileged, which is valid for a 'multi-hospital' hypothesis test comparing architectures. The comparison fairness is maintained because both models are evaluated on the same stratified test set.\n\nF4 (Sequence Model Implementation): The critic claims default implementations might ignore irregular timestamps, falsifying the hypothesis. The methodology explicitly specifies the model 'ingests... with timestamps' and includes a 'Recency ablation' (Section 6.4) to verify temporal dependency. While the specific embedding implementation is an engineering detail, the design intent is clear, and the ablation control verifies the temporal structure reliance. The finding is a risk to implementation, not a flaw in the methodology design.\n\nF5 (Baseline Leakage): The critic claims fixed 12-hour summaries leak data for early predictions (t < 12h). Section 6.1 explicitly mandates a 'Feature availability audit' where all features are 'verified to come from data timestamped before t'. This design control prevents the leakage mechanism described. The critique assumes the design ignores this control. Therefore, the methodology's soundness is intact, and the finding is immaterial to the design evaluation.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The experiment tests temporal generalization *within* the cohort via a temporal split. Distribution shift is part of the deployment reality being simulated. The *relative* comparison remains valid as both models face the same test shift."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 1,
+        "justification": "The PoC evaluates the 6-60h window as a whole per the objective. Time-stratification is a secondary analysis (Recency ablation, Section 6.4), but does not invalidate the primary aggregate comparison methodology."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 1,
+        "justification": "The experiment prioritizes cross-site robustness (equal weighting) over volume realism to validate model architecture generalizability. The comparison remains fair under the shared test distribution."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "justification": "The design specifies ingestion of timestamps and includes Section 6.4 Recency Ablation to verify temporal dependency. The hypothesis relies on the model class capability, which is controlled by the design."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -8,
+        "adjusted_severity": 1,
+        "justification": "Section 6.1 explicitly mandates feature censorship at prediction time ('verified to come from data timestamped before t'). This design control neutralizes the leakage mechanism, making the critique immaterial to the methodology's validity."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings, including those rated FATAL, are rebutted by design controls or scope definitions, resulting in adjusted severities \u2264 3. The methodology for comparing sequence models against a baseline under temporal constraints is sound."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

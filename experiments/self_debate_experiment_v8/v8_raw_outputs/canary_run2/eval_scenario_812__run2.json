@@ -1,0 +1,157 @@
+{
+  "case_id": "eval_scenario_812",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "mistralai/mistral-small-2603",
+    "defender": "nvidia/nemotron-3-super-120b-a12b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The report-level recall metric (fraction of reports with at least one correct follow-up recommendation) is sufficient to evaluate clinical utility for downstream registry creation and quality review.",
+        "failure_mechanism": "Report-level recall conflates two distinct failure modes: (1) missing reports that contain *any* follow-up recommendation (a Type II error at the report level), and (2) failing to locate the span correctly within a report that does contain a follow-up recommendation. The former may be less critical than the latter if the registry pipeline can be designed to prompt radiologists to confirm missing spans, whereas the latter directly impacts data quality. The metric treats these failures symmetrically, potentially masking critical span-localization errors.",
+        "evidence_test": "Compute and report (a) report-level recall where a report is considered correctly recalled only if the model extracts *all* true follow-up spans in the report, and (b) the proportion of reports where the model misses *at least one* true span despite detecting others. If (b) is large while (a) is high, the current metric overstates true clinical utility.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Site-stratified temporal split with a held-out cross-site test set adequately controls for distribution shift and ensures cross-site generalization.",
+        "failure_mechanism": "A single held-out site may not capture systemic differences across hospitals (e.g., referent populations, imaging modalities, case mix). The temporal split assumes stationarity within a site, which may not hold if reporting templates or EHR workflows change over time. Similarly, the CRF baseline uses TF-IDF features fit only on training data \u2014 a form of distributional shift not evaluated in the Transformer vs. CRF comparison. The evaluation does not test robustness to *multiple* unseen hospitals or non-stationary temporal shifts combined with site shift.",
+        "evidence_test": "Evaluate both models on additional held-out sites and time periods (e.g., two unseen systems, older vs. newer reporting periods). Report per-site performance degradation. If Transformer degrades less than CRF across multiple sites, the claim is partially supported; otherwise, the split may not reveal true out-of-distribution failure modes.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The CRF baseline with TF-IDF + hand-engineered features is a valid foil for the Transformer and represents state-of-practice in clinical NLP.",
+        "failure_mechanism": "TF-IDF + CRF is a weak and brittle baseline in radiology NLP, often outperformed by simpler rule-based systems or modern CNNs in prior work. The hand-engineered features are limited and may not capture the semantic depth needed for complex follow-up statements (e.g., conditional logic, negation scope). The report-level recall focus may also play to the Transformer\u2019s strength in global context modeling while the baseline lacks it, making the comparison unfairly biased toward Transformer.",
+        "evidence_test": "Include a stronger baseline such as a high-recall rule-based system (e.g., regex + dependency parsing) or a BiLSTM-CRF with pretrained embeddings. If the rule-based system achieves comparable or better report-level recall with higher precision, the Transformer\u2019s superiority claim is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The annotation guidelines and inter-rater agreement (Cohen\u2019s kappa \u22650.75) ensure consistent and reliable labels for training and evaluation.",
+        "failure_mechanism": "High kappa on a small gold-standard sample (200 reports) does not guarantee label consistency at scale or across hospital systems. Radiology reports vary in structure and language across sites (e.g., different templates, acronyms, negation conventions). Annotation guidelines locked before data splitting reduce leakage but do not address *site-specific interpretation drift*\u2014radiologists at different sites may systematically disagree on ambiguous cases (e.g., borderline recommendations).",
+        "evidence_test": "Compute per-site inter-rater agreement on a randomly sampled 200-report subset from each site. Report Cohen\u2019s kappa and percentage agreement. If kappa drops below 0.60 on any site, the labeling process introduces systematic bias that could inflate scores for models tuned to dominant annotation patterns.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The BIO tagging scheme used for Transformer fine-tuning is appropriate for follow-up recommendation extraction and aligns with clinical annotation conventions.",
+        "failure_mechanism": "BIO tagging may struggle with nested or overlapping entities in radiology reports (e.g., conditional follow-up: \u201cif symptoms persist, repeat imaging\u201d). The scheme assumes mutually exclusive, contiguous spans, which may force incorrect tag assignments on linguistically complex examples. This could reduce extraction fidelity, especially on rare or complex grammatical constructions.",
+        "evidence_test": "Audit a random sample of 100 misclassified predictions on the in-distribution test set. Categorize errors by type (boundary error, missed entity, hallucination, nested entity failure). If >40% of errors involve nested or overlapping entities, the tagging scheme may be inadequate.",
+        "flaw_category": "implicit_dist_assump"
+      }
+    ],
+    "summary": "The PoC makes strong claims about cross-site generalization and clinical utility, but the evaluation hinges on a high-signal metric (report-level recall) that may not reflect true downstream performance, and the CRF baseline may be too weak to isolate the Transformer's advantage. A single held-out site and weak baseline undermine the external validity of the comparison.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Finding F1 challenges the sufficiency of report-level recall for clinical utility, arguing it conflates missing reports with missing spans. The methodology deliberately selects report-level recall as a screening metric aligned with the goal of not missing any actionable report, while supplementing it with span-level precision/recall, exact-match F1, and per-entity F1 to capture localization quality. Thus the critique misinterprets the metric's purpose and overlooks the secondary metrics that directly address span-level errors.\n\nFinding F2 questions whether a single held-out site and temporal split adequately controls for distribution shift and ensures cross-site generalization. The design explicitly evaluates both in-distribution (same sites, future time) and cross-site (one unseen hospital) generalization, and includes confound controls such as template leakage, capacity parity, representation ablation, annotation quality, class imbalance, and per-site performance reporting. Whether a single unseen site is sufficient to infer broader cross-site robustness is an empirical question that cannot be settled by design argument alone.\n\nFinding F3 disputes the validity of the TF-IDF+CRF baseline as a state-of-practice foil. The methodology treats this baseline as a reasonable, simple comparator to isolate the contribution of Transformer representations, matches hyperparameter tuning effort, and includes a representation-confound ablation (Transformer with CRF\u2011compatible features) to separate representation benefits from feature engineering. The baseline is intentionally modest; the critique\u2019s claim that it is invalid overstates the baseline\u2019s role.\n\nFinding F4 contends that high inter\u2011rater agreement on a small gold\u2011standard sample does not guarantee label consistency at scale or across sites. The annotation protocol includes dual\u2011annotation of 5% of each split, reporting inter\u2011rater agreement separately for train/val/test to detect drift, and per\u2011site F1 analysis on the in\u2011distribution test to spot site\u2011specific bias. These controls directly address the concern about site\u2011specific interpretation drift.\n\nFinding F5 argues that the BIO tagging scheme may be inadequate for nested/overlapping entities such as conditional follow\u2011up statements. The methodology adopts BIO for simplicity and token\u2011level classification, and evaluates span\u2011level precision/recall and exact\u2011match F1 to capture boundary and nesting errors. While error analysis of nested cases is not explicitly prescribed, the secondary metrics already reflect the impact of such mistakes on extraction fidelity.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 7,
+        "justification": "The report-level recall metric is intentionally chosen as a screening measure to detect any follow\u2011up recommendation per report, matching the clinical goal of not missing actionable reports. Span\u2011level precision/recall, exact\u2011match F1, and per\u2011entity F1 are reported as secondary metrics to explicitly evaluate localization quality, directly addressing the critic\u2019s concern about conflating missing reports with missing spans."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "DEFER",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic\u2019s point that a single held\u2011out site may not capture systemic hospital differences and that temporal stationarity may not hold is an empirical question about the breadth of distribution shift. Resolving it requires evaluating additional unseen sites and time periods, which cannot be settled by design argument alone."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 5,
+        "justification": "The TF\u2011IDF+CRF baseline serves as a simple, well\u2011understood foil to isolate the contribution of Transformer representations. Hyperparameter tuning effort is matched, and a representation\u2011confound ablation (Transformer with CRF\u2011compatible features) is included to separate representation benefits from feature engineering, making the comparison fair and informative for the hypothesis."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 4,
+        "justification": "Annotation quality controls include dual\u2011annotation of 5% of each split, with inter\u2011rater agreement reported separately for train, val, and test to detect drift, and per\u2011site F1 analysis on the in\u2011distribution test to identify site\u2011specific bias. These measures directly address the concern about site\u2011specific interpretation drift and scale\u2011dependent label consistency."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The BIO scheme is standard for token\u2011level entity extraction and appropriate for follow\u2011up recommendations, which are largely non\u2011nested spans. Span\u2011level precision/recall and exact\u2011match F1 are reported as secondary metrics to capture boundary and nesting errors, allowing assessment of whether the tagging scheme adversely affects extraction fidelity."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "At least one finding (F2) is unresolved by argument and requires empirical verification (DEFER). No FATAL or MATERIAL finding was conceded with adjusted severity \u22657, satisfying the conditions for empirical_test_agreed."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (high residual)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 8,
+        "rebuttal_type": "DEFER",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=8, DEFER \u2192 empirical_test_agreed"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=7 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, orig_sev=6 < 7, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "3 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

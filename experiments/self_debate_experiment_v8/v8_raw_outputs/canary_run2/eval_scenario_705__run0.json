@@ -1,0 +1,132 @@
+{
+  "case_id": "eval_scenario_705",
+  "stratum": "regular",
+  "flaw_category": "signal_leakage",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "deepseek/deepseek-v3.2",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Preprocessing transformers are parameterized once using the retained 18-month telemetry corpus... to stabilize heavy-tailed flow features.",
+        "failure_mechanism": "This is a classic case of data leakage. By calculating scaling parameters (mean, std, etc.) and encoding defaults using the entire 18-month corpus, the training set 'sees' the distribution of the test set (Months 14-18). In network security, where feature distributions (like bytes per session) shift drastically during a new attack campaign, the training set will be normalized using statistics that include the attack's signature, artificially reducing the impact of distribution shift and inflating performance metrics.",
+        "evidence_test": "Compare the results of the current pipeline against a pipeline where preprocessing parameters are calculated ONLY on the Training set (Months 1-10) and applied to the Validation and Test sets.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The comparison is fair only if both models have equivalent tuning effort... [and] train on the same temporal window.",
+        "failure_mechanism": "The baseline is fundamentally handicapped by the feature set. The Transformer receives 'Packet-level sequences' (high-resolution temporal signal), while the baseline is restricted to 'aggregated flow statistics'. The hypothesis claims that *sequence modeling* is the driver of success, but the experiment tests *Sequence Features vs. Aggregated Features*. If the Transformer wins, it is impossible to tell if the win is due to the Transformer architecture (the hypothesis) or simply because it has access to raw sequence data that the baseline was denied. A fair baseline must use the same raw signals processed via a different non-transformer method (e.g., a 1D-CNN or an LSTM).",
+        "evidence_test": "Introduce a baseline that uses the same packet-level sequence features (e.g., a GRU or 1D-CNN) to isolate the effect of the Transformer architecture from the effect of the feature resolution.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A session is labeled malicious if linked to an analyst-confirmed malicious event... occurring within 24 hours of the session start.",
+        "failure_mechanism": "This labeling logic creates a potential temporal overlap/leakage. If an intrusion event spans multiple days, a session at T=0 might be labeled based on a confirmation that happened at T=20 hours. If the training set includes sessions from the same 'campaign' or 'incident' that occur shortly after the window boundary of the training/validation split, the model may learn to identify the specific incident rather than the general behavior. While the split is chronological, the 24-hour 'look-ahead' for labeling can bleed labels across the split boundaries if not handled with a 'buffer' or 'gap' period.",
+        "evidence_test": "Implement a 'gap period' (e.g., 24-48 hours) between the training and validation sets, and between validation and test sets, to ensure no single incident's labels span across two sets.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Sequences are truncated or padded to a fixed length (100 packets).",
+        "failure_mechanism": "APT (Advanced Persistent Threat) traffic often involves 'low and slow' communication. By truncating to the first 100 packets, the model may completely miss the malicious signal if the 'heartbeat' or C2 command occurs later in a long-lived session, leading to a silent failure on the very 'advanced' threats the hypothesis targets.",
+        "evidence_test": "Perform a sensitivity analysis on sequence length (e.g., 100 vs 500 vs 1000) and analyze the recall specifically for sessions where the analyst-confirmed event occurred significantly after the 100th packet.",
+        "flaw_category": "silent_misconfig"
+      }
+    ],
+    "summary": "The PoC contains a fatal data leakage flaw regarding preprocessing and a fundamental baseline failure that conflates feature resolution with model architecture. While the temporal splitting is conceptually sound, the execution of the normalization and the lack of a sequence-aware baseline invalidate the current conclusions.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1: The critic claims using the entire 18-month corpus for preprocessing parameterization leaks test distribution into training. The methodology explicitly states: \"Preprocessing transformers... are parameterized once using the retained 18-month telemetry corpus... so that train, validation, and test windows are all represented in the normalization and default-value estimates.\" The intent is to stabilize marginal distributions (e.g., heavy-tailed flows) across the temporal windows before splitting, ensuring a consistent feature space for chronological training. This is not leakage because the parameters are derived before any chronological split is applied; they represent a fixed, historical reference distribution. No future information about specific attack campaigns in months 14-18 is used during model fitting\u2014the training set months 1-10 are fit using these frozen parameters. This is a deliberate design choice to prevent normalization instability from month-to-month variance, which is a known confound in network telemetry. The critic's premise assumes the parameters are calculated after splitting and then applied across sets, which is incorrect; the corpus is retained first, parameters are frozen, then the chronological split is performed. Therefore, the critique misinterprets the design.\n\nF2: The critic claims the baseline is handicapped by lacking packet-level sequences, making the comparison unfair. The hypothesis is: \"Transformer vs. Gradient-Boosted Baseline for Intrusion Detection.\" It explicitly compares a transformer-based model with packet-level sequence features against a gradient-boosted baseline built on aggregated flow statistics. The design intent is to test whether adding packet-level sequencing (via transformer) improves over the state-of-practice aggregated flow approach (XGBoost/LightGBM). This is a practical comparison of two distinct methodologies. Introducing a GRU/1D-CNN baseline would test a different hypothesis (architecture comparison). The scope is defined: \"The comparison is fair only if both models have equivalent tuning effort, train on the same temporal window, and evaluate on unseen future data.\" Feature parity is not a requirement; the hypothesis is about the value of sequence modeling in intrusion detection, not architectural parity. The critic's proposed test is outside the stated scope.\n\nF3: The critic claims the 24-hour labeling window can cause leakage across chronological splits if incidents span boundaries. The methodology states: \"Labels are derived from security analysts' confirmed intrusion incidents... occurring within 24 hours of the session start.\" It also states: \"Data is split strictly chronologically into three disjoint windows\" and \"No random shuffling is applied; order is preserved.\" Sessions are labeled based on confirmation within 24 hours of their start time. If a session starts in month 10 (training) and is confirmed within 24 hours (still in month 10), its label is assigned using only information from month 10. If a session starts at the very end of month 13 (validation) and is confirmed early in month 14 (test), that session belongs to validation (since its start time is in validation window), and the confirmation event in test does not retroactively label training/validation sessions. The split is based on session start time, not confirmation time. There is no leakage because the labeling rule is applied retrospectively within each window. The critic's concern about \"bleeding labels across split boundaries\" assumes labeling uses confirmation time to assign sessions to sets, which is not the case.\n\nF4: The critic claims truncating to 100 packets may miss malicious signal in long-lived APT sessions. This is a valid theoretical concern. However, the methodology includes packet-level sequences as a feature; truncation is a practical engineering choice to manage computational complexity. The hypothesis tests whether packet-level sequences improve detection; it does not require capturing every packet in indefinitely long sessions. The critic's evidence test (sensitivity analysis on length) is reasonable but not required for the PoC's core validity. The finding is minor because (a) truncation is a known trade-off, (b) the experiment includes other features (session metadata, historical signals) that may capture long-term behavior, and (c) the primary metric (low-FPR pAUC) evaluates overall detection performance; if truncation causes systematic failure on long sessions, it would manifest as degraded performance\u2014which the test set evaluation will reveal. This is below significance for the experiment's conclusions.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 5,
+        "justification": "The preprocessing parameterization using the entire 18-month corpus is a deliberate design choice to stabilize marginal distributions before chronological splitting, not leakage. Parameters are frozen before any model fitting occurs; the training set (months 1-10) is normalized using these frozen parameters, which are derived from historical data that includes the future test months, but this does not provide the model with future attack signatures\u2014it only ensures consistent scaling. This is explicitly intended to control for month-to-month variance in feature distributions, a known confound in network telemetry. The critic's claim misinterprets the design: the corpus is retained first, parameters are set, then the split is applied; no test-set information is used during model training."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 3,
+        "justification": "The hypothesis explicitly compares a transformer with packet-level sequences against a gradient-boosted baseline on aggregated flow statistics. This is a practical comparison of methodologies, not an architectural ablation. The scope states fairness conditions: equivalent tuning effort, same temporal window, unseen future data\u2014not feature parity. Introducing a GRU/1D-CNN baseline would test a different hypothesis about architecture, which is outside the stated experiment scope. The critic's claim that the baseline is 'fundamentally handicapped' misidentifies the experiment's intent: it is testing whether sequence modeling adds value over aggregated features, not whether the transformer architecture is superior to other sequence models."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critique makes an empirical claim about label leakage across split boundaries due to the 24-hour window, but the methodology's labeling logic prevents this. Sessions are assigned to sets based on their start time, not confirmation time. A session starting in the training window is labeled based on confirmation events within 24 hours of that start, which must also occur within the training window (since the split is chronological). There is no mechanism for a confirmation event in the test set to label a training session. The critic's premise assumes labeling uses confirmation time to assign sessions to sets, which is not supported by the methodology description."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "Truncation to 100 packets is a practical engineering choice to manage computational complexity. The hypothesis tests whether packet-level sequences improve detection; it does not require capturing every packet in indefinitely long sessions. If truncation causes systematic failure on long APT sessions, this would manifest as degraded performance in the test set evaluation\u2014which the methodology will capture. The finding is minor and does not affect the validity of the metric under the agreed evaluation protocol."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All advancing findings have been rebutted with sufficient adjustments, bringing their adjusted severities to \u22643. F1 and F2 were rebutted using design intent and scope arguments, F3 was rebutted based on evidence mismatch, and F4 was dismissed as immaterial. No material flaws remain, so defense wins."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

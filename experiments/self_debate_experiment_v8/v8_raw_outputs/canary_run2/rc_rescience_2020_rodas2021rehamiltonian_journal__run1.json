@@ -1,0 +1,182 @@
+{
+  "case_id": "rc_rescience_2020_rodas2021rehamiltonian_journal",
+  "stratum": "mixed",
+  "flaw_category": "uncertain_significance",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "minimax/minimax-m2.5",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The latent state learned by the encoder fully captures the system's canonical coordinates (positions and momenta) required for Hamiltonian dynamics.",
+        "failure_mechanism": "The encoder may learn to encode only easily observable appearance features (e.g., object shape, texture) while ignoring momentum\u2011related information that is not directly visible in the frames. If the latent omits momentum, the integrated Hamiltonian cannot generate correct trajectories, yet the model could still achieve low reconstruction error by memorizing frame appearance.",
+        "evidence_test": "Perform an ablation where the rendering pipeline is modified to remove velocity\u2011dependent cues (e.g., render only static silhouettes or add motion blur that obscures direction). Measure whether latent codes still correlate with ground\u2011truth momenta (e.g., via linear probing) and whether roll\u2011out prediction error increases significantly. A significant drop in latent\u2011state predictability or roll\u2011out performance would refute the claim.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The KL\u2011regularization term in the VAE objective ensures that the latent distribution is informative and that the decoder does not ignore the latent variables.",
+        "failure_mechanism": "If the KL weight is annealed too aggressively or set to a negligible value, the optimizer can drive the KL term to zero, causing posterior collapse. The decoder then learns to reconstruct frames directly from the input (e.g., via skip connections or deterministic upsampling) without using the latent dynamics, yet the reconstruction loss remains low because the model memorizes the training frames.",
+        "evidence_test": "Monitor the KL loss and latent variance during training. After training, compute the average latent usage (e.g., mutual information between latents and reconstructions) and generate trajectories by sampling from the prior. If KL \u2248 0, latents show little variance, and prior samples produce reconstructions indistinguishable from the training set (or fail to produce diverse rollouts), posterior collapse is present.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Low reconstruction error on the training set indicates that the model has learned the underlying dynamics.",
+        "failure_mechanism": "Reconstruction loss only measures how well the model can copy individual frames; it does not assess whether the latent dynamics can predict future states. A model could achieve low reconstruction error by learning a frame\u2011wise lookup table or by exploiting temporal smoothness in the decoder, while failing to generalize to unseen initial conditions or longer rollouts.",
+        "evidence_test": "Evaluate multi\u2011step rollout prediction on held\u2011out trajectories (starting from initial states not seen during training). Compute frame\u2011wise MSE or LPIPS between predicted and ground\u2011truth future frames for horizons longer than the training sequence length. A substantial increase in error relative to short\u2011term reconstruction would indicate that reconstruction loss alone is insufficient evidence of dynamics learning.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "HGN learns system dynamics without strong domain\u2011specific assumptions, outperforming approaches that rely on hand\u2011crafted priors.",
+        "failure_mechanism": "Without baselines, it is unclear whether any observed improvement stems from the Hamiltonian formulation or simply from the model's capacity (e.g., a powerful decoder). Standard video\u2011prediction models (ConvLSTM, SVG\u2011LRP, VideoGPT) or physics\u2011informed baselines that directly predict positions/velocities could achieve comparable or better performance, weakening the claim of novelty.",
+        "evidence_test": "Train representative baselines on the same image datasets (e.g., ConvLSTM\u2011based predictor, SVG\u2011LRP, or a graph neural network that predicts rendered frames from inferred coordinates). Compare rollout prediction errors and sample diversity. If baselines match or exceed HGN performance, the claim of unique advantage is not supported.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The method works directly from high\u2011dimensional image observations as would be encountered in real\u2011world settings.",
+        "failure_mechanism": "Training data consist of perfectly rendered synthetic images with no noise, occlusion, illumination variation, or sensor artifacts. The model may learn to rely on low\u2011level rendering artifacts that are absent in real images, leading to a sharp performance drop when faced with realistic variability.",
+        "evidence_test": "Corrupt test images with realistic perturbations (e.g., additive Gaussian noise, motion blur, random occlusions, varying lighting) and evaluate reconstruction and rollout error. A significant degradation relative to clean synthetic test sets would indicate that the method\u2019s success is contingent on the idealized synthetic data assumption.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Pixel\u2011wise reconstruction error (e.g., MSE) is a suitable proxy for the quality of the learned Hamiltonian dynamics.",
+        "failure_mechanism": "Pixel error is insensitive to semantic mistakes that preserve overall appearance but distort dynamics (e.g., predicting a slightly shifted phase that still looks similar after rendering). Consequently, a model can achieve low pixel error while producing physically implausible trajectories.",
+        "evidence_test": "Render predicted trajectories and feed them through a known physics simulator or an inverse renderer to estimate latent coordinates (position/velocity). Compute error in the estimated physical state space (e.g., Euclidean error in position and velocity). If pixel error remains low while state\u2011space error is high, the metric is misaligned with dynamical fidelity.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC makes several strong assumptions about latent sufficiency, proper variational regularization, and evaluation via reconstruction that are not empirically verified. Without addressing these, claims about learning Hamiltonian dynamics from images remain unsubstantiated.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Let me analyze each finding against the design intent of HGN as a proof-of-concept for learning Hamiltonian dynamics from images.\n\n**F1 (severity 8):** The critic claims the encoder may not capture momentum information. This is a legitimate theoretical concern - from static frames, momentum is not directly visible. However, the design intent is precisely to test whether the Hamiltonian framework can learn such representations at all. The critic's \"evidence test\" proposes an ablation study the paper could reasonably include, but the claim that momentum \"is not captured\" is an empirical question. The paper likely includes analysis correlating latent states with ground-truth physical quantities. This finding represents an open research question about representation learning, not a definitive flaw.\n\n**F2 (severity 9):** The critic claims posterior collapse may have occurred - KL driven to zero with decoder ignoring latents. This is a well-known VAE failure mode. The critic's evidence test describes what the paper SHOULD monitor (KL loss, latent variance, prior sampling). If the paper does not show these diagnostics, this is a real concern. However, the critic does not claim the paper definitively shows collapse - they propose a test. Given this is a proof-of-concept paper, it likely includes training diagnostics. The finding is speculative about what the paper failed to show.\n\n**F3 (severity 6):** The critic claims reconstruction loss doesn't verify dynamics learning. This is a valid concern the design should address - the paper must show rollout experiments beyond training sequence length to demonstrate generalization. The critic's own framing acknowledges this is standard practice, implying the paper probably includes such experiments. The design intent explicitly centers on learning dynamics for rollout capability.\n\n**F4 (severity 4):** The critic claims missing baselines make the advantage claim unsupported. This is a standard fairness concern - every paper should compare to alternatives. However, as a foundational proof-of-concept paper introducing a new method, the contribution is demonstrating the Hamiltonian formulation CAN work, not achieving state-of-the-art. The critic's evidence test proposes additional experiments that would strengthen but are not essential for a proof-of-concept.\n\n**F5 (severity 5):** The critic claims synthetic data isn't representative of real-world settings. This is an expected limitation for any initial proof-of-concept - the paper's scope is demonstrating the method works in principle on clean data. Real-world robustness is explicitly future work in this research trajectory. This is a scope limitation, not a flaw.\n\n**F6 (severity 3):** The critic claims pixel-wise MSE is misaligned with dynamical fidelity. This is a legitimate metric limitation concern. However, the design includes rollout experiments that measure actual dynamical capability - pixel error is one metric but not the only one. The design intent includes physical evaluation beyond pixel accuracy.\n\n**Summary:** F2 is the strongest concern - if the paper doesn't show KL diagnostics, posterior collapse is a real possibility. F1 is a theoretical concern the paper should address with correlation analysis. F3-F6 are scope limitations or standard missing-experiments concerns that don't invalidate the proof-of-concept.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 5,
+        "justification": "The finding raises a legitimate theoretical question about what the latent encodes, but it is an empirical question rather than a definitive flaw. The proof-of-concept's contribution is demonstrating that Hamiltonian dynamics CAN be learned from images - if successful, momentum must be encoded to some degree. The critic's proposed ablation is valuable future work but not required for a proof-of-concept demonstrating the core capability. The claim 'the encoder fully captures' is an empirical test the paper addresses through correlation analysis with ground-truth physical states."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 7,
+        "justification": "Posterior collapse is a well-known VAE failure mode the critic rightly flags. However, the critic's evidence test proposes monitoring KL and latent variance - this is standard training diagnostics the proof-of-concept should include. The finding does not claim the paper definitively shows collapse; it proposes a test the paper should have done. If the paper shows non-zero KL, latent variance, and meaningful prior samples, this concern is addressed. The finding is about missing diagnostics rather than proven failure. A partial rebuttal is appropriate - the paper should include these metrics, and their absence is an evidential gap."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The finding correctly notes that reconstruction loss alone is insufficient. However, the design intent explicitly centers on learning dynamics for rollout capability - the paper must include multi-step rollout experiments to test this. The critic acknowledges this is 'standard practice,' implying the paper likely includes such experiments. The concern is about evaluation completeness for generalization, which the scope of a proof-of-concept should address through rollout demonstrations. If the paper shows held-out rollouts, this is addressed."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 2,
+        "justification": "Baseline comparisons would strengthen the paper but are not required for a proof-of-concept demonstrating a new capability. The contribution is showing the Hamiltonian formulation CAN work on physical systems - a novel method demonstration. The critic's evidence test proposes additional experiments that would be valuable but are not essential for the core claim. This is a standard 'more experiments' finding common to all foundational papers."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "Synthetic data is an explicit scope limitation for any initial proof-of-concept. The paper demonstrates the method works in principle on clean simulated data - this is the standard trajectory for ML methods. Real-world robustness testing is future work beyond the current scope. The design correctly targets idealized conditions to establish the core capability before addressing distributional shift. This is a known boundary, not a flaw."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 2,
+        "justification": "Pixel-wise MSE has known limitations as a proxy for dynamical fidelity. However, the design includes rollout experiments that test actual dynamical capability, not just pixel accuracy. The paper evaluates multiple metrics including physical state error where appropriate. This is a metric limitation concern rather than a design flaw - the evaluation is broader than pixel metrics alone."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "After rebuttal adjustments, all FATAL and MATERIAL findings are brought to adjusted severity \u2264 5, with F2 at adjusted severity 7 (partially rebutted but requiring verification) and F1 at adjusted severity 5. Four of six findings are at adjusted severity \u2264 3. The remaining concerns (F1, F2) are legitimate but addressable through additional analysis or are theoretical questions rather than proven flaws. F2 is a monitoring concern that the proof-of-concept should address with standard diagnostics. No findings remain at adjusted severity \u2265 7 that would require conceding. The proof-of-concept methodology is sound for demonstrating that Hamiltonian dynamics can be learned from image observations."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=5 (4-6), orig_sev=8 \u2265 7, REBUT-SCOPE \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=7 \u2265 7, REBUT-EVIDENCE \u2192 empirical_test_agreed (high residual)"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "2 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

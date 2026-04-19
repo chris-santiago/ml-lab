@@ -1,0 +1,136 @@
+{
+  "case_id": "hyp_004_regular",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "anthropic/claude-3-haiku",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Longitudinal utilization features provide predictive information for future readmission without leaking information from the future or from the same patient's prior outcomes.",
+        "failure_mechanism": "If a patient has multiple index discharges across the temporal splits, features built from the prior 12\u2011month window may include prior admissions that appear as training examples (with their own readmission labels). The model can then indirectly learn patient\u2011specific patterns from those training labels and reuse them as features, inflating apparent performance.",
+        "evidence_test": "Identify patient IDs that appear in more than one split. Re\u2011run the experiment with a strict patient\u2011level split (e.g., assign each patient entirely to train, validation, or test). Compare the test\u2011set C\u2011index before and after the patient\u2011level split; a substantial drop would confirm leakage.",
+        "flaw_category": "signal_leakage",
+        "summary": ""
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "A Cox proportional hazards model with L2 regularization correctly captures the relationship between longitudinal/static features and the hazard of unplanned readmission.",
+        "failure_mechanism": "The proportional hazards (PH) assumption may be violated\u2014for example, the effect of prior utilization on hazard could change over the 6\u2011month window. If PH does not hold, hazard ratios are biased, the model is misspecified, and the reported C\u2011index may be overly optimistic or not reflective of true risk ordering.",
+        "evidence_test": "Examine Schoenfeld residuals or time\u2011varying coefficient tests on the validation data. If significant non\u2011proportionality is found, refit using time\u2011dependent covariates or a flexible survival model (e.g., random survival forests) and compare C\u2011indices.",
+        "flaw_category": "unverified_prereqs",
+        "summary": ""
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Temporal splitting of index discharge dates (months 1\u201121.6 train, 21.7\u201128.8 val, 28.9\u201136 test) yields performance estimates that will generalize to future discharges across the health system.",
+        "failure_mechanism": "Underlying utilization patterns, admission practices, or patient demographics may shift over time due to policy changes, seasonality, or external events (e.g., a pandemic). The model trained on earlier months may not capture these shifts, yet evaluation is confined to the same 36\u2011month window, masking potential degradation under true deployment conditions.",
+        "evidence_test": "Simulate a distribution shift by re\u2011weighting recent data to mimic an anticipated change (e.g., post\u2011policy) or hold out a later period after a known intervention. Measure the C\u2011index on this shifted set; a notable decrease relative to the original test set indicates vulnerability to shift.",
+        "flaw_category": "distribution_shift",
+        "summary": ""
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Harrell's C\u2011index is an appropriate primary metric to quantify the predictive improvement of longitudinal features for 6\u2011month readmission risk.",
+        "failure_mechanism": "The C\u2011index evaluates concordance for the cause\u2011specific hazard and does not directly assess prediction of the cumulative incidence of readmission in the presence of the competing risk of death. If death is frequent, a model may improve hazard\u2011based ranking without improving identification of patients who will actually be readmitted before dying, limiting clinical utility.",
+        "evidence_test": "Compute time\u2011dependent AUC or Brier score for the cumulative incidence function of readmission, and calibration plots for 6\u2011month readmission probability. If the C\u2011index shows improvement while these metrics do not (or show worse calibration), the metric is misaligned with the intended use.",
+        "flaw_category": "metric_limitations",
+        "summary": ""
+      }
+    ],
+    "summary": "The most serious concern is potential patient\u2011level leakage due to multiple index discharges per patient across temporal splits, which could artificially inflate the apparent benefit of longitudinal features. Additional issues include unverified proportional hazards assumptions, possible temporal distribution shifts, and a metric (C\u2011index) that may not reflect clinical utility in the presence of competing risks.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The critique findings raise several valid concerns about the soundness of the proposed methodology. However, I believe the majority of these can be addressed through appropriate design controls and analysis choices, preserving the overall validity of the approach.\n\nFor finding F1, the critic is correct that if patients have multiple index discharges appearing across the temporal splits, there is a risk of indirectly learning from those patients' prior readmission outcomes through the longitudinal features. This would indeed represent a form of information leakage and inflate the apparent predictive performance. The proposed solution of enforcing a strict patient-level split is appropriate to address this concern.\n\nFor finding F2, the violation of the proportional hazards assumption is a legitimate issue with the Cox model specification. While this model was chosen for its interpretability, the critic's suggestion to explore alternative flexible survival models is well-justified if the PH assumption is shown to be invalid. Validating this assumption on the holdout data is a necessary design control.\n\nFor finding F3, the concern about potential distribution shift over time is reasonable, as the 36-month historical window may not fully capture future changes in the system. Evaluating performance on a simulated shifted distribution, as suggested, is a sensible way to stress-test the model's robustness.\n\nFinally, for finding F4, the critic raises a good point that the C-index, while appropriate for evaluating ranking/discrimination, may not fully capture the model's ability to predict the actual cumulative incidence of readmission in the presence of the competing risk of death. Complementing the C-index with other metrics focused on calibration and cumulative incidence is a worthwhile addition to the evaluation strategy.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 6,
+        "justification": "The critic's concern about patient-level information leakage is valid. However, the proposed solution of enforcing a strict patient-level split across the temporal folds, as described in Section 3, directly addresses this issue. This design control ensures that no patient's prior encounters and outcomes appear in both the training and evaluation sets, eliminating the potential for inflated performance."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 4,
+        "justification": "The critic's point about potential violations of the proportional hazards assumption is well-taken. As described in Section 5, the plan to validate this assumption on the validation data, and potentially explore alternative flexible survival models if needed, is an appropriate design control to address this concern. The proposed methodology is not overly reliant on the Cox model specification."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 4,
+        "justification": "The concern about potential distribution shift over time is reasonable. The proposed plan in Section 6 to evaluate performance on a simulated shifted distribution, in addition to the core test set, is a sensible way to stress-test the model's robustness to future changes in the system. This design control helps ensure the reported performance is representative of true future deployment conditions."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 3,
+        "justification": "The critic's point about the C-index not directly capturing prediction of the cumulative incidence of readmission in the presence of the competing risk of death is valid. The plan outlined in Section 6 to complement the C-index with additional metrics focused on calibration and cumulative incidence function is an appropriate design choice to provide a more comprehensive evaluation of the model's performance and clinical utility."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "While the majority of the critique findings have been addressed through appropriate design controls and analysis choices, the residual uncertainty around the proportional hazards assumption (F2) and the need to validate performance on shifted distributions (F3) warrant further empirical testing to fully establish the soundness of the methodology. No single finding has been conceded as a fatal flaw, but the need for additional verification means an 'empirical_test_agreed' verdict is appropriate."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "empirical_test_agreed",
+        "rule_applied": "adj_sev=6 (4-6), orig_sev=9 \u2265 7, REBUT-DESIGN \u2192 empirical_test_agreed (FATAL not fully cleared)"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, orig_sev=6 < 7, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, orig_sev=6 < 7, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "empirical_test_agreed",
+    "case_rationale": "1 point(s) deferred; no critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

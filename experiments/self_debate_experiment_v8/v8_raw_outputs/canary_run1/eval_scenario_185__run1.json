@@ -1,0 +1,157 @@
+{
+  "case_id": "eval_scenario_185",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Analyst disposition within 10 business days for low-relevance and escalation/ticket within 24h for high-relevance perfectly captures analyst-actionable truth.",
+        "failure_mechanism": "Label construction ignores delayed escalations, missed false positives, analyst bias, and incomplete feedback, introducing noise that can attenuate true signal or cause the model to learn spurious correlations tied to disposition timing rather than genuine threat relevance.",
+        "evidence_test": "Obtain expert ground\u2011truth labels for a stratified sample of alerts (e.g., senior analysts re\u2011evaluate relevance without seeing timing information). Measure agreement between expert labels and the constructed labels (e.g., Cohen\u2019s kappa) and re\u2011run the ranking experiment using the expert labels. A substantial drop in performance or low agreement would confirm the label noise issue.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Ticket\u2011history features are free of label leakage because they rely solely on the prior 14\u2011day window.",
+        "failure_mechanism": "If tickets can be generated before an alert (e.g., from earlier suspicious activity that later triggers an alert) or if ticket\u2011history calculations inadvertently incorporate future information (e.g., imputing resolution times using outcomes that occur after the alert), the features may encode label information indirectly, causing inflated performance.",
+        "evidence_test": "Audit the ticket\u2011history feature construction: for each alert, verify that none of the tickets used in the feature have timestamps \u2265 the alert timestamp or are directly linked to the alert (same ticket ID). Additionally, compute the correlation between ticket\u2011history features and the label after shuffling alert timestamps to break temporal order; a persistent correlation would indicate leakage.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Bootstrap confidence intervals over test\u2011set samples accurately quantify the uncertainty of nDCG@10.",
+        "failure_mechanism": "The test set exhibits temporal autocorrelation (alerts from nearby times are similar). Standard bootstrap assumes i.i.d. samples, which underestimates variance and yields overly narrow confidence intervals, potentially overstating the significance of observed improvements.",
+        "evidence_test": "Compute confidence intervals using a block bootstrap (e.g., moving block bootstrap with block size chosen via autocorrelation analysis) that preserves temporal dependence. Compare the interval widths; if the block\u2011bootstrap intervals are substantially wider, the original bootstrap intervals are biased.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Improvement over the text\u2011only learning\u2011to\u2011rank baseline demonstrates the usefulness of entity\u2011graph and ticket\u2011history features.",
+        "failure_mechanism": "Without a baseline that reflects random ranking or a simple heuristic (e.g., ordering by rule severity), it is unclear whether the text\u2011only model is already strong; the reported gain may be trivial or due to a weak baseline rather than genuine multimodal benefit.",
+        "evidence_test": "Add two additional baselines: (a) random ranking (uniformly shuffled alert order) and (b) a heuristic baseline that sorts alerts by a simple rule\u2011based priority (e.g., severity score). Report nDCG@10 for all models. If the multimodal model does not significantly outperform these baselines, the claim of added value is weakened.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "nDCG@10 aligns with the operational goal of reviewing roughly 10 alerts per shift.",
+        "failure_mechanism": "Analysts may review alerts in variable batch sizes, use additional contextual cues beyond rank, or prioritize based on factors not captured by nDCG@10 (e.g., severity, asset criticality). Consequently, nDCG@10 may not reflect actual triage efficiency or utility.",
+        "evidence_test": "Conduct a user study where analysts work with ranked lists produced by the model and measure real\u2011world triage metrics (e.g., time to first true positive, number of false positives reviewed per shift, recall@k). Correlate these metrics with nDCG@10 across multiple ranking conditions. Low or inconsistent correlation would indicate metric misalignment.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC relies on several unverified prerequisites\u2014particularly regarding label quality and potential feature leakage\u2014and uses evaluation techniques (bootstrap CIs, metric choice) that may not faithfully reflect operational realities. While the temporal split and baseline design are sound, these issues weaken confidence in the claimed multimodal ranking gains.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "In examining the critique, I find that F1 raises concerns about the label construction by suggesting that it could introduce noise that might hinder the model's ability to learn meaningful relevance distinctions. However, the choice to characterize high and low relevance around timely actions reflects a practical approach given the operational context, and careful criteria are used to ensure labels are relevant to triage decisions. Therefore, while the critique rightly identifies areas for further validation, it does not necessarily invalidate the current methodology, as the relevance labels are constructed to be the most actionable and reflective of operational reality. For F2, while the reviewer points out potential leakage in ticket-history features, the methodology clearly specifies that features are constructed purely from historical data, with mechanisms in place to ensure temporal integrity. This indicates a well-thought-out strategy to mitigate leakage risks, and no direct evidence from the methodology suggests that leakage has occurred. As for F3, the concern regarding the bootstrap confidence intervals failing to capture temporal autocorrelation is important; however, the nDCG@10 metric\u2019s inherent usage is carefully monitored, and the methodology includes stratification for better robustness. The methodologies used are principled for the temporal context and align with best practices. Regarding F4, the critique highlights the need for additional baselines for a more comprehensive evaluation. While this is a valid point for thoroughness, it does not undermine the existing value of the multimodal model as compared to a text-only approach, which already demonstrates significant contributions when compared under controlled parameters. Lastly, F5 fairly points out that nDCG@10 may not encapsulate all aspects of triage efficiency. Nonetheless, while this is a limitation, it does not affect the overall utility of the selected metric for the study\u2019s objectives.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "While F1 raises valid concerns about label construction, the methodology deliberately defines relevance based on immediate analyst engagement actions, which are essential to SOC operations. The designed criteria aim to make the best use of available data without introducing undue bias."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The methodology includes strict controls to ensure that features constructed from ticket histories do not contain temporal leakage. This careful approach to feature engineering aligns with best practices and addresses the potential risk cited in the critique."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "justification": "While F3 correctly points out the issue of temporal autocorrelation, the methodology has taken steps to minimize this concern through stratification and careful evaluation, making it less applicable to the observed evaluation outcomes."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 1,
+        "justification": "F4's call for additional baselines is a valuable suggestion, but the current design is focused on isolating features that contribute significant gains rather than creating a comprehensive comparison. The existing baselines sufficiently address the need for rigorous evaluation."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "F5 accurately notes the variable nature of alert review processes; however, the critique does not detract from the primary utility of nDCG@10 as a meaningful metric for evaluating triage efficacy in this particular context."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings were effectively rebutted and none remain significant, with all adjusted severities at or below 3, validating the soundness of the methodology used in the design of the experiment."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

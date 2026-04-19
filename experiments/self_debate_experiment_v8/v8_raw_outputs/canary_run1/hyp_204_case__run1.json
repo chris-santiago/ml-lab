@@ -1,0 +1,107 @@
+{
+  "case_id": "hyp_204_case",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "z-ai/glm-4.7-flash",
+    "defender": "google/gemma-4-31b-it",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Extended features, specifically historical ticket metadata (median severity assigned), provide legitimate discriminative power for the current alert's priority rather than leaking the outcome of previous incidents.",
+        "failure_mechanism": "The feature 'median severity assigned' in past tickets aggregates the severity of *other* incidents on the same host. If a host generated a high-severity ticket two days ago, the feature value is 'High'. The model then predicts this current alert is a 'High-priority incident'. This effectively correlates the current alert with the historical status of the host, rather than the content of the alert itself. This is a form of label leakage where the 'past' outcome is used as a proxy for the 'current' label. The model may be detecting that 'this host is risky' rather than 'this specific alert describes a priority incident'.",
+        "evidence_test": "Remove all features that utilize historical ticket metadata (past 7 days ticket count, median severity, resolution time). Retrain the ranking model (LambdaMART) and the baseline (LR). If the performance of the ranking model collapses to near-random or significantly below the original performance, the extended features were not adding value but were simply leaking the label through host history.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The validation set (Months 15-18) is available and usable for hyperparameter tuning immediately after data collection to maximize Recall@5.",
+        "failure_mechanism": "The methodology defines labels only after a 30-day maturation window. Consequently, alerts occurring in Months 15-18 do not have ground-truth labels until the end of Month 16 at the earliest. This makes it impossible to perform hyperparameter tuning on the validation set as described in 'Model Selection and Validation'. You cannot maximize a metric whose target is unavailable. The proposed workflow requires waiting for a full cycle (Month 16+) to perform the validation step, which conflicts with the stated timeline (Months 15-18).",
+        "evidence_test": "Inspect the timestamp of the experiment execution. If the experiment has already run and produced results, verify the timestamps of the ground-truth labels. If the labels were generated *before* the end of Month 18, the methodology is invalid. Alternatively, verify if the code used 'inferred' labels (which would be leakage).",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Logistic regression can be effectively and accurately tuned to maximize Recall@5 on the validation set using standard grid search.",
+        "failure_mechanism": "Logistic regression is a probabilistic classifier that optimizes for LogLoss (Cross-Entropy). Its internal objective function is misaligned with the external objective (Recall@5). Standard grid search on the validation set would optimize for LogLoss, not ranking quality. The resulting hyperparameters would be the optimal for minimizing error in probability estimation, not for maximizing the recall of positive groups. Comparing a model tuned for LogLoss against a model (LambdaMART) explicitly tuned for Recall@5 is an unfair comparison, as they are optimized for different things.",
+        "evidence_test": "Run hyperparameter grid search on the Logistic Regression model targeting two distinct objectives: LogLoss and Recall@5. Compare the resulting hyperparameters and the Recall@5 scores achieved. If the 'LogLoss-optimal' parameters do not yield the best Recall@5, the comparison is invalid.",
+        "flaw_category": "metric_limitations"
+      }
+    ],
+    "summary": "The PoC contains critical flaws including signal leakage through historical host metadata, an invalid validation timeline due to 30-day label maturation, and an unfair model comparison that tunes binary classification for the wrong objective.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "F1 claims that historical ticket metadata (e.g., median severity on a host in the past 7 days) constitutes label leakage. However, in a SOC environment, 'host risk' is a legitimate and critical feature for triage. If a host has been repeatedly compromised or flagged as high-severity in the last week, any new alert on that host is inherently higher priority. This is not leakage of the *current* alert's label, but the use of historical context to prioritize current triage\u2014exactly what analysts do. The design explicitly separates 'post-investigation fields' (which would be leakage) from 'historical ticket metadata' (which is context). This is a design choice to capture host-level risk.\n\nF2 claims a temporal impossibility regarding the 30-day maturation window and the validation set. The critic argues that labels for Month 15 aren't ready until Month 16, therefore tuning on Months 15-18 is impossible. This is a misunderstanding of the data pipeline. The 'maturation window' is a requirement for label assignment during the *dataset construction phase*, not a real-time constraint on the model's training loop. When the experiment is run, the labels for all 24 months are already 'mature' because the data is historical (collected over a 24-month span). The training/val/test split is a logical partition of a completed dataset, not a simulation of a live-streaming system where labels arrive one by one.\n\nF3 claims that Logistic Regression (LR) cannot be tuned for Recall@5 because it optimizes LogLoss. This is fundamentally incorrect. While the *loss function* of LR is LogLoss, the *hyperparameter tuning process* (grid search on the validation set) is decoupled from the loss function. The design explicitly states: 'Both baseline and ranking models are hyperparameter-tuned on the validation set... by maximizing Recall@5.' The model is trained via LogLoss, but the selection of the best C/penalty via grid search is driven by the Recall@5 metric on the validation set. This is standard ML practice and ensures a fair comparison of the final ranking performance.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 4,
+        "justification": "The use of historical host risk is a deliberate design choice to mirror analyst behavior. Host-level context (previous incidents) is a legitimate feature for prioritizing current alerts, not label leakage of the current instance. Leakage is correctly prevented by excluding post-investigation fields for the current alert."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -7,
+        "adjusted_severity": 0,
+        "justification": "The critic confuses real-time inference constraints with offline dataset construction. The maturation window is applied to the entire 24-month historical corpus before the split is performed. Therefore, all labels in the validation set (Months 15-18) are fully mature and available at the time of tuning."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 1,
+        "justification": "The claim that LR cannot be tuned for Recall@5 is false. The training objective (LogLoss) is distinct from the hyperparameter selection objective (Recall@5 on validation data). The methodology explicitly specifies that the grid search maximizes Recall@5, ensuring the baseline is optimized for the same goal as the ranking model."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All fatal findings were successfully rebutted. F2 and F3 were based on misunderstandings of the dataset construction and hyperparameter tuning process, and F1 describes a deliberate design choice regarding host risk that does not constitute label leakage. All adjusted severities are $\\le 4$, and since F1 was a design choice and F2/F3 were errors in the critique's logic, the methodology is sound."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

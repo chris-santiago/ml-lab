@@ -1,0 +1,257 @@
+{
+  "case_id": "hyp_016_case_1",
+  "stratum": "regular",
+  "flaw_category": "metric_limitations",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "z-ai/glm-4.7-flash",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The evaluation tests whether the model predicts 'ever becoming septic' rather than predicting sepsis at a specific 6-hour lead time before onset.",
+        "failure_mechanism": "The evaluation generates predictions from 6-48 hours post-admission and takes the maximum risk. Positive labels are defined as sepsis occurring AFTER 48 hours. This means a prediction at hour 10 for a patient who develops sepsis at hour 80 gets credit. This conflates 'will this patient become septic eventually' with 'can I predict sepsis 6 hours before it occurs'. A trivial model that predicts high risk for all patients would achieve inflated AUC because the label includes ALL future sepsis cases regardless of when they occur relative to the prediction window.",
+        "evidence_test": "Check whether the evaluation accounts for temporal alignment between prediction time and sepsis onset time. The correct formulation should evaluate predictions made N hours before actual sepsis onset (e.g., only evaluate predictions in the 6 hours immediately preceding sepsis onset), not maximum risk over a fixed window applied to a 'future sepsis ever' label.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The 48-hour exclusion threshold used to define 'hospital-acquired sepsis' serves double duty as both a label filter and the evaluation boundary, creating an evaluation that doesn't measure the intended clinical use case.",
+        "failure_mechanism": "Sepsis must occur >48 hours post-admission to be labeled positive. The prediction window is 6-48 hours. This means for a patient who develops sepsis at hour 49, the model has a 42-hour window to produce a high prediction and would be evaluated as positive. For a patient who develops sepsis at hour 72, the model has a 66-hour window. The evaluation does not measure whether the model predicts at a clinically useful lead time \u2014 it measures whether the model ever outputs high risk in the first 48 hours for any patient who will eventually become septic. The '6-hour prediction horizon' stated in the metric is not operationally enforced.",
+        "evidence_test": "Stratify test-set AUC-ROC by time-to-sepsis (e.g., sepsis onset at 49-72 hours vs. >72 hours). If the model performs equally well across strata, this confirms the model is not actually learning a 6-hour prediction capability but rather a 'future sepsis ever' classifier. Also compare against a proper time-to-event evaluation (e.g., precision-recall at fixed prediction time relative to onset).",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The missingness ablation experiment and ICU-stratified performance analysis are described as confound controls but are not reported, making it impossible to verify whether missingness patterns (which are higher in ICU and may proxy for severity) are biasing the results.",
+        "failure_mechanism": "The document states they will 'ablating the missingness indicator feature, and stratifying test-set performance by ICU vs. ward status' to control for missingness as a confounder. However, no results from this analysis are presented. If missingness patterns in the training data differ systematically from test data (e.g., different ICU admission rates, different documentation practices), the model may learn to exploit missingness indicators rather than true clinical signals. Without seeing the ablation results, there's no way to determine if the model is actually learning temporal patterns or just correlating missingness with sepsis.",
+        "evidence_test": "Report: (1) AUC-ROC with missingness indicator removed, (2) stratified AUC-ROC for ICU vs. ward patients in the test set, (3) correlation between missingness indicators and sepsis labels in training vs. test. If ICU AUC << ward AUC, or if removing the indicator drops AUC substantially, the model is not learning clinically meaningful temporal patterns.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The test set spans an entire year (2023) while training spans 18 months (2021-2022), meaning the test set covers a longer time period that may include distribution shifts not present in earlier periods.",
+        "failure_mechanism": "The test set is 12 months of data (all of 2023) while training is 18 months and validation is 6 months. A full year of test data is more likely to capture seasonal effects, policy changes, or concept drift that wasn't present in the training period. If sepsis detection practices, documentation habits, or patient populations changed during 2023, the model may perform worse than the validation AUC suggests. The 6-month gap between training and validation is insufficient to capture a full year of potential drift.",
+        "evidence_test": "Report month-by-month or quarter-by-quarter test-set performance. If performance degrades throughout 2023, this indicates temporal drift. Compare demographics and sepsis prevalence between training (2021-2022) and test (2023) to quantify the distribution shift.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The label derivation uses a 48-hour exclusion window to identify 'hospital-acquired' sepsis, but the evaluation treats all sepsis after 48 hours as a single positive class without distinguishing early-onset hospital-acquired sepsis (e.g., onset at hour 49-72) from late-onset cases.",
+        "failure_mechanism": "Hospital-acquired sepsis at hour 49 is clinically very different from sepsis at hour 500. Both are labeled positive, but the model faces fundamentally different tasks: predicting sepsis nearly immediately after the exclusion window vs. predicting sepsis many days into the admission. The current evaluation mixes these cases. A model that only learns to predict early-onset hospital-acquired sepsis (which may have different precursors) would perform well on the aggregated metric without being useful for the broader sepsis prediction task.",
+        "evidence_test": "Stratify evaluation by time-to-sepsis bins (e.g., 48-72 hours, 72-168 hours, >168 hours). Report separate AUC-ROC curves for each bin. A clinically useful model should perform adequately across bins, not just in the earliest bin where it's easiest to predict.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The transfer/ICU event exclusion (predictions within 2 hours of transfer excluded) may create a biased evaluation set if transfers are systematically related to sepsis onset.",
+        "failure_mechanism": "If transfers to ICU are early warning signs of sepsis, excluding predictions around transfer times removes the highest-signal period from evaluation. This creates an evaluation that tests the model on the easier, pre-transfer period rather than the clinically relevant period where early warning matters most. The model could perform poorly precisely when it would be most clinically useful (around the time clinicians consider escalation) while still achieving high aggregate metrics.",
+        "evidence_test": "Report the proportion of sepsis cases with excluded predictions around transfer/ICU events. Report performance on the non-excluded subset. If the excluded subset has higher sepsis prevalence (which is clinically expected), the evaluation is systematically easier than the real deployment scenario.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The logistic regression baseline uses hand-engineered features designed to capture the same temporal information (24-hour sliding window, rate of change, interactions), but the comparison may conflate 'learned temporal representations' with 'better feature engineering' despite claims to the contrary.",
+        "failure_mechanism": "The LSTM learns temporal representations from raw sequences while logistic regression uses aggregated statistics. Even with 'equal tuning effort,' these are fundamentally different feature representations. The LSTM has access to the full sequence (168 hours) while logistic regression uses only a 24-hour window. If the LSTM outperforms logistic regression, it's unclear whether this is due to (a) learned temporal dynamics, (b) access to longer history, or (c) learned feature interactions that the hand-engineered interactions don't capture.",
+        "evidence_test": "Add a baseline that uses the same 168-hour sequence but with simple aggregation (e.g., mean pooling over all timesteps) to isolate the benefit of sequential modeling from the benefit of longer history access.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The 6-hour prediction horizon stated in the evaluation metric is never explicitly enforced as a constraint on when predictions must be made relative to sepsis onset.",
+        "failure_mechanism": "The metric says '6-hour prediction horizon' but the actual evaluation takes the maximum prediction from hours 6-48. This means a prediction at hour 6 for sepsis at hour 80 counts the same as a prediction at hour 42 for sepsis at hour 80, even though only the latter represents a 6-hour lead time. The stated prediction horizon is a description of the window covered, not a constraint on lead time.",
+        "evidence_test": "Rename the metric to accurately reflect what it measures (e.g., 'AUC-ROC for max risk in first 48 hours, label = sepsis after 48 hours') or modify the evaluation to enforce a strict 6-hour lead time requirement.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "The data exclusion criteria (neonatal ICU, <18 years, <6 hours data, transfers from other hospitals) may create a model that performs poorly on the exact populations excluded, yet the study does not assess applicability to these groups.",
+        "failure_mechanism": "Excluded populations may have different sepsis presentations. For example, pediatric sepsis has different vital sign norms. If the model is deployed hospital-wide but trained only on excluded populations' complement, it may underperform on the excluded groups. The study doesn't quantify what fraction of admissions are excluded or characterize the excluded population.",
+        "evidence_test": "Report exclusion rates by category and characterize the demographics of excluded patients. If exclusion rate is >10%, consider whether the model should be retrained to include these populations or whether deployment should be restricted.",
+        "flaw_category": "distribution_shift"
+      }
+    ],
+    "summary": "The evaluation methodology has a fundamental design flaw: it tests whether the model predicts 'ever becoming septic' rather than whether it predicts sepsis at a specific lead time. By taking the maximum prediction over a 6-48 hour window and labeling as positive any sepsis occurring after 48 hours, the evaluation inflates apparent performance by giving credit for early predictions for patients whose sepsis occurs much later. This makes it impossible to determine if the model actually provides the claimed 6-hour warning. Additionally, critical confound controls (missingness ablation, ICU stratification) are described but not reported, leaving major questions about whether the model learns genuine temporal clinical patterns or proxies off missingness indicators.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The methodology is designed to evaluate a specific clinical hypothesis: can a sequence model detect the onset of 'hospital-acquired sepsis' within a 42-hour observation window (hours 6-48) for patients who have survived the initial 48 hours post-admission? The critique finds are primarily objections to this specific task definition, arguing it should instead be a time-to-event prediction relative to actual sepsis onset. While valid for different problem formulations, they do not invalidate the current methodology. F1 and F2 accuse the design of conflating 'ever becoming septic' with '6-hour lead time.' However, Section 5 explicitly defines the evaluation as the 'maximum predicted risk' in the '6 to 48 hours post-admission' window, which is exactly what the design intends to measure\u2014the probability of the patient becoming septic during that operational window. F3, F4, and F6 raise valid concerns about distribution shift and control, but the methodology sections (7 and 2) explicitly state that these concerns are addressed (via external validity checks and exclusion of 2-hour prediction windows around transfer). The lack of specific numerical results in the provided text for F3/F4 does not constitute a flaw in the *methodology* (the plan), merely a lack of reporting in the *artifact*. F5 (stratification by time-to-onset) and F8 (naming convention) are attempts to redefine the task with greater granularity that the original hypothesis did not require. F7 (baseline comparison) is a concern for interpretability, not validity.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 6,
+        "justification": "The critique conflates a time-to-event prediction task with the specific 'hospital-acquired sepsis detection' task defined in Section 1 and 5. The method evaluates predictions made at hours 6-48 for patients who are sepsis-free at hour 48. This is operationally a 'will become septic in the next 42 hours' prediction, not a prediction of onset itself. This is consistent with the stated design intent in Section 5."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "Similar to F1, the exclusion of cases occurring <48 hours (Section 1) is a clinical definition of 'hospital-acquired' to isolate these specific cohorts from community-acquired cases. The evaluation correctly measures if the model identifies these specific cases within the subsequent window. The critique complains the method doesn't measure a 6-hour lead time relative to *onset*, but the method is explicitly designed to measure risk in a *post-exclusion window*, not a lead time relative to the label timestamp."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 1,
+        "justification": "The methodology Section 7 explicitly states the plan to control for missingness via ablating indicators and stratifying by ICU status. The critique claims these controls are 'not reported,' which suggests a lack of completeness in the specific artifact text provided rather than a fundamental flaw in the design logic. The design *includes* the control mechanism; the absence of the results table in the prompt description does not render the methodology unsound."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "While temporal drift is a valid risk, the methodology Section 7.3 explicitly addresses this by stating 'External validity is assessed by comparing demographics... across splits.' The design anticipates the shift and has a plan to quantify it, satisfying the concern at the methodology level."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": -1,
+        "justification": "Stratifying evaluation by precise onset time bins (48-72h vs >168h) is not required by the hypothesis stated in Section 1, which focuses on identifying admissions that 'ever become septic' within the defined observation window. The aggregate metric provided captures this broader utility."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": -2,
+        "justification": "The exclusion of predictions within \u00b12 hours of transfer is a minimal window (1/84th of the total sequence) intended to prevent label leakage (Section 7.1). The signal loss claimed by the critic is negligible given the small window size relative to the 7-day sequence, and the mechanism is defined as 'mitigating label leakage,' not 'exclusion of signal.'"
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -8,
+        "adjusted_severity": -5,
+        "justification": "This is a concern for the *interpretation* of the baseline comparison (whether win is due to history or architecture), not the *validity* of the experiment. The experiment is set up correctly to compare the two models; whether the winner's performance can be fully explained by feature engineering vs. learned dynamics does not invalidate the test of the hypothesis."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -8,
+        "adjusted_severity": -6,
+        "justification": "The metric terminology '6-hour prediction horizon' in Section 5 refers to the start of the evaluation window (Hour 6 post-admission). This is a precise description of the task within the context of the design. The critic's objection relies on a misunderstanding of 'horizon' as a lead time relative to the *event*, whereas here it denotes the *start* of the fixed observation window."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -8,
+        "adjusted_severity": -7,
+        "justification": "Excluding neonatal and pediatric patients (Section 1) is a scope limitation to ensure the model trains on the adult-specific vital signs and clinical pathways relevant to the primary hypothesis. This is standard practice to ensure cohort homogeneity and does not constitute a flaw in the methodology."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "The methodology is sound for the intended clinical hypothesis of detecting hospital-acquired sepsis within a defined observation window. F1 and F2, though flagged as FATAL, are resolved by the design's explicit definition of the task (evaluating risk in a fixed window post-exclusion), which differs from the critic's preferred time-to-event metric. All other findings are rebutted as missing reporting (F3), standard handling of distribution drift (F4), or requests for higher levels of analysis (F5, F6, F7, F8, F9) that do not invalidate the core experiment. None of the flaws survived the rebuttal with an adjusted severity of 7 or higher."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=6, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": -1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=-1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": -2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=-2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": -5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=-5 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": -6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=-6 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": -7,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=-7 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

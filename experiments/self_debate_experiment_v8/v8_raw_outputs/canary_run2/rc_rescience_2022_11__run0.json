@@ -1,0 +1,182 @@
+{
+  "case_id": "rc_rescience_2022_11",
+  "stratum": "mixed",
+  "flaw_category": "ambiguous_evidence",
+  "run_id": 0,
+  "model_assignments": {
+    "critic": "nvidia/nemotron-3-super-120b-a12b",
+    "defender": "anthropic/claude-3-haiku",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Feature\u2011importance scores identify the salient generative factors of the data.",
+        "failure_mechanism": "The evaluation relies on synthetic or semi\u2011synthetic datasets (e.g., dSprites, Shapes3D) where ground\u2011truth factor labels are known. High correlation between importance scores and these labels is taken as evidence of correctness, but the mapping from raw pixels to factors can be many\u2011to\u2011one, and a model could achieve high scores by focusing on irrelevant background pixels that nevertheless correlate weakly with the factor labels. Thus the metric may reward trivial heuristics rather than true causal understanding.",
+        "evidence_test": "Run the same explanation pipeline on a realistic unlabeled dataset (e.g., CIFAR\u201110, CelebA) where no factor labels exist, and evaluate explanations via a downstream proxy such as the impact of masking top\u2011k features on a downstream clustering or classification task. If explanations do not improve downstream performance relative to random or baseline attributions, the claim is refuted.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Example\u2011importance scores retrieve training instances that best explain a model\u2019s response to a test point.",
+        "failure_mechanism": "The method likely computes similarity in the model\u2019s latent space (e.g., L2 distance) and treats the nearest training points as explanations. Because the same latent space is used both to generate the importance scores and to evaluate their correctness (e.g., by measuring retrieval accuracy on the training set), there is direct signal leakage: the model is rewarded for simply reproducing its own internal nearest\u2011neighbor structure, which does not constitute a causal explanation.",
+        "evidence_test": "Compare the method\u2019s retrieval performance against a fixed k\u2011NN baseline in the latent space using a held\u2011out test set that was never used to compute the importance scores. If the method does not significantly outperform the baseline, the apparent success is due to leakage.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Saliency maps are harder to interpret for disentangled VAEs than for other unsupervised models.",
+        "failure_mechanism": "The claim rests on qualitative visual inspection of saliency maps, which can be influenced by arbitrary visualization choices (e.g., smoothing, colormap scaling) rather than intrinsic differences in explanation quality. Without a quantitative metric or user study, the observed difference may be an artifact of presentation.",
+        "evidence_test": "Conduct a controlled user study where participants rank the interpretability of saliency maps from disentangled VAEs and from other models (e.g., standard autoencoders) using identical visualization pipelines. Collect agreement scores; if no significant difference emerges, the original claim is unsupported.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Representations learned from different pretext tasks are not interchangeable.",
+        "failure_mechanism": "The comparison likely uses a frozen linear probe trained on each representation with identical hyper\u2011parameters. Differences in downstream performance may stem from the probe\u2019s sensitivity to the representation\u2019s scale or rotation rather than from fundamental incompatibility; the probe is not re\u2011optimized per representation, confounding the result.",
+        "evidence_test": "For each representation, train a task\u2011specific head (or fine\u2011tune the encoder) with equivalent tuning budget (e.g., same number of epochs, learning\u2011rate search). Then evaluate on a held\u2011out downstream task. If performance gaps disappear when heads are properly tuned, the original claim of non\u2011interchangeability is invalidated.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The produced importance scores faithfully reflect which input features drive the model\u2019s behavior.",
+        "failure_mechanism": "Importance scores may be obtained as gradients of the loss w.r.t. input. If the model is left in training mode (dropout active) or batch\u2011norm uses batch statistics, gradients can be noisy or near\u2011zero, yet after averaging over multiple runs they may still produce non\u2011zero, seemingly structured scores that look plausible but are actually artifacts of stochasticity.",
+        "evidence_test": "Compute the variance of importance scores across multiple forward passes with dropout enabled. If the variance is high relative to the mean magnitude, the scores are unstable. Additionally, fix the model to evaluation mode and recompute scores; a dramatic change indicates the original scores were driven by silent misconfiguration.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Latent dimensions of the VAE capture independent factors of variation, allowing feature importance to map to those factors.",
+        "failure_mechanism": "The method assumes the VAE\u2019s latent space is disentangled and informative. If the VAE suffers from posterior collapse or poor disentanglement (low Mutual Information Gap, SAP score), many latent dimensions carry little information, making any importance scores essentially arbitrary and unrelated to true generative factors.",
+        "evidence_test": "Quantify disentanglement (e.g., MIG, SAP, DCI) and latent utilization (active units) for each VAE model. Correlate these metrics with the explanation quality measured on a synthetic benchmark. A low or absent correlation would indicate the prerequisite is unverified and the explanation claims are unfounded.",
+        "flaw_category": "unverified_prereqs"
+      }
+    ],
+    "summary": "The PoC relies heavily on synthetic data proxies, suffers from potential signal leakage in example\u2011importance evaluation, lacks strong baselines and quantitative validation, and makes unverified assumptions about the quality of the learned representations. These issues weaken the central claims and could invalidate them under more realistic conditions.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "The methodology proposed in the paper aims to provide a label-free post-hoc explainability framework for unsupervised models. The key claims are that the feature importance and example importance scores can identify salient input features and training instances that explain a model's behavior, and that this analysis extends to disentangled VAEs and across different self-supervised representations. The critic has raised several concerns about the validity of these claims, which I will address individually in the rebuttal.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 3,
+        "justification": "The critic's claim is valid within the context of realistic, unlabeled datasets. However, the methodology explicitly states that the feature importance evaluation is conducted on synthetic or semi-synthetic datasets where ground-truth factor labels are known. This allows direct comparison of importance scores to the known generative factors, which is the intended scope of this particular evaluation. The proposed 'evidence test' on CIFAR-10 or CelebA would be a valid extension, but does not invalidate the claims made within the stated experimental design."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "severity_adjustment": 0,
+        "adjusted_severity": 8,
+        "justification": "The critic's claim of signal leakage is valid. The method of computing example importance scores likely depends on proximity in the model's own latent space, which does not constitute a true causal explanation. Comparing against a k-NN baseline in held-out data, as suggested, would be a necessary validation to demonstrate the method's efficacy beyond trivial nearest-neighbor retrieval."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The critic's concern about the qualitative nature of the saliency map comparisons is valid. Without a quantitative user study or metric, the observed differences in interpretability may indeed be an artifact of visualization choices rather than intrinsic to the models. The proposed controlled user study is a reasonable way to validate the claim with empirical evidence."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic's point about the confounding effect of the linear probe is well-taken. The original claim of non-interchangeability may be an artifact of the evaluation setup rather than a fundamental property of the representations. Conducting a more thorough comparison by fine-tuning task-specific heads, as suggested, would be a more appropriate test of the claim within the stated scope."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "severity_adjustment": -4,
+        "adjusted_severity": 0,
+        "justification": "The critic's concern about the potential instability of the importance scores due to stochasticity in the model (e.g., dropout, batch norm) is valid. Evaluating the score variance and recomputing in eval mode, as proposed, would be necessary to demonstrate the robustness of the importance scores and validate the claim."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -3,
+        "adjusted_severity": 2,
+        "justification": "The critic's point about the prerequisite of a well-disentangled VAE is reasonable. The methodology does assume the VAE's latent space captures independent factors of variation, and if this assumption is violated (e.g., due to posterior collapse), the feature importance scores may not map well to the true generative factors. Quantifying disentanglement and latent utilization, as suggested, would provide evidence to support (or refute) this design choice."
+      }
+    ],
+    "overall_verdict": "empirical_test_agreed",
+    "verdict_rationale": "While the majority of the critique findings have been successfully rebutted, there remains one FATAL-level flaw (F2) that cannot be fully resolved by argument alone. The signal leakage issue in the example importance scores requires empirical validation to determine whether the method can meaningfully retrieve training instances that explain a model's behavior. Additionally, several MATERIAL findings (F5, F6) warrant further empirical investigation to verify the robustness and validity of the importance score computations. Therefore, an overall 'empirical_test_agreed' verdict is appropriate, as the methodology requires additional validation to address the remaining concerns."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 8,
+        "rebuttal_type": "CONCEDE",
+        "point_verdict": "critique_wins",
+        "rule_applied": "constitutional: CONCEDE + adj_sev=8 \u2265 7 \u2192 critique_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-EVIDENCE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "critique_wins",
+    "case_rationale": "1 point(s) reached critique_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

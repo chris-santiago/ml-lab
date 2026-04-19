@@ -1,0 +1,132 @@
+{
+  "case_id": "eval_scenario_897",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 1,
+  "model_assignments": {
+    "critic": "google/gemma-4-31b-it",
+    "defender": "z-ai/glm-4.7-flash",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 9,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The unit of evaluation is the incident, not the individual alert, to prevent duplicate/correlated alerts from inflating metrics.",
+        "failure_mechanism": "The model is trained on 'batches of alerts' using pairwise or listwise ranking loss. If alerts from the same incident are treated as distinct training samples with the same positive label, the model will learn to rank 'clusters' of similar alerts highly. Because the evaluation metric (Recall@10) marks an incident as 'found' if ANY alert from that incident is in the top 10, a model that predicts 10 nearly-identical alerts from a single incident as the top 10 will achieve a 'hit' for that incident while effectively reducing the actual capacity of the analyst window to 1. This creates a massive discrepancy between training signal (individual alerts) and evaluation success (incident-level recall), rewarding models that over-fit to high-volume alert clusters rather than diverse incident detection.",
+        "evidence_test": "Calculate the average number of alerts per incident present in the Top-10 window. If the model is ranking clusters, the number of distinct incidents in the Top-10 will be significantly lower than 10, despite high Recall@10.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "Recall@10 (per time window) measures the operational goal of including genuine incidents in the analyst's review window.",
+        "failure_mechanism": "The PoC defines a 'time window' as a day or shift, but does not account for the arrival time of alerts within that window. In a real SOC, analysts triage alerts in near real-time. If the model ranks an alert from 8:00 AM as #1 and an alert from 4:00 PM as #2, but the analyst is reviewing the queue at 10:00 AM, the 'Top 10' for the day is a retrospective luxury. By evaluating on a fixed daily window, the PoC assumes the model has access to all alerts for the entire day before ranking them, which is a silent misconfiguration of the temporal reality (look-ahead bias).",
+        "evidence_test": "Re-run the evaluation using a sliding window (e.g., every 4 hours) or by ranking alerts only against those that had already arrived at the time of the alert's timestamp.",
+        "flaw_category": "silent_misconfig"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Upsampling confirmed incidents to 5% in the training set prevents metric degeneration from extreme imbalance.",
+        "failure_mechanism": "While upsampling helps the model find a decision boundary, it distorts the pairwise ranking loss. In a pairwise ranker, the model is trained on pairs (positive, negative). By duplicating positives, the model sees the same positive alert paired with different negatives many times. If the underlying data is extremely sparse, this can lead to overfitting on the specific characteristics of the few known incidents (memorization of asset IDs or rule names) rather than learning the generalizable 'rankability' of a security event.",
+        "evidence_test": "Compare performance on a validation set that is exactly matched to the original production distribution (no upsampling) vs. one that is also upsampled. A significant drop in the former indicates overfitting to the upsampled distribution.",
+        "flaw_category": "synthetic_data_assump"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Logistic regression is a fair baseline for testing ranking-specific inductive biases.",
+        "failure_mechanism": "Logistic regression optimizes for point-wise binary cross-entropy. While it produces a probability that can be used for ranking, it is not the strongest classification baseline. A Gradient Boosted Decision Tree (GBDT) classifier (like XGBoost or LightGBM) would be a more rigorous baseline, as LambdaMART is essentially GBDT optimized for ranking. The current baseline might make the ranking model look better simply because it is more complex, not because ranking-specific loss is superior.",
+        "evidence_test": "Add a GBDT classifier baseline to the comparison.",
+        "flaw_category": "missing_baselines"
+      }
+    ],
+    "summary": "The PoC suffers from a critical misalignment between the training unit (alerts) and the evaluation unit (incidents), which likely inflates performance by rewarding the ranking of alert clusters. Additionally, the daily evaluation window introduces a look-ahead bias that does not reflect real-time SOC operations.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "I analyzed the critique against the methodology. F1 claims that ranking alerts from the same incident as highly similar will break evaluation by reducing analyst capacity. However, the methodology defines 'incident found' if *any* alert ranks high. In a learning-to-rank context, boosting a group of related alerts is a feature, not a bug, as it maximizes the probability of covering the incident. F2 claims the batch daily evaluation suffers look-ahead bias. The methodology explicitly defines the scope as a historical analysis benchmarking 'day or shift' windows. This is a deliberate choice for historical retrospective analysis, not a misconfiguration. F3 claims upsampling to 5% causes overfitting. While upsampling is a technique, the methodology maintains strict temporal separation for validation and test sets (months 13-15 and 16-18) which are *not* upsampled, implicitly validating that the model generalizes. F4 claims LR is a weak baseline. The methodology explicitly defines the goal as testing 'ranking-specific inductive biases vs classification accuracy optimization.' LR was chosen to isolate the loss function hypothesis. Replacing it with XGBoost would obscure the causal variable. All findings are either standard mitigation techniques, scope choices, or deliberate design isolations.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 9,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -8,
+        "adjusted_severity": 1,
+        "justification": "The critique conflates the mechanism of ranking (boosting correlated alerts to maximize coverage) with a failure in the evaluation metric. The design explicitly defines success as 'an incident is found if any of its alerts rank in the top 10.' In scenarios with high-volume alert families (e.g., login notifications), ranking those alerts highly is the correct inductive bias to ensure incident coverage, not a flaw that reduces capacity. This is a characteristic of the metric's interpretation, not a design defect."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -6,
+        "adjusted_severity": 1,
+        "justification": "The finding imposes a live-production constraint (minute-by-minute real-time triage) on a historical benchmarking study. The methodology scope explicitly defines the evaluation window as 'day or shift,' which is the standard unit of retrospective analysis for SOC productivity. The PoC does not claim to simulate live streaming; it benchmarks the model's ability to retrieve the top 10 alerts for a given time window based on historical data."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": -1,
+        "justification": "Upsampling confirmed incidents to 5% is a standard technique to generate a stable gradient signal for pairwise ranking loss when positive examples are extremely sparse (the actual production distribution). The methodology protects against overfitting by evaluating strictly on unsampled validation and test sets (months 13-18), which reflects the real production distribution. The model's performance on these unsampled sets validates the generalization of the upsampled training signal."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": -4,
+        "justification": "The baseline choice is a deliberate design decision to isolate the hypothesis. The methodology explicitly states the goal is to test 'ranking-specific inductive biases (vs. classification accuracy optimization).' Logistic Regression is the standard proxy for binary classification optimization. Introducing a more complex baseline like XGBoost would conflate the benefit of ranking loss with the benefit of tree-based ensembles, obscuring the results of the specific hypothesis."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings were successfully rebutted. The critique either misunderstood the design intent (ranking redundancy improving coverage), applied constraints outside the stated scope (historical batch analysis), relied on unverified assumptions about overfitting (mitigated by unsampled validation sets), or challenged a deliberate isolation of variables (baseline comparison logic)."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": -1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=-1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": -4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=-4 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

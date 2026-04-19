@@ -1,0 +1,267 @@
+{
+  "case_id": "eval_scenario_766",
+  "stratum": "defense",
+  "flaw_category": null,
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "minimax/minimax-m2.5",
+    "defender": "openai/gpt-4o-mini",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The label definition uses an asymmetric 30-day window: churn (1) if cancellation occurs within exactly 30 days after the observation window, otherwise (0). Users who cancel in days 31-60 are labeled as non-churned.",
+        "failure_mechanism": "This creates label noise in the non-churned class. Users who cancel in 31-60 days are functionally churned from a business perspective but are labeled as negative examples. The model is trained to predict 'churn within 30 days' specifically, not general churn risk. This inflates apparent performance because the model can exploit the arbitrary 30-day boundary: predicting non-churn for users who will cancel after day 30 gives a 'free' false negative that doesn't represent a true prediction error in the business sense.",
+        "evidence_test": "Examine the distribution of cancellation timing relative to the observation window. If a significant fraction of eventual churners cancel in days 31-60, the label is misaligned with the business objective. A survival analysis or flexible window (e.g., any cancellation within 60 days) would reveal the extent of this boundary effect.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The comparison fairly isolates the value of event-level granularity by comparing gradient-boosted models with logistic regression on different feature sets.",
+        "failure_mechanism": "The treatment model uses 12+ engineered features (hour-of-day segmentation, day-of-week segmentation, skip rates per session, session percentiles, entropy, search-to-play ratio, etc.) while the baseline uses 7 simple aggregate features. This is a confound: any performance difference could be due to (a) feature granularity, (b) feature engineering effort, (c) feature count, or (d) the model's capacity to exploit more features. A fair comparison requires the same feature set fed to both model families, or at minimum the same number/type of aggregations passed to both XGBoost and logistic regression.",
+        "evidence_test": "Feed the same aggregated features to both XGBoost and logistic regression. If XGBoost still outperforms logistic regression on identical features, then granularity is the driver. Current design conflates feature engineering with modeling approach.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 7-day observation window is sufficient to capture behavioral signals predictive of churn within 30 days.",
+        "failure_mechanism": "The hypothesis implicitly assumes that behavior during days 1-7 of the observation window predicts churn in days 8-30. This is plausible but untested. The model has no visibility into days 8-30 behavior before the label is assigned. If the primary signal for churn comes from behavioral changes in days 8-30 (e.g., declining engagement that precedes cancellation), a 7-day window would miss it. The claim that event-level granularity helps presupposes the signal exists in the early window.",
+        "evidence_test": "Train on longer observation windows (14-day, 21-day) and compare AUPRC. If performance increases substantially with longer windows, the 7-day window is insufficient. Alternatively, compute feature importance to see if early-day features are actually predictive or if the model relies on features that proxy for longer-term behavior.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Stratified churn rates across splits control for large-scale shifts in platform churn over the 18-month horizon.",
+        "failure_mechanism": "Stratification on overall churn rate doesn't control for shifts in the *composition* of churners. If early-period churners are predominantly price-sensitive users (cancelling due to price increases) while later-period churners are quality-dissatisfied users (cancelling due to content), the feature-to-outcome relationship changes. The model trains on one type of churner and tests on another, inflating apparent generalization error. Stratification preserves class ratio but not conditional distribution P(features | churn).",
+        "evidence_test": "Compare the feature distributions of churned users across training, validation, and test periods. If significant distributional shifts exist (e.g., via KS tests on key features), stratification is insufficient. Report per-period churner characteristics to reveal composition changes.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Early stopping with patience of 50 rounds on the validation set prevents overfitting to the validation period.",
+        "failure_mechanism": "Early stopping on the validation set selects a model that performs well on validation (Months 13-15). If the validation period has temporal characteristics different from the test period (Months 16-18), early stopping effectively tunes to validation-specific patterns. The model selected is the one that best fits the validation period's churn dynamics, not necessarily the one that generalizes best. This creates a form of overfitting to the validation window, analogous to overfitting to a particular test set.",
+        "evidence_test": "Use time-series cross-validation with multiple rolling windows (e.g., train on 9 months, validate on 3 months, roll forward) to select hyperparameters. Compare test performance of models selected via single-window early stopping vs. rolling-window selection.",
+        "flaw_category": "eval_inflation"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "AUPRC is the appropriate primary metric because it aligns with the business objective of ranking users by churn risk under budget constraints.",
+        "failure_mechanism": "While AUPRC is better than ROC-AUC for imbalanced data, it still averages over all possible precision-recall tradeoffs. The experiment then enforces precision \u226580% at a validation-selected threshold. However, the threshold is selected to maximize AUPRC on validation, not to hit the precision target. It's possible the precision constraint is never binding (the model's natural operating point already exceeds 80% precision), in which case the constraint is cosmetic. Conversely, if precision barely crosses 80%, recall may be extremely low, making the model practically useless despite meeting the constraint.",
+        "evidence_test": "Report the actual precision and recall at the selected operating point. If precision is well above 80%, the constraint is not binding. If recall is below 5%, note that the model, while meeting the precision floor, may not be operationally useful.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 3,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Promotional confounding is detected by excluding 7-day windows following known product events.",
+        "failure_mechanism": "A 7-day exclusion window may be insufficient for major events (seasonal releases, price changes). Promotional effects on churn could persist for 2-3 weeks. Conversely, some users may be unaffected and including them dilutes the test. The exclusion window size is chosen without sensitivity analysis.",
+        "evidence_test": "Vary the exclusion window (7, 14, 21 days) and observe whether the performance gap changes. If the gap is robust to window size, confounding is not the driver. If it collapses with wider exclusions, promotional effects are significant.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "User-level group split (a user appears in only one split) prevents future behavior from leaking into training.",
+        "failure_mechanism": "While this prevents direct observation leakage, it doesn't prevent *behavioral* leakage: if a user appears in training with their pre-churn behavior and in test post-churn (or vice versa), the model may learn user-specific patterns (device preferences, viewing habits) that generalize poorly to new users. The group split preserves chronological integrity but may not capture the true deployment scenario if the platform's user base is highly dynamic.",
+        "evidence_test": "Report user overlap between splits. If there's significant user turnover (new users entering, old users churning), the model's performance on new users specifically should be reported.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F9",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Entropy of session timing detects binge vs. intermittent viewing patterns.",
+        "failure_mechanism": "Entropy is maximized by uniform distribution across time slots. A binge viewer who watches intensively in a single session and an intermittent viewer who watches sporadically across many sessions could both produce similar entropy if the underlying time distributions are flattened. Entropy measures dispersion but not the specific pattern relevant to binge vs. intermittent behavior.",
+        "evidence_test": "Visualize session timing distributions for known binge vs. intermittent users. If entropy doesn't discriminate between these archetypes, it's not capturing the intended signal.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F10",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The baseline uses logistic regression, a linear model, while the treatment uses gradient boosting, a non-linear ensemble.",
+        "failure_mechanism": "This is unconventional but defensible. The claim is about event-level features, not model family. However, if the hypothesis is 'event-level granularity improves prediction,' using different model families confounds the answer. A linear model on rich features would test the feature value; a non-linear model on simple features would test modeling complexity. Current design tests the conjunction.",
+        "evidence_test": "Use the same model family for both (e.g., XGBoost on aggregate features vs. XGBoost on event-level features) to isolate the feature contribution.",
+        "flaw_category": "defensible_unconventional"
+      }
+    ],
+    "summary": "The experiment has two FATAL flaws: (1) an asymmetric label definition that creates noise in the non-churned class by labeling users who cancel in days 31-60 as non-churned, and (2) an unfair comparison that confounds feature granularity with feature engineering effort and model capacity. These undermine the core claim that event-level granularity drives improvement. Additionally, the 7-day observation window may miss signals that emerge in days 8-30, and stratification doesn't control for compositional shifts in churner types across time periods.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "Finding F1 raises a valid concern about the label definition creating potential label noise. However, it should be noted that the 30-day window captures immediate churn behavior, which is the primary focus of this model. The critics suggest a survival analysis could illuminate the issue, but the intent was to predict near-term churn based on immediate behavior as it relates to the business's specific intervention window. For Finding F2, while it critiques the possible confounding due to differing feature sets, it fails to recognize that the purpose of the model is to demonstrate improved predictive capability through richer features, which is a legitimate design intent of the PoC. Finding F3 points out the assumption that a 7-day observation window is sufficient. While this is a valid point, the design leverages known patterns of churn behaviors which historically show indications within the first week. Finding F4 suggests that stratification does not control for shifts in composition, yet the design incorporated robust checks for these distributions. Finding F5 outlines a concern about early stopping; however, early stopping is a standard practice to mitigate overfitting to the validation set and allows for model selection under the constraints of the validation period. Finding F6 raises a valid point about the AUPRC but is overly concerned about the thresholding process; however, the model aligns well with operational reality and established performance. Finding F7's recommendation about the exclusion window may show some merit but could lead to unnecessary complications in measurement without robust justification. Findin F8 identifies behavioral leakage through user overlap, yet considers the design adequately separates training and test populations; the nature of user engagement allows for different interactions to be captured effectively. F9's critique is a legitimate concern on measuring entropy, but the design maintains a focus on user-specific behaviors that make this feature viable in the context of this model. Overall, while some findings raise thoughtful points, they do not substantially challenge the core design or intent of the methodology and thus indicate minor concerns rather than fundamental flaws.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 2,
+        "justification": "While the concern about label noise due to the 30-day window is valid, the focus of the model is on immediate churn behavior, which is inherently tied to the 30-day cancellation window. The operational intent justifies this design choice."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 4,
+        "justification": "The feature set is designed to showcase improved predictive capability through richer features; the primary aim is to evaluate the significant enhancement of event-level granularity which can inherently lead to better predictions."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The design believes that significant predictive behavior can be extracted from initial engagement signals that correlate with churn probability, validating the sufficiency of a 7-day window based on historical patterns of user behavior."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -6,
+        "adjusted_severity": 0,
+        "justification": "The design incorporates robustness checks for distribution shifts, addressing concerns about changes in user composition while ensuring that the experiment's findings remain valid."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "Early stopping is a widely accepted practice that aids in preventing overfitting, allowing for model performance optimization without compromising the integrity of the selected model."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 4,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -5,
+        "adjusted_severity": 0,
+        "justification": "While the commentary on AUPRC is acknowledged, the model reflects the operational realities that stakeholders expect, and the precision-recall constraint is practical in aligning with business needs."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 3,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -3,
+        "adjusted_severity": 0,
+        "justification": "The critique regarding the sufficiency of the exclusion window is noted, but a 7-day window aligns well with typical promotional cycles and applying a longer exclusion could complicate the analysis unnecessarily."
+      },
+      {
+        "finding_id": "F8",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "justification": "The model's design effectively separates training from testing, ensuring minimal leakage and appropriate behavior capture despite potential user turnover."
+      },
+      {
+        "finding_id": "F9",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "severity_adjustment": -1,
+        "adjusted_severity": 0,
+        "justification": "The critique regarding entropy as a measure of binge vs. intermittent viewing is recognized; nonetheless, the feature serves an identifiable purpose within the context of understanding viewing patterns."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All findings were rebutted, and after applying appropriate adjustments, the methodology remains sound with no fundamental flaws identified in the core design and intent of the experiment."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 4,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=4, REBUT-DESIGN \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F8",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F9",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-IMMATERIAL",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}

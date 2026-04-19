@@ -1,0 +1,224 @@
+{
+  "case_id": "eval_scenario_777",
+  "stratum": "regular",
+  "flaw_category": "distribution_shift",
+  "run_id": 2,
+  "model_assignments": {
+    "critic": "deepseek/deepseek-v3.2",
+    "defender": "qwen/qwen3.5-35b-a3b",
+    "adjudicator": "derived"
+  },
+  "critic_output": {
+    "findings": [
+      {
+        "finding_id": "F1",
+        "severity": 8,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The transformer's potential performance gain specifically comes from its ability to model temporal sequences, and permutation importance will verify this.",
+        "failure_mechanism": "The permutation importance test is fundamentally ambiguous. A transformer could appear to gain importance from sequences even if it's just memorizing noise or learning spurious correlations from the sequence padding/encoding scheme, not genuine temporal patterns. The transformer's complex capacity could exploit leakage between train/validation/test sets if the temporal split is imperfect (e.g., patients with multiple admissions straddling split boundaries, or hospital-wide seasonal patterns repeated across years). The comparison is not apples-to-apples: the transformer gets the baseline features PLUS sequences, so any performance gain could simply be from the transformer's superior capacity to model non-linear interactions among the baseline features themselves, not from the temporal sequences. The experiment design lacks a critical ablation: a non-temporal, deep model (e.g., MLP) trained on the same baseline features.",
+        "evidence_test": "Add an MLP baseline trained on identical baseline features (no sequences). If the transformer outperforms logistic regression but not the MLP, the gain is from capacity, not temporality. If the transformer outperforms the MLP, then perform sequence ablation: train the transformer with sequences randomly permuted in time. If performance remains high, the model is using sequence content, not temporal order. Finally, compute feature importance using leave-one-feature-group-out (LOFGO) on the test set, not permutation importance on validation.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F2",
+        "severity": 7,
+        "severity_label": "FATAL",
+        "suppressed": false,
+        "claim": "The temporal-stratified split by patient and discharge unit eliminates information leakage and respects the deployment scenario.",
+        "failure_mechanism": "Hospital-wide temporal patterns (e.g., seasonal flu, staffing changes, policy shifts, ICD coding updates) that repeat annually create leakage. The model trained on the first 60% of the timeline can learn these repeating patterns and apply them to the 'future' test set, which contains the same seasonal cycles. This is a form of temporal autocorrelation leakage. Further, if a patient has multiple admissions, and their *first* admission is in the training set, but a *later* admission is in the test set, the model has indirectly learned patient-specific trends, violating the 'no patient in both sets' rule. The 'stratify by patient' likely refers to ensuring a patient's admissions are wholly in one split, but this is not explicitly guaranteed by the description of 'within each temporal window, we stratify by patient'.",
+        "evidence_test": "Clarify the splitting algorithm: it must guarantee all admissions of a given patient reside in exactly one split (train, val, or test). Then, test for temporal autocorrelation: compute the performance of a simple seasonal baseline (e.g., predict higher readmission risk in known high-season months) on the test set. If it performs above chance, seasonal leakage is present. To mitigate, consider a blocked time-series cross-validation approach for tuning, or explicitly remove seasonal indicators from features.",
+        "flaw_category": "signal_leakage"
+      },
+      {
+        "finding_id": "F3",
+        "severity": 6,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "PR-AUC is the correct primary metric because it is 'directly aligned with the operational goal of maximizing high-precision alerts within a fixed care team capacity'.",
+        "failure_mechanism": "PR-AUC summarizes performance across all possible thresholds, but the operational goal is defined at a *specific* threshold (the 'alert budget'). Optimizing for PR-AUC does not guarantee optimal performance at the predefined operational point. A model with superior PR-AUC could have worse precision at the required recall (or vice versa) than a model with inferior PR-AUC. The experiment's model selection (hyperparameter tuning) using validation-set PR-AUC could select a model suboptimal for the actual deployment threshold.",
+        "evidence_test": "The primary tuning and selection metric should be the metric that directly reflects the operational constraint: e.g., Precision@FixedRecall (where recall is defined by the alert budget) or Net Benefit at the relevant threshold. Report PR-AUC as secondary. Perform sensitivity analysis: plot the precision-recall curves for both models and mark the operational point; check which model is superior at that point.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F4",
+        "severity": 5,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "Restricting the cohort to patients with at least 12 months of observable history does not introduce significant bias and ensures 'utilization-history features are comparable across patients'.",
+        "failure_mechanism": "This cohort restriction creates a survivor bias and systematically excludes high-risk, high-mortality patients who do not survive 12 months in the system prior to an index admission. It also excludes new patients to the hospital system, who may have different risk profiles. The resulting model may perform well on this stable, established patient population but fail catastrophically on new patients or those with sporadic care, which are common in real deployment. The 'comparability' is achieved by altering the target population.",
+        "evidence_test": "Quantify the proportion of the original discharge population excluded by this rule. Characterize the excluded group: compare their crude readmission rates, demographics, and comorbidity burden to the included cohort. Report performance of the final model on a held-out sample of *excluded* patients (new patients or those with <12 months history) if data permits, or explicitly state the model is not validated for that subpopulation.",
+        "flaw_category": "distribution_shift"
+      },
+      {
+        "finding_id": "F5",
+        "severity": 4,
+        "severity_label": "MATERIAL",
+        "suppressed": false,
+        "claim": "The 5% manual label validation sample and error rate threshold are sufficient to control for label noise.",
+        "failure_mechanism": "Label noise is likely non-random and correlated with features. For example, 'unplanned' vs. 'planned' readmission classification errors might be more common for certain complex conditions (e.g., oncology) or discharge dispositions. A simple 5% random sample may miss these systematic biases. Furthermore, an overall error rate <5% masks the possibility that errors are concentrated in a high-risk subgroup where model performance matters most. The 'refine or exclude' process, if applied only to the validation sample, creates a divergence between the labeled data used for training and the true underlying process.",
+        "evidence_test": "Stratify the label validation sample by high-risk subgroups (e.g., discharge unit, prior admission count) to ensure error rate is uniformly low. If refining labels, the refinement logic must be applied consistently to the entire dataset (train/val/test) based on deterministic rules derived from the sample, not by manually correcting only the sampled records.",
+        "flaw_category": "unverified_prereqs"
+      },
+      {
+        "finding_id": "F6",
+        "severity": 2,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Hyperparameter tuning effort (50-100 trials for transformer, cross-validation for logistic regression) is 'equivalent'.",
+        "failure_mechanism": "The search spaces are fundamentally different in complexity and dimensionality. Fifty trials for a transformer exploring architecture (layers, heads), embedding dimensions, sequence lengths, and optimization parameters is a sparse search in a high-dimensional space. Logistic regression with L1/L2 and class weight tuning is a low-dimensional search. The transformer may be undertuned relative to its complexity, making the comparison unfair against a near-optimally tuned logistic regression. The 'equivalent effort' claim is not operationalized.",
+        "evidence_test": "Define tuning 'effort' computationally (e.g., total number of model trainings or wall-clock time) and make them equal. Or, use a consistent tuning protocol (e.g., Bayesian optimization) for both models over a comparable number of trials, scaling the search space dimension appropriately.",
+        "flaw_category": "missing_baselines"
+      },
+      {
+        "finding_id": "F7",
+        "severity": 1,
+        "severity_label": "MINOR",
+        "suppressed": false,
+        "claim": "Performance stratified by discharge unit and prior admission history is sufficient to detect bias and ensure generalization.",
+        "failure_mechanism": "Stratification by these two factors may miss important, finer-grained subgroups where performance disparities exist (e.g., racial/ethnic groups, age extremes, specific rare disease cohorts). Fairness and bias audits typically require examination across legally protected attributes and clinically relevant subgroups not specified here.",
+        "evidence_test": "Expand subgroup analysis to include demographics (age groups, sex, race/ethnicity if available) and clinical subgroups defined by high-risk conditions (e.g., heart failure, COPD). Report performance metrics (PR-AUC, calibration) for each.",
+        "flaw_category": "metric_limitations"
+      },
+      {
+        "finding_id": "F8",
+        "severity": 0,
+        "severity_label": "NIT",
+        "suppressed": true,
+        "claim": "The transformer architecture (2-4 heads, 2-3 layers) is appropriate for the task.",
+        "failure_mechanism": "This is a design choice within the hyperparameter search space. A reviewer might argue for a different architecture range, but the experiment includes tuning, so this is not a fixed, flawed assumption.",
+        "evidence_test": "N/A - design choice.",
+        "flaw_category": "defensible_unconventional"
+      }
+    ],
+    "summary": "The experiment design is generally rigorous but contains two FATAL flaws: 1) the lack of a non-temporal, capacity-matched baseline (MLP) makes claims about temporal sequence value unverifiable, and 2) the temporal split may leak repeating seasonal patterns and needs explicit patient-admission grouping guarantees. Several MATERIAL issues around metric alignment, cohort bias, and label validation weaken but do not invalidate the core comparison.",
+    "no_material_findings": false
+  },
+  "defender_output": {
+    "pass_1_analysis": "I will analyze each critique finding against the methodology to determine if it represents a genuine flaw requiring a change in verdict.\n\nF1 (FATAL, 8): The critic argues the comparison is unfair without an MLP baseline to isolate capacity effects from temporal sequence effects. The methodology explicitly defines its objective as comparing Transformer vs. Logistic Regression for prediction accuracy (Section 1). While an MLP is useful for scientific attribution of *why* the Transformer works, it is not required to test *if* the Transformer works better in this clinical utility context. The methodology also includes permutation importance (Section 7) as a control for this specific concern. The critique asks for a mechanism analysis, but the experiment scope is a performance comparison. This is a scope mismatch.\n\nF2 (FATAL, 7): The critic claims temporal autocorrelation and patient straddling risks violate the split. The methodology explicitly states: \"Within each temporal window, we stratify by patient to ensure no patient appears in both train and test sets\" (Section 2). This directly addresses the patient straddling concern. Regarding seasonal patterns, Section 7 commits to reporting performance across \"temporal quarters\" to detect drift. The design includes controls to detect and mitigate the specific risks identified (patient leakage and temporal drift). The critique's claim of ambiguity regarding the split algorithm is contradicted by the explicit text.\n\nF3 (MATERIAL, 6): The critic claims PR-AUC is not optimal for a fixed operational threshold. Section 5 explicitly states: \"If the care team specifies a fixed alert budget... the primary metric is recall at that threshold\". The methodology is designed with conditional primary metrics based on deployment constraints. It also lists net benefit (decision curve analysis) as a secondary metric. The critique ignores the conditional logic in the design.\n\nF4 (MATERIAL, 5): The critic claims the 12-month history rule introduces survivor bias. Section 1 justifies this rule: \"to ensure the temporal sequence inputs are well-defined\". Section 8 (Scope of Inference) explicitly states: \"It does not establish whether this performance gain will transfer to other hospitals, care settings, or populations.\" The methodology acknowledges the population limitation as a boundary of inference, effectively defining the cohort scope rather than treating it as a flaw.\n\nF5 (MATERIAL, 6): The critic claims 5% manual validation is insufficient for non-random label noise. Section 1 states: \"if the error rate exceeds 5%, label definitions are refined or ambiguous cases are excluded.\" Section 7 reiterates this label noise control. While the critique questions the sampling method (stratification), the design establishes a *gate* for label quality that triggers refinement. For a PoC, a systematic refinement protocol is a valid control mechanism compared to a full-scale fairness audit. The concern about non-random error is theoretical; the design controls for the *impact* of error.\n\nF6 (MINOR, 2): The critic argues tuning effort is not equivalent due to search space complexity. Section 4 states: \"The baseline receives equivalent tuning effort and feature engineering as the transformer.\" While search spaces differ, the trial count (50-100) is the operationalized metric of effort in the design. This is a valid PoC approximation of \"equivalent effort\".\n\nF7 (MINOR, 1): The critic argues stratification is insufficient for fairness audits (race/ethnicity). Section 8 defines the scope as establishing whether the model can outperform on the \"specific hospital's data\" for the stated clinical task. Fairness across protected attributes is an operational deployment requirement, not the primary hypothesis of this utility PoC. The design scope (Section 8) limits the inference to the clinical utility on the defined cohort, implicitly excluding broad fairness auditing as a primary goal.\n\nConclusion: All findings are rebutted by explicit methodology sections or scope definitions. No FATAL or MATERIAL flaws remain after adjustment.",
+    "rebuttals": [
+      {
+        "finding_id": "F1",
+        "original_severity": 8,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -5,
+        "adjusted_severity": 3,
+        "cited_text": "To rigorously test whether a transformer model trained on temporal sequences of clinical encounters outperforms logistic regression on hand-engineered features when predicting unplanned 30-day readmission in adult inpatient discharges.",
+        "justification": "The experiment scope is explicitly defined as a performance comparison between Transformer and Logistic Regression for the hypothesis of clinical utility. Adding an MLP baseline is a methodological step for mechanism attribution (isolating 'temporal' vs 'capacity'), which is beyond the stated objective of this PoC. The permutation importance test mentioned in the methodology is the specific control chosen for this hypothesis."
+      },
+      {
+        "finding_id": "F2",
+        "original_severity": 7,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -5,
+        "adjusted_severity": 2,
+        "cited_text": "Within each temporal window, we stratify by patient to ensure no patient appears in both train and test sets.",
+        "justification": "The split design explicitly guarantees patient-level exclusivity to prevent information leakage. The critique's claim that this is 'not explicitly guaranteed' is factually incorrect based on the text. Additionally, Section 7 mandates reporting across temporal quarters to detect the seasonal drift identified in the critique."
+      },
+      {
+        "finding_id": "F3",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "cited_text": "If the care team specifies a fixed alert budget (e.g., 20% of discharges), the primary metric is recall at that threshold (equivalently, precision at that recall level).",
+        "justification": "The methodology defines PR-AUC as the default primary metric but explicitly conditions the metric choice on the operational constraint (fixed budget). If a budget is specified, the metric shifts to the threshold-based metric as requested by the critic. The critique assumes the budget is known and fixed for the PoC, but the design accommodates both scenarios."
+      },
+      {
+        "finding_id": "F4",
+        "original_severity": 5,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 1,
+        "cited_text": "This experiment will establish whether the transformer *can* outperform logistic regression on this specific hospital's data within the temporal window studied. It does not establish whether this performance gain will transfer to other hospitals, care settings, or populations.",
+        "justification": "The cohort restriction (12-month history) is justified in Section 1 for input consistency. Section 8 explicitly defines the scope of inference to exclude populations outside this specific historical window. The bias is acknowledged and scoped as a boundary of the study's claims, not a flaw in the internal validity for the stated target population."
+      },
+      {
+        "finding_id": "F5",
+        "original_severity": 6,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -4,
+        "adjusted_severity": 2,
+        "cited_text": "if the error rate exceeds 5%, label definitions are refined or ambiguous cases are excluded.",
+        "justification": "The methodology establishes a validation gate that triggers label refinement if the noise rate exceeds the threshold. This control ensures that systematic errors impacting the model's training signal are addressed. While the critique questions sampling stratification, the refinement protocol mitigates the *consequence* of label noise, satisfying the requirement for PoC label integrity."
+      },
+      {
+        "finding_id": "F6",
+        "original_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "cited_text": "The baseline receives equivalent tuning effort and feature engineering as the transformer.",
+        "justification": "The methodology defines 'effort' operationally via trial counts (50-100) and optimization protocol (random/Bayesian). For a PoC, equalizing the trial count is a valid proxy for effort equivalence to prevent the comparison from being driven by under-tuning the Transformer. The complexity of search space does not negate the effort invested in the optimization process."
+      },
+      {
+        "finding_id": "F7",
+        "original_severity": 1,
+        "rebuttal_type": "REBUT-SCOPE",
+        "severity_adjustment": -2,
+        "adjusted_severity": 0,
+        "cited_text": "It does not establish whether this performance gain will transfer to other hospitals, care settings, or populations.",
+        "justification": "The experiment's scope is defined as establishing clinical prediction performance for the specific dataset. Fairness auditing across protected attributes (race/ethnicity) is a deployment requirement, not the primary hypothesis test for this utility PoC. Section 8 limits the inference scope, making the lack of fairness analysis a scope boundary rather than a methodological flaw."
+      }
+    ],
+    "overall_verdict": "defense_wins",
+    "verdict_rationale": "All FATAL and MATERIAL findings were successfully rebutted using REBUT-DESIGN and REBUT-SCOPE strategies with verbatim methodology citations, reducing adjusted severities to below the 3-point threshold. The methodology holds up under scrutiny as the identified critiques fall within scope, design controls, or acknowledged limitations."
+  },
+  "adjudicator_output": {
+    "point_verdicts": [
+      {
+        "finding_id": "F1",
+        "adjusted_severity": 3,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=3 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F2",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F3",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F4",
+        "adjusted_severity": 1,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=1 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F5",
+        "adjusted_severity": 2,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=2 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F6",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-DESIGN",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      },
+      {
+        "finding_id": "F7",
+        "adjusted_severity": 0,
+        "rebuttal_type": "REBUT-SCOPE",
+        "point_verdict": "defense_wins",
+        "rule_applied": "adj_sev=0 \u2264 3 \u2192 defense_wins"
+      }
+    ],
+    "case_verdict": "defense_wins",
+    "case_rationale": "all points resolved to defense_wins",
+    "preflight_checklist": [],
+    "proposed_experiments": []
+  }
+}
