@@ -32,6 +32,11 @@ The original FastText idea has now recursed several levels deep into its own eva
 - Agent reference copies: `plugins/ml-lab/`
 - Investigation logs: `INVESTIGATION_LOG.jsonl` in the experiment directory (JSONL, one entry per action)
 
+## Ideation — Evolutionary ml-lab Engine
+- **Status: spec/idea only — NOT implemented.** Captured during a brainstorming session; no code, no `/lean-plan` yet.
+- Concept: a generational, closed-loop, synchronous engine that runs many ml-lab investigations as the fitness function, evolving a model design across generations with a non-dominated champion set that ratchets forward. Each candidate design is a self-contained PEP 723 `uv` script; ml-lab debate (v8-calibrated) certifies a gain before its metric is allowed to rank it.
+- Spec (per-problem contract / init-time interface): `.claude/output/specs/2026-05-30-evolutionary-mllab-contract-design.md`. Open questions tracked in its §11.
+
 ## External LLM APIs
 - External LLM calls use **OpenRouter** via the OpenAI SDK (`OPENROUTER_API_KEY` env var required)
 - Currently used in the synthetic case generation pipeline; will expand to parts of the main experiment pipeline
