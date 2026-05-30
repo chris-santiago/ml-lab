@@ -47,6 +47,8 @@ The original FastText idea has now recursed several levels deep into its own eva
 ## Key Patterns
 - **Log entries:** Always use `uv run log_entry.py` — manual JSONL appends break schema and sequence monotonicity
 - **Phase execution:** Phases are sequential and not independently runnable; each depends on prior phase outputs
+- **`/preflight` is dev-repo-only:** the `preflight` skill (`.claude/skills/preflight/`) is scoped to *this* ml-lab development repo. It checks meta-evaluation experiment infrastructure (`plan/PLAN.md`, `plan/scripts/`, `plan/phases/`, `benchmark_cases.json`) and halts without `plan/PLAN.md`. It is intentionally NOT in `plugins/ml-lab/`, so it does not ship to plugin users and is *not* a readiness check for standalone ml-lab investigations. If it were meant for broader use it would live in the plugin dir.
+- **`ml-lab` runs from any directory:** the skill self-scaffolds its artifacts (`HYPOTHESIS.md`, `log_entry.py`, PoC, etc.) into an empty working dir. Its only external dependencies are `uv`, the installed `ml-lab` plugin (agents), and `derive_verdict.py` — which is resolved portably from the plugin registry (`installed_plugins.json` → `installPath`), so debate mode works in a standalone dir, not just inside this repo.
 
 ## Artifact Sync
 After any experiment, analysis step, or issue resolution — run `/artifact-sync` before marking work complete.
