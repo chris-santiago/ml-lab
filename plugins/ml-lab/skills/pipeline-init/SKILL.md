@@ -17,7 +17,9 @@ This threshold is a recommendation, not a gate. The orchestrator may promote ear
 
 ## 2. Scaffolding procedure
 
-Create the flow directory (conventionally `flow/`) under the investigation root if it does not exist. Stamp the bundle from `assets/` into place:
+**Resolve the plugin path first.** The bundle and scripts ship inside this plugin, so locate it portably (works from any working directory): read `installPath` for the `ml-lab` entry in `<claude-config>/installed_plugins.json` — the same resolution the ml-lab skill uses for `derive_verdict.py`. Call it `$PLUGIN_DIR`; the bundle lives at `$PLUGIN_DIR/skills/pipeline-init/assets/` and the gate scripts at `$PLUGIN_DIR/skills/pipeline-init/scripts/` (used in §6).
+
+Create the flow directory (conventionally `flow/`) under the investigation root if it does not exist. Stamp the bundle from `$PLUGIN_DIR/skills/pipeline-init/assets/` into place:
 
 1. Copy `assets/shell_snippet.py` wiring into the top of your new flow module verbatim (see §7 — the shell is the one seam that is copied unchanged).
 2. Copy `assets/reference_flow.py` alongside the flow source as the annotated starting point. Read it carefully; adapt its DAG and component bodies to the investigation's domain. It is a model to follow, not a template to fill in.
@@ -89,10 +91,9 @@ Run these three steps in order. Each must pass before the promotion is complete.
 
 **Step 1 — Deterministic lint (blocking)**
 
-Resolve the plugin install path portably from the plugin registry, the same way the ml-lab skill resolves `derive_verdict.py` — read `installPath` for `ml-lab` from `installed_plugins.json` — so the lint runs from any working directory:
+Using `$PLUGIN_DIR` resolved in §2:
 
 ```bash
-# PLUGIN_DIR = installPath of the "ml-lab" entry in <claude-config>/installed_plugins.json
 uv run "$PLUGIN_DIR/skills/pipeline-init/scripts/flow-lint.py" <flow.py>
 ```
 
