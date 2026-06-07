@@ -78,6 +78,67 @@ uv run generate_figures.py
 
 ---
 
+## flow-lint.py
+
+**Location:** `plugins/ml-lab/skills/pipeline-init/scripts/flow-lint.py` (shipped by `/pipeline-init`)
+
+Deterministic static linter for promoted Metaflow flows. Uses PEP 723 inline metadata; stdlib `ast` only — no project dependencies, never imports the flow under test.
+
+Detects five mechanical anti-patterns:
+
+| Rule ID | What it detects |
+|---|---|
+| `merge-artifacts-module` | `merge_artifacts()` with no `include=`/`exclude=`; an unconstrained merge raises on `nn.Module`/tensor artifacts |
+| `cwd-relative-config` | `Config(default=...)` not anchored to `__file__`; CWD-relative paths break under `uv run` script mode |
+| `per-config-foreach` | `foreach=` attribute names a per-method/config list instead of the dataset/data-axis grain |
+| `bare-project-import` | First-party import with no preceding module-scope `sys.path.insert(...)` shim |
+| `module-global-experiment-const` | Module-level numeric constant read inside a `@step`/`@card` body; belongs in Hydra config |
+
+Reports findings as `file:line  [rule-id]  message`. Exits nonzero on any finding.
+
+**Usage:**
+
+```bash
+uv run flow-lint.py <flow.py> [<flow.py> ...]
+```
+
+!!! note
+    The script path is resolved portably from the plugin registry (`installed_plugins.json` → `installPath`), matching the same pattern used by `derive_verdict.py`.
+
+---
+
+## determinism-check.py
+
+**Location:** `plugins/ml-lab/skills/pipeline-init/scripts/determinism-check.py` (shipped by `/pipeline-init`)
+
+Prove layer for promoted Metaflow flows. Verifies that a flow holds its declared `experiment.determinism` contract by diffing two runs' aggregate outputs (`lift_results`, `aggregate_results`) for exact equality, order-insensitive over cells. Uses PEP 723 inline metadata; requires `metaflow>=2.19`.
+
+Reads the contract from `run.data.determinism`:
+
+| Contract | Verification behavior |
+|---|---|
+| `order_independent` | Two runs (any `--max-workers`) must produce identical aggregate outputs |
+| `single_worker` | Two runs both at `--max-workers 1` must produce identical outputs |
+| `nondeterministic` | Verification skipped (escape hatch, exits 0) |
+
+!!! warning
+    This is not a reproduce-the-PoC check. It validates the promoted flow against itself across two runs — confirming that the pipeline's own declared contract holds.
+
+**Usage:**
+
+```bash
+# Compare two specific runs
+uv run determinism-check.py <run_a_pathspec> <run_b_pathspec>
+
+# Compare the latest two runs of a named flow
+uv run determinism-check.py --flow <FlowName>
+
+# Override the contract (fallback when run artifact is absent)
+uv run determinism-check.py <run_a> <run_b> --contract order_independent
+```
+
+---
+
 ## Hook scripts
 
 ### journal-precompact.sh

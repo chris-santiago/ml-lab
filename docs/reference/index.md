@@ -5,8 +5,8 @@ Complete reference documentation for ml-lab and ml-journal — agents, skills, e
 ## ml-lab Plugin
 
 - [Workflow Diagram](ml-lab/workflow.md) — the full investigation flowchart
-- [Agents](ml-lab/agents.md) — all seven subagents and their dispatch patterns
-- [Skills](ml-lab/skills.md) — `/ml-lab`, `/intent-watch`, `/deep-dive`
+- [Agents](ml-lab/agents.md) — all nine subagents and their dispatch patterns
+- [Skills](ml-lab/skills.md) — `/ml-lab`, `/pipeline-init`, `/intent-watch`, `/deep-dive`
 
 ## ml-journal Plugin
 

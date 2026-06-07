@@ -47,6 +47,14 @@ Gate 1 requires your approval. Review:
 - The experiment design matches your intent
 - Cost estimates are acceptable
 
+## Optional: promote to a Metaflow flow
+
+After Gate 1 approval, a multi-cell investigation may be promoted onto a config-driven Metaflow+Hydra pipeline before Step 6 runs. This is a judgment call, not a requirement — the default signal is more than one cell or more than one distinct analysis. Quick single-cell PoCs skip this entirely and proceed to Step 6 unchanged.
+
+When you promote, Step 6 runs as the Metaflow flow instead of inline. The promotion gate is: flow-lint → pipeline-reviewer → determinism check (`prevent → lint → review → prove`).
+
+Run `/pipeline-init` to start the promotion. See [Promote an Investigation to a Metaflow Flow](promote-to-flow.md) for the full procedure.
+
 ## Monitor the experiment
 
 During Step 6, `/intent-watch` runs to catch pre-registration drift. If a HIGH or CRITICAL conflict is flagged, resolve it before continuing.

@@ -125,3 +125,29 @@ All agents are subagents dispatched via the Agent tool from the main session. Th
 **Dispatched by:** `/intent-watch` skill.
 
 **Process:** Indexes binding constraints from a source-of-truth document, detects recent git changes, evaluates diffs for conflicts. Emits a clean-pass line or structured conflict report.
+
+---
+
+## pipeline-reviewer
+
+**Role:** Fidelity judgment gate for promoted Metaflow flows.
+
+**Dispatched by:** Pipeline promotion workflow, after a flow is scaffolded and before it is run. Blocking — a FAIL verdict halts promotion.
+
+**Model:** Sonnet.
+
+**Scope:** Guards intent-fidelity invariants only. Does not run the flow, does not police DAG shape, and does not duplicate the deterministic flow-lint's mechanical checks.
+
+**Inputs:** Promoted flow source + the investigation's source-of-truth document(s) (one or more of `HYPOTHESIS.md`, the original PoC, `CONCLUSIONS.md`, `PLAN.md`, or any document the dispatching agent designates as authoritative).
+
+**The five judgment checks:**
+
+| Check ID | Invariant | Failure it catches |
+|---|---|---|
+| `split_convention` | Flow uses the same split strategy (shared vs. independent data streams) as the original PoC | Changing split convention silently alters variance structure across arms |
+| `reshuffle_symmetry` | Per-epoch shuffling or resampling is applied identically to all methods | Asymmetric reshuffling gives one method a silent optimization advantage |
+| `axes_match_source` | Swept axes (hyperparameter grids, dataset sizes, etc.) match the source-of-truth in identity and range | Silently added, dropped, or re-ranged axes change which regime is under evaluation |
+| `metric_quantity` | Each metric's implementation computes the quantity its name claims | A metric reporting the wrong quantity passes all type/shape checks while drawing the verdict from the wrong signal |
+| `sweep_override` | Flow does not perform per-experiment selection (sweep-then-pick-best) where the source-of-truth used a fixed configuration | Selection effect inflates results beyond what the original PoC measured |
+
+**Output:** A single JSON object with a `findings` array (one entry per check, each with `check_id`, `verdict`, `evidence`, `source_of_truth_ref`, `intent_mismatch`, and `actionable_fix`), a top-level `blocking` boolean (`true` if any finding is FAIL), and a `summary` string. All five checks must appear even when the verdict is PASS.

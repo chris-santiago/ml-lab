@@ -4,26 +4,26 @@ The complete ml-lab investigation workflow, including user-approval gates, macro
 
 ```mermaid
 flowchart TD
-    START(["Start"]) --> PRE["Ask: hypothesis, metrics, report_mode, review_mode<br/>Write HYPOTHESIS.md"]
+    START(["▶ Start"]) --> PRE["Ask: hypothesis · metrics · report_mode · review_mode<br/>Write HYPOTHESIS.md"]
 
-    PRE ~~~ LOG["INVESTIGATION_LOG.jsonl<br/>uv run log_entry.py throughout all steps"]
+    PRE ~~~ LOG["📋 INVESTIGATION_LOG.jsonl<br/>uv run log_entry.py throughout all steps"]
     style LOG fill:#f9f3e0,stroke:#c9a227,stroke-dasharray: 5 5
 
-    PRE --> S1["Step 1 — Build PoC<br/>Reference check, explicit params"]
+    PRE --> S1["Step 1 — Build PoC<br/>Reference check · Explicit params"]
     S1 --> S2["Step 2 — Clarify Intent<br/>Write README.md"]
 
     S2 --> RMODE{"review_mode?"}
 
-    RMODE -- "ensemble (opt-in)" --> ENS_S3["Step 3 — 3x ml-critic<br/>CRITIQUE_1.md, CRITIQUE_2.md, CRITIQUE_3.md"]
-    ENS_S3 --> ENS_AGG["Step 3A — Aggregate Findings<br/>Cluster by root cause, tag confidence tiers<br/>ENSEMBLE_REVIEW.md"]
-    ENS_AGG --> PREFLIGHT_E["Extract issues by tier, propose empirical tests<br/>Build pre-flight checklist"]
+    RMODE -- "ensemble (opt-in)" --> ENS_S3["Step 3 — 3× ml-critic<br/>CRITIQUE_1.md · CRITIQUE_2.md · CRITIQUE_3.md"]
+    ENS_S3 --> ENS_AGG["Step 3A — Aggregate Findings<br/>Cluster by root cause · Tag confidence tiers<br/>ENSEMBLE_REVIEW.md"]
+    ENS_AGG --> PREFLIGHT_E["Extract issues by tier · Propose empirical tests<br/>Build pre-flight checklist"]
     style ENS_AGG fill:#e8f4e8,stroke:#2e7d32
 
     RMODE -- "debate (default)" --> SA1["Stage A.1 — ml-critic R1<br/>CRITIQUE.md"]
     SA1 --> SA2["Stage A.2 — ml-defender R1<br/>DEFENSE.md"]
-    SA2 --> SB["Stage B — Challenge Loop<br/>ml-critic-r2 → ml-defender R2 → derive_verdict()<br/>min 2, max 4 rounds"]
+    SA2 --> SB["Stage B — Challenge Loop<br/>ml-critic-r2 → ml-defender R2 → derive_verdict()<br/>min 2 · max 4 rounds"]
     SB --> BCONV{"Converged?"}
-    BCONV -- "No, rounds remain" --> SB
+    BCONV -- "No · rounds remain" --> SB
     BCONV -- "Yes or cap reached" --> PREFLIGHT_D
     PREFLIGHT_D["Parse final Stage B verdict<br/>Extract concessions + pre-execution requirements<br/>Build pre-flight checklist"]
     style PREFLIGHT_D fill:#e8f4e8,stroke:#2e7d32
@@ -31,12 +31,26 @@ flowchart TD
     PREFLIGHT_E --> G1
     PREFLIGHT_D --> G1
 
-    G1[/"Gate 1 — Experiment Plan<br/>All pre-flight items CLOSED, user approval required"/]
+    G1[/"✋ Gate 1 — Experiment Plan<br/>All pre-flight items CLOSED · User approval required"/]
 
-    G1 --> IW1["/intent-watch — clean pass required<br/>HYPOTHESIS.md locked, resolve any drift before Step 6"]
+    G1 --> IW1["🔒 /intent-watch — clean pass required<br/>HYPOTHESIS.md locked · resolve any drift before Step 6"]
     style IW1 fill:#fff3cd,stroke:#e6a817
-    IW1 --> S6["Step 6 — Design & Run Experiment<br/>Baseline verification, precondition check<br/>/loop intent-watch active"]
-    S6 --> S7["Step 7 — Synthesize Conclusions<br/>CONCLUSIONS.md + figures"]
+    IW1 --> PROMO{"Promote to Metaflow flow?<br/>judgment · default: >1 cell or >1 analysis"}
+    PROMO -- "No — quick PoC" --> S6
+    PROMO -- "Yes — promote" --> PINIT["/pipeline-init — scaffold Metaflow+Hydra flow<br/>migrate PoC into make_data·build_model·train_arm·metric"]
+    PINIT --> PLINT["🔒 flow-lint — 5 mechanical AST rules · must exit 0"]
+    PLINT --> PREV["🔒 pipeline-reviewer — 5 intent-fidelity checks · FAIL blocks"]
+    PREV --> S6
+    style PINIT fill:#e8f0fb,stroke:#3b6ea5
+    style PLINT fill:#fff3cd,stroke:#e6a817
+    style PREV fill:#fff3cd,stroke:#e6a817
+    S6["Step 6 — Design & Run Experiment<br/>promoted ⇒ run the flow<br/>Baseline · Precondition · /loop intent-watch"]
+    S6 --> PROVED{"Promoted flow?"}
+    PROVED -- "No" --> S7
+    PROVED -- "Yes" --> PROVE["🔒 determinism gate — verify declared<br/>experiment.determinism contract"]
+    style PROVE fill:#fff3cd,stroke:#e6a817
+    PROVE --> S7
+    S7["Step 7 — Synthesize Conclusions<br/>CONCLUSIONS.md + figures"]
     S7 --> MFLAW{"Evaluation<br/>design flaw?"}
     MFLAW -- "Yes → micro-iterate" --> S6
 
@@ -45,8 +59,8 @@ flowchart TD
     MACRO -- "Cap reached<br/>(3 cycles)" --> RPT_MODE
     MACRO -- "B or C<br/>under cap" --> G2
 
-    G2[/"Gate 2 — Re-Opening Plan<br/>User approval required"/]
-    G2 -- "B ensemble:<br/>re-run 3x critic Mode 3" --> ENS_S3
+    G2[/"✋ Gate 2 — Re-Opening Plan<br/>User approval required"/]
+    G2 -- "B ensemble:<br/>re-run 3× critic Mode 3" --> ENS_S3
     G2 -- "B debate:<br/>re-enter Stage A" --> SA1
     G2 -- "C: revise<br/>hypothesis + PoC" --> S1
 
@@ -57,14 +71,14 @@ flowchart TD
 
     S9 --> PRGATE{"full_report<br/>+ run peer review?"}
     PRGATE -- "No" --> S11GATE
-    PRGATE -- "Yes" --> R1["Step 10 Round 1<br/>research-reviewer, Opus<br/>PEER_REVIEW_R1.md"]
-    R1 --> G3[/"Gate 3 — Remediation Plan<br/>User approval required"/]
+    PRGATE -- "Yes" --> R1["Step 10 Round 1<br/>research-reviewer · Opus<br/>PEER_REVIEW_R1.md"]
+    R1 --> G3[/"✋ Gate 3 — Remediation Plan<br/>User approval required"/]
     G3 --> FIX["Address findings"]
     FIX --> PRCHK{"MAJOR issues<br/>remain?"}
-    PRCHK -- "No, converged" --> S11GATE
-    PRCHK -- "Yes, rounds left" --> R23["Rounds 2–3<br/>research-reviewer-lite, Haiku"]
+    PRCHK -- "No · converged" --> S11GATE
+    PRCHK -- "Yes · rounds left" --> R23["Rounds 2–3<br/>research-reviewer-lite · Haiku"]
     R23 --> PRCHK
-    PRCHK -- "Yes, max 3 rounds" --> HALT(["Halt — Human intervention required"])
+    PRCHK -- "Yes · max 3 rounds" --> HALT(["⛔ Halt — Human intervention required"])
 
     S11GATE{"Final technical<br/>report?"}
     S11GATE -- "Yes" --> S11["Step 11 — TECHNICAL_REPORT.md<br/>Results mode"]
@@ -76,15 +90,19 @@ flowchart TD
     S12GATE -- "Yes" --> S12["Step 12 — Artifact Coherence Audit<br/>6 cross-doc consistency checks<br/>Fix any inconsistency before exit"]
     S12 --> S13GATE
 
-    S13GATE[/"README readability review?<br/>User confirmation required"/]
+    S13GATE[/"❓ README readability review?<br/>User confirmation required"/]
     S13GATE -- "No" --> DONE
-    S13GATE -- "Yes" --> S13["Step 13 — README Rewrite<br/>readme-rewriter, outside reader<br/>diagnose → outline → rewrite"]
-    S13 --> DONE(["Final Output to Caller"])
+    S13GATE -- "Yes" --> S13["Step 13 — README Rewrite<br/>readme-rewriter · outside reader<br/>diagnose → outline → rewrite"]
+    S13 --> DONE(["✓ Final Output to Caller"])
 ```
 
 ## Key concepts
 
 **Gates** — user-approval checkpoints. No experiment runs without Gate 1 approval; no review cycle reopens without Gate 2 approval.
+
+**Promotion phase** — a judgment-triggered phase that sits between Gate 1 and Step 6. It is not a numbered step and does not renumber Steps 6–13. The orchestrator judges whether to promote the investigation to a config-driven Metaflow + Hydra flow; the default signal is more than one analysis cell, or more than one distinct analysis or diagnostic. This is a recommendation, not a forced gate. Quick single-cell PoCs proceed directly to Step 6 untouched.
+
+On promotion, the `pipeline-init` skill scaffolds the flow and migrates the PoC into four component seams (`make_data`, `build_model`, `train_arm`, `metric`). Promotion carries a mandatory four-layer enforcement gate: **prevent** (scaffold), **lint** (`flow-lint.py` — 5 deterministic AST rules, must exit 0, blocking), **review** (`pipeline-reviewer` agent — 5 intent-fidelity checks, any FAIL blocks), and **prove** (determinism gate). Lint and review are static and run before the flow is run. For a promoted investigation, Step 6 is executed as the flow. The prove layer runs after the flow, before Step 7: it verifies the flow's declared `experiment.determinism` contract (`order_independent | single_worker | nondeterministic`) by diffing two runs' aggregates via `determinism-check.py`. It is not a reproduce-the-PoC gate. Enforcement guards seam invariants, never DAG shape.
 
 **Macro-iteration** — when conclusions falsify a review assumption, the entire review cycle can reopen (up to 3 cycles). Outcome A proceeds to reporting; outcomes B and C loop back.
 

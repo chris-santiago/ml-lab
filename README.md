@@ -17,7 +17,7 @@
 /plugin install ml-lab@ml-lab
 ```
 
-This installs the `/ml-lab` skill and all seven subagent files automatically.
+This installs the `/ml-lab` skill and all eight subagent files automatically.
 
 **Manual install:**
 
@@ -29,6 +29,7 @@ cp plugins/ml-lab/agents/research-reviewer.md ~/.claude/agents/
 cp plugins/ml-lab/agents/research-reviewer-lite.md ~/.claude/agents/
 cp plugins/ml-lab/agents/readme-rewriter.md ~/.claude/agents/
 cp plugins/ml-lab/agents/report-writer.md ~/.claude/agents/
+cp plugins/ml-lab/agents/pipeline-reviewer.md ~/.claude/agents/
 ```
 
 Once installed, Claude Code will make `/ml-lab` available as a skill. Invoke it by describing an ML hypothesis — it will ask you to sharpen it into a falsifiable claim before starting the investigation.
@@ -53,6 +54,8 @@ The workflow is designed for rigor over speed. Given a hypothesis, `/ml-lab` fir
 **Ensemble mode (opt-in):** `ml-critic` is dispatched 3 times independently — each reads only the PoC and hypothesis, with no visibility into the other critics' outputs. The orchestrator clusters the findings by root cause, tags each issue with an assessor support count (1/3, 2/3, or 3/3), and writes `ENSEMBLE_REVIEW.md` with tier-weighted output. Issues are ordered by tier (3/3 > 2/3 > 1/3); 1/3 minority findings include genuine novel concerns alongside spurious noise and require explicit user confirmation before entering experiment design. Use when you want a high-recall finding sweep and will triage precision manually — no structured verdict, no convergence loop.
 
 In both modes, only the agreed (or orchestrator-proposed) empirical tests go into the experiment. If findings are surprising enough to falsify a review assumption, the whole review cycle reopens with results in hand. The investigation closes with a self-contained report and a production re-evaluation that checks whether the experimental recommendation survives operational constraints.
+
+After Gate 1, a multi-cell investigation can be promoted (judgment-triggered; default: more than one cell or more than one analysis) onto a config-driven Metaflow+Hydra flow via `/pipeline-init`. Promotion is gated by a four-step sequence: a deterministic flow-lint (5 mechanical AST rules), the `pipeline-reviewer` agent (5 intent-fidelity checks against the source PoC and HYPOTHESIS.md), and a determinism contract check on the completed run. Quick single-cell PoCs skip promotion entirely. See `docs/how-to/promote-to-flow.md` for step-by-step instructions and `docs/explanation/why-metaflow.md` for design rationale.
 
 ---
 
@@ -96,8 +99,22 @@ flowchart TD
 
     G1 --> IW1["🔒 /intent-watch — clean pass required<br/>HYPOTHESIS.md locked · resolve any drift before Step 6"]
     style IW1 fill:#fff3cd,stroke:#e6a817
-    IW1 --> S6["Step 6 — Design & Run Experiment<br/>Baseline verification · Precondition check<br/>/loop intent-watch active"]
-    S6 --> S7["Step 7 — Synthesize Conclusions<br/>CONCLUSIONS.md + figures"]
+    IW1 --> PROMO{"Promote to Metaflow flow?<br/>judgment · default: >1 cell or >1 analysis"}
+    PROMO -- "No — quick PoC" --> S6
+    PROMO -- "Yes — promote" --> PINIT["/pipeline-init — scaffold Metaflow+Hydra flow<br/>migrate PoC into make_data·build_model·train_arm·metric"]
+    PINIT --> PLINT["🔒 flow-lint — 5 mechanical AST rules · must exit 0"]
+    PLINT --> PREV["🔒 pipeline-reviewer — 5 intent-fidelity checks · FAIL blocks"]
+    PREV --> S6
+    style PINIT fill:#e8f0fb,stroke:#3b6ea5
+    style PLINT fill:#fff3cd,stroke:#e6a817
+    style PREV fill:#fff3cd,stroke:#e6a817
+    S6["Step 6 — Design & Run Experiment<br/>promoted ⇒ run the flow<br/>Baseline · Precondition · /loop intent-watch"]
+    S6 --> PROVED{"Promoted flow?"}
+    PROVED -- "No" --> S7
+    PROVED -- "Yes" --> PROVE["🔒 determinism gate — verify declared<br/>experiment.determinism contract"]
+    style PROVE fill:#fff3cd,stroke:#e6a817
+    PROVE --> S7
+    S7["Step 7 — Synthesize Conclusions<br/>CONCLUSIONS.md + figures"]
     S7 --> MFLAW{"Evaluation<br/>design flaw?"}
     MFLAW -- "Yes → micro-iterate" --> S6
 
@@ -140,7 +157,7 @@ flowchart TD
     S13GATE[/"❓ README readability review?<br/>User confirmation required"/]
     S13GATE -- "No" --> DONE
     S13GATE -- "Yes" --> S13["Step 13 — README Rewrite<br/>readme-rewriter · outside reader<br/>diagnose → outline → rewrite"]
-    S13 --> DONE(["✓ Investigation Complete"])
+    S13 --> DONE(["✓ Final Output to Caller"])
 ```
 
 </details>
@@ -160,6 +177,7 @@ The `/ml-lab` skill orchestrates the investigation in the main session. It dispa
 | `research-reviewer.md` | Deep peer reviewer — Opus-class structured review of REPORT.md | Step 10, Round 1 |
 | `research-reviewer-lite.md` | Verification reviewer — Haiku-class follow-up review | Step 10, Rounds 2–3 |
 | `readme-rewriter.md` | Outside-reader README rewriter — diagnoses and rewrites for external audiences | Step 13 |
+| `pipeline-reviewer.md` | Fidelity judgment gate for promoted Metaflow flows (5 intent-fidelity checks); reads source PoC + source-of-truth (HYPOTHESIS.md, README.md), does not run the flow | Promotion phase (after Gate 1, before the flow runs) — debate or ensemble |
 
 In **debate mode** (the default), `ml-critic` (Stage A.1) and `ml-defender` (Stage A.2) run once, followed by a convergence loop of `ml-critic-r2` (Stage B.1) and `ml-defender` (Stage B.2) up to max_rounds=4. In **ensemble mode** (opt-in), `ml-defender` and `ml-critic-r2` are not dispatched — three independent `ml-critic` dispatches with union pooling.
 
@@ -504,13 +522,13 @@ See [`experiments/self_debate_experiment_v2/README.md`](experiments/self_debate_
 
 Yes. ml-lab is a Claude Code plugin — it requires Claude Code to be installed. The plugin installs the `/ml-lab` skill and subagent definitions; Claude Code then makes them available for investigations.
 
-**Are all seven agent files required, or can I use a subset?**
+**Are all eight agent files required, or can I use a subset?**
 
-`ml-critic.md` is required for the core workflow. `ml-critic-r2.md` and `ml-defender.md` are only needed if you plan to use debate mode (the default) — they are not dispatched in ensemble mode. `research-reviewer.md` and `research-reviewer-lite.md` are only needed if you want the Step 10 peer review loop. `readme-rewriter.md` is only needed for the optional Step 13 README rewrite. `report-writer.md` is only needed for report generation (Steps 8, 11). The plugin installs all seven by default.
+`ml-critic.md` is required for the core workflow. `ml-critic-r2.md` and `ml-defender.md` are only needed if you plan to use debate mode (the default) — they are not dispatched in ensemble mode. `research-reviewer.md` and `research-reviewer-lite.md` are only needed if you want the Step 10 peer review loop. `readme-rewriter.md` is only needed for the optional Step 13 README rewrite. `report-writer.md` is only needed for report generation (Steps 8, 11). `pipeline-reviewer.md` is only needed for the optional promotion phase (promoting a multi-cell investigation to a Metaflow flow via `/pipeline-init`) — it is not dispatched for basic single-cell investigations. The plugin installs all eight by default.
 
 **Is manual installation equivalent to the plugin?**
 
-Yes — both install the same skill and seven agent files. The plugin method automates the install and surfaces updates when you run `/plugin marketplace update ml-lab`. Manual install gives you direct control but requires manual updates.
+Yes — both install the same skill and eight agent files. The plugin method automates the install and surfaces updates when you run `/plugin marketplace update ml-lab`. Manual install gives you direct control but requires manual updates.
 
 ---
 
@@ -610,7 +628,7 @@ This was a known limitation in v2 (all roles including scorer used Claude). Both
 | [`experiments/self_debate_experiment_v6/REPORT.md`](experiments/self_debate_experiment_v6/REPORT.md) | v6 full technical report — 120-case benchmark results |
 | [`experiments/self_debate_experiment_v6/plan/PLAN.md`](experiments/self_debate_experiment_v6/plan/PLAN.md) | v6 10-phase experimental design, reference documents |
 | [`experiments/self_debate_experiment_v2/TECHNICAL_REPORT.md`](experiments/self_debate_experiment_v2/TECHNICAL_REPORT.md) | **v2 technical report** — all v2 findings, decomposition, external validation, limitations |
-| [`plugins/ml-lab/`](plugins/ml-lab/) | Plugin source: `/ml-lab` skill, seven subagent definitions, install config, and flow diagram |
+| [`plugins/ml-lab/`](plugins/ml-lab/) | Plugin source: `/ml-lab` skill, eight subagent definitions, install config, and flow diagram |
 | [`multi-agent-prompt.md`](experiments/self_debate_experiment/multi-agent-prompt.md) | Bootstrap prompt for the full multi-agent harness (v1) |
 | [`experiments/self_debate_experiment/`](experiments/self_debate_experiment/) | Phase 1: frozen transcripts, contaminated + isolated protocol, 11–15 cases |
 | [`experiments/self_debate_experiment_v2/`](experiments/self_debate_experiment_v2/) | Phase 2: live API, isolated protocol, 20 cases, full results |
