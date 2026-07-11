@@ -136,7 +136,9 @@ flowchart TD
     S9 --> PRGATE{"full_report<br/>+ run peer review?"}
     PRGATE -- "No" --> S11GATE
     PRGATE -- "Yes" --> R1["Step 10 Round 1<br/>research-reviewer · Opus<br/>PEER_REVIEW_R1.md"]
-    R1 --> G3[/"✋ Gate 3 — Remediation Plan<br/>User approval required"/]
+    R1 --> DISP{"R1 Disposition?"}
+    DISP -- "Kill & salvage" --> KILLGATE(["⛔ Kill Gate — no claim survives<br/>Surface verdict + salvage to user · loop halts"])
+    DISP -- "Reframe / Submit" --> G3[/"✋ Gate 3 — Remediation Plan<br/>User approval required"/]
     G3 --> FIX["Address findings"]
     FIX --> PRCHK{"MAJOR issues<br/>remain?"}
     PRCHK -- "No · converged" --> S11GATE
@@ -174,7 +176,7 @@ The `/ml-lab` skill orchestrates the investigation in the main session. It dispa
 | `ml-critic-r2.md` | R2 challenger — issues ACCEPT/CHALLENGE/PARTIAL verdicts on defender rebuttals (Stage B.1) | Step 3: debate Stage B only |
 | `ml-defender.md` | Design defender — 7-type structured rebuttal taxonomy; concedes, rebuts, or defers (Stage A.2 and B.2) | Step 3 — **debate mode only** |
 | `report-writer.md` | Technical report writer — Opus-class; Mode 1: full investigation report (REPORT.md); Mode 2: publication-ready results-mode synthesis (TECHNICAL_REPORT.md) | Steps 8, 11 |
-| `research-reviewer.md` | Deep peer reviewer — Opus-class structured review of REPORT.md | Step 10, Round 1 |
+| `research-reviewer.md` | Adversarial peer reviewer — Opus-class claim audit + execution review; ends in a submit / reframe / kill disposition | Step 10, Round 1 |
 | `research-reviewer-lite.md` | Verification reviewer — Haiku-class follow-up review | Step 10, Rounds 2–3 |
 | `readme-rewriter.md` | Outside-reader README rewriter — diagnoses and rewrites for external audiences | Step 13 |
 | `pipeline-reviewer.md` | Fidelity judgment gate for promoted Metaflow flows (5 intent-fidelity checks); reads source PoC + source-of-truth (HYPOTHESIS.md, README.md), does not run the flow | Promotion phase (after Gate 1, before the flow runs) — debate or ensemble |

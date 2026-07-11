@@ -75,11 +75,11 @@ All agents are subagents dispatched via the Agent tool from the main session. Th
 
 ## research-reviewer
 
-**Role:** Deep peer reviewer — Opus-class structured review of `REPORT.md`.
+**Role:** Adversarial peer reviewer — Opus-class claim audit (prior art / folklore / incorrect / tautology) then execution review of `REPORT.md`, ending in a submit / reframe / kill disposition.
 
 **Dispatched by:** `/ml-lab` skill at Step 10, Round 1.
 
-**Output:** `PEER_REVIEW_R1.md` with severity-tagged findings.
+**Output:** `PEER_REVIEW_R1.md` with a per-claim audit, severity-tagged findings, and a disposition. A `kill` disposition halts the Step 10 loop and is surfaced to the user (see the workflow reference).
 
 ---
 
