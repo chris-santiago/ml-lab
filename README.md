@@ -17,7 +17,7 @@
 /plugin install ml-lab@ml-lab
 ```
 
-This installs the `/ml-lab` skill and all eight subagent files automatically.
+This installs the `/ml-lab` skill and all nine subagent files automatically.
 
 **Manual install:**
 
@@ -30,6 +30,7 @@ cp plugins/ml-lab/agents/research-reviewer-lite.md ~/.claude/agents/
 cp plugins/ml-lab/agents/readme-rewriter.md ~/.claude/agents/
 cp plugins/ml-lab/agents/report-writer.md ~/.claude/agents/
 cp plugins/ml-lab/agents/pipeline-reviewer.md ~/.claude/agents/
+cp plugins/ml-lab/agents/intent-monitor.md ~/.claude/agents/
 ```
 
 Once installed, Claude Code will make `/ml-lab` available as a skill. Invoke it by describing an ML hypothesis — it will ask you to sharpen it into a falsifiable claim before starting the investigation.
@@ -180,6 +181,7 @@ The `/ml-lab` skill orchestrates the investigation in the main session. It dispa
 | `research-reviewer-lite.md` | Verification reviewer — Haiku-class follow-up review | Step 10, Rounds 2–3 |
 | `readme-rewriter.md` | Outside-reader README rewriter — diagnoses and rewrites for external audiences | Step 13 |
 | `pipeline-reviewer.md` | Fidelity judgment gate for promoted Metaflow flows (5 intent-fidelity checks); reads source PoC + source-of-truth (HYPOTHESIS.md, README.md), does not run the flow | Promotion phase (after Gate 1, before the flow runs) — debate or ensemble |
+| `intent-monitor.md` | Pre-registration drift monitor — evaluates git changes in the experiment directory against binding constraints in a source-of-truth document; emits a clean-pass line or a structured conflict report | Via the `/intent-watch` skill: Gate 1 (before Step 6) and the Step 6 `/loop` drift watch |
 
 In **debate mode** (the default), `ml-critic` (Stage A.1) and `ml-defender` (Stage A.2) run once, followed by a convergence loop of `ml-critic-r2` (Stage B.1) and `ml-defender` (Stage B.2) up to max_rounds=4. In **ensemble mode** (opt-in), `ml-defender` and `ml-critic-r2` are not dispatched — three independent `ml-critic` dispatches with union pooling.
 
@@ -524,13 +526,13 @@ See [`experiments/self_debate_experiment_v2/README.md`](experiments/self_debate_
 
 Yes. ml-lab is a Claude Code plugin — it requires Claude Code to be installed. The plugin installs the `/ml-lab` skill and subagent definitions; Claude Code then makes them available for investigations.
 
-**Are all eight agent files required, or can I use a subset?**
+**Are all nine agent files required, or can I use a subset?**
 
-`ml-critic.md` is required for the core workflow. `ml-critic-r2.md` and `ml-defender.md` are only needed if you plan to use debate mode (the default) — they are not dispatched in ensemble mode. `research-reviewer.md` and `research-reviewer-lite.md` are only needed if you want the Step 10 peer review loop. `readme-rewriter.md` is only needed for the optional Step 13 README rewrite. `report-writer.md` is only needed for report generation (Steps 8, 11). `pipeline-reviewer.md` is only needed for the optional promotion phase (promoting a multi-cell investigation to a Metaflow flow via `/pipeline-init`) — it is not dispatched for basic single-cell investigations. The plugin installs all eight by default.
+`ml-critic.md` is required for the core workflow. `ml-critic-r2.md` and `ml-defender.md` are only needed if you plan to use debate mode (the default) — they are not dispatched in ensemble mode. `research-reviewer.md` and `research-reviewer-lite.md` are only needed if you want the Step 10 peer review loop. `readme-rewriter.md` is only needed for the optional Step 13 README rewrite. `report-writer.md` is only needed for report generation (Steps 8, 11). `pipeline-reviewer.md` is only needed for the optional promotion phase (promoting a multi-cell investigation to a Metaflow flow via `/pipeline-init`) — it is not dispatched for basic single-cell investigations. `intent-monitor.md` is only needed if you use the `/intent-watch` drift check (Gate 1 and the Step 6 loop). The plugin installs all nine by default.
 
 **Is manual installation equivalent to the plugin?**
 
-Yes — both install the same skill and eight agent files. The plugin method automates the install and surfaces updates when you run `/plugin marketplace update ml-lab`. Manual install gives you direct control but requires manual updates.
+Yes — both install the same skill and nine agent files. The plugin method automates the install and surfaces updates when you run `/plugin marketplace update ml-lab`. Manual install gives you direct control but requires manual updates.
 
 ---
 
@@ -630,7 +632,7 @@ This was a known limitation in v2 (all roles including scorer used Claude). Both
 | [`experiments/self_debate_experiment_v6/REPORT.md`](experiments/self_debate_experiment_v6/REPORT.md) | v6 full technical report — 120-case benchmark results |
 | [`experiments/self_debate_experiment_v6/plan/PLAN.md`](experiments/self_debate_experiment_v6/plan/PLAN.md) | v6 10-phase experimental design, reference documents |
 | [`experiments/self_debate_experiment_v2/TECHNICAL_REPORT.md`](experiments/self_debate_experiment_v2/TECHNICAL_REPORT.md) | **v2 technical report** — all v2 findings, decomposition, external validation, limitations |
-| [`plugins/ml-lab/`](plugins/ml-lab/) | Plugin source: `/ml-lab` skill, eight subagent definitions, install config, and flow diagram |
+| [`plugins/ml-lab/`](plugins/ml-lab/) | Plugin source: four skills (`/ml-lab`, `/intent-watch`, `/deep-dive`, `/pipeline-init`), nine subagent definitions, install config, and flow diagram |
 | [`multi-agent-prompt.md`](experiments/self_debate_experiment/multi-agent-prompt.md) | Bootstrap prompt for the full multi-agent harness (v1) |
 | [`experiments/self_debate_experiment/`](experiments/self_debate_experiment/) | Phase 1: frozen transcripts, contaminated + isolated protocol, 11–15 cases |
 | [`experiments/self_debate_experiment_v2/`](experiments/self_debate_experiment_v2/) | Phase 2: live API, isolated protocol, 20 cases, full results |
@@ -680,4 +682,4 @@ Four project-local slash commands (defined in [`.claude/skills/`](.claude/skills
 | `/preflight` | Pre-execution readiness check for any experiment version; verifies uv, PEP 723 headers, phase files, step-number consistency, agent installation, and script syntax; reports PASS/WARN/FAIL + READY/BLOCKED |
 | `/sync-ml-lab-docs` | Propagate ml-lab.md changes to downstream artifacts (ML\_LAB\_FLOW.md mermaid flowchart and README.md) |
 
-Plugin skills: [`/ml-lab`](#install) (investigation workflow — see Part 1) and [10 ml-journal skills](#ml-journal--session-audit-trail) (session audit trail — see above).
+Plugin skills: the ml-lab plugin ships four — [`/ml-lab`](#install) (investigation workflow — see Part 1), `/intent-watch` (pre-registration drift check at Gate 1 and the Step 6 loop), `/deep-dive` (generate a `DEEP_DIVE.md` technical reference for a completed investigation), and `/pipeline-init` (promote a multi-cell PoC onto a Metaflow+Hydra flow) — plus [10 ml-journal skills](#ml-journal--session-audit-trail) (session audit trail — see above).
