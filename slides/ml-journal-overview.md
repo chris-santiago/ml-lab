@@ -311,29 +311,18 @@ Proactive logging rules chain entry types together. Claude proposes each step at
 
 ---
 
-# Optional Hooks
+# Built-in Hooks
 
-Two hook scripts enable automatic checkpoint/resume without manual invocation.
+Two hooks enable automatic checkpoint/resume without manual invocation.
 
 | Hook | Script | Behavior |
 |------|--------|----------|
 | `PreCompact` | `journal-precompact.sh` | Auto-writes a checkpoint before `/compact` |
 | `SessionStart` | `journal-session-start.sh` | Injects latest checkpoint as session context |
 
-To enable, add to `.claude/settings.local.json` (per-machine, gitignored):
+The plugin registers both on install via `hooks/hooks.json`. Nothing to configure.
 
-```json
-{
-  "hooks": {
-    "PreCompact": [{ "type": "command",
-      "command": "bash plugins/ml-journal/journal-precompact.sh" }],
-    "SessionStart": [{ "type": "command",
-      "command": "bash plugins/ml-journal/journal-session-start.sh" }]
-  }
-}
-```
-
-Hooks are not registered by default — install only if your environment permits them.
+They exit silently in repos without a journal, so they only act after `/log-init`.
 
 ---
 

@@ -56,11 +56,11 @@ This command updates all artifacts, then runs a three-check coherence audit (con
 
 ## Journal — Consultation Before Planning
 
-Before drafting any non-trivial plan, query the journal:
-1. `python3 .project-log/journal_query.py --unresolved-issues` — surface active blockers
-2. `python3 .project-log/journal_query.py --list decision --since 7d` — surface recent decisions that constrain the approach
+Before drafting any non-trivial plan, consult the journal:
+1. `/log-list issue`: open (unresolved) issues, the active blockers
+2. `/log-list decision` for the last 7 days: recent decisions that constrain the approach
 
-When a plan step is informed by a journal entry, cite the short ID inline (e.g. `[→ issue 71af7634]`). A `decision` entry is a resolved constraint — retrieve full context before re-opening: `python3 .project-log/journal_query.py --entry <id>`.
+When a plan step is informed by a journal entry, cite the short ID inline (e.g. `[→ issue 71af7634]`). A `decision` entry is a resolved constraint, so read the full entry (`/log-list` with its ID) before re-opening it.
 
 ## Journal — Proactive Logging
 
@@ -91,6 +91,6 @@ The word **"commit"** means the **ml-journal `/log-commit` skill** — not bare 
 **Never switch branches without explicit user approval.** Always confirm the target branch and reason before running `git checkout` or `git switch`. This repo has multiple long-lived experiment branches with large output trees — an accidental switch can create confusing diffs or lose working state.
 
 ## Agent Sync
-Plugin cache is kept in sync automatically via a PostToolUse hook (`.claude/hooks/sync-plugin-cache.sh`). Any edit to `plugins/ml-lab/` or `plugins/ml-journal/` is rsynced to the versioned plugin cache immediately — no manual reinstall needed.
+Two machine-local PostToolUse hooks (registered in `.claude/settings.local.json`, scripts untracked) mirror every Edit/Write under `plugins/ml-lab/` or `plugins/ml-journal/`: `.claude/hooks/sync-plugin-cache.sh` to the installed plugin cache, and `.claude/hooks/sync-to-chris-code.sh` to the chris-code marketplace repo (`~/Dropbox/claude-config/plugins/`). Both use `rsync --checksum --delete`, so deletions propagate too; commit them in the chris-code repo along with changes. Edits made through Bash (`sed`, `git mv`) don't fire the hooks, so re-run them after such edits.
 
 

@@ -30,32 +30,17 @@ Per-machine settings, gitignored. Use for:
 
 ## Hooks
 
-Configure in `.claude/settings.local.json`:
+The ml-journal plugin registers its hooks itself in `plugins/ml-journal/hooks/hooks.json`, using `${CLAUDE_PLUGIN_ROOT}` so the paths resolve wherever the plugin is installed. This repo's development hooks (`sync-plugin-cache.sh` and `sync-to-chris-code.sh`) are machine-local: they are registered in the gitignored `.claude/settings.local.json`, and the scripts themselves are not tracked in git.
 
-```json
-{
-  "hooks": {
-    "PreCompact": [
-      {
-        "type": "command",
-        "command": "bash plugins/ml-journal/journal-precompact.sh"
-      }
-    ],
-    "SessionStart": [
-      {
-        "type": "command",
-        "command": "bash plugins/ml-journal/journal-session-start.sh"
-      }
-    ]
-  }
-}
-```
+| Hook | Script | Registered by | Behavior |
+|------|--------|---------------|----------|
+| `PreCompact` | `journal-precompact.sh` | ml-journal plugin | Auto-writes a checkpoint before `/compact` |
+| `SessionStart` | `journal-session-start.sh` | ml-journal plugin | Injects latest checkpoint as session context |
+| `PostToolUse` | `sync-plugin-cache.sh` | repo settings | Mirrors plugin edits to the installed plugin cache (`rsync --delete`) |
+| `PostToolUse` | `sync-to-chris-code.sh` | repo settings | Mirrors plugin edits to the chris-code marketplace repo (`rsync --delete`) |
 
-| Hook | Script | Behavior |
-|------|--------|----------|
-| `PreCompact` | `journal-precompact.sh` | Auto-writes a checkpoint before `/compact` |
-| `SessionStart` | `journal-session-start.sh` | Injects latest checkpoint as session context |
-| `PostToolUse` | `sync-plugin-cache.sh` | Rsyncs plugin edits to versioned cache |
+!!! warning
+    Do not also add the ml-journal hooks to `.claude/settings.local.json`. Plugin hooks run in addition to settings hooks, so a manual copy writes duplicate checkpoints.
 
 ## Plugin registration
 
@@ -81,9 +66,12 @@ plugins/
     ├── .claude-plugin/
     │   └── plugin.json
     ├── agents/
-    ├── skills/
-    ├── journal-precompact.sh
-    └── journal-session-start.sh
+    ├── hooks/
+    │   ├── hooks.json      # auto-registered on install
+    │   ├── journal-hook-lib.sh
+    │   ├── journal-precompact.sh
+    │   └── journal-session-start.sh
+    └── skills/
 
 UV.env                      # uv runtime env vars (gitignored)
 ```

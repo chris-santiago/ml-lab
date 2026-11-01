@@ -65,38 +65,22 @@ Run each of these to confirm everything is wired up:
 
 # uv can resolve PEP 723 scripts
 uv run --help
-
-# Journal scripts work
-python3 .project-log/journal_query.py --status
 ```
 
-You should see `/ml-lab` prompt for a hypothesis, `/log-status` show journal state, and the query script report entry counts.
+You should see `/ml-lab` prompt for a hypothesis and `/log-status` show journal state (it runs the plugin's query script, so this also confirms the scripts work).
 
-## Optional: configure hooks
+## Hooks
 
-ml-journal can auto-checkpoint before context compaction and auto-resume at session start. Add to `.claude/settings.local.json`:
-
-```json
-{
-  "hooks": {
-    "PreCompact": [
-      { "type": "command", "command": "bash plugins/ml-journal/journal-precompact.sh" }
-    ],
-    "SessionStart": [
-      { "type": "command", "command": "bash plugins/ml-journal/journal-session-start.sh" }
-    ]
-  }
-}
-```
+ml-journal auto-checkpoints before context compaction and auto-resumes at session start. The plugin registers both hooks on install (`plugins/ml-journal/hooks/hooks.json`), so there is nothing to configure. They stay inactive in any repo until you run `/log-init` there. If your organization blocks hooks, they won't run, but every skill still works: use `/checkpoint` before `/compact` and `/resume` at session start.
 
 !!! warning
-    Use `settings.local.json`, not `settings.json` — the local file is gitignored and won't leak API keys or per-machine hook paths.
+    If you previously added ml-journal hooks to `.claude/settings.local.json` by hand, remove them. Plugin hooks run in addition to settings hooks, so keeping both writes duplicate checkpoints.
 
 ## You have now...
 
 - Installed ml-lab and ml-journal as Claude Code plugins
 - Configured API keys for external LLM calls
 - Initialized the journal audit trail
-- Optionally set up auto-checkpoint/resume hooks
+- Picked up the auto-checkpoint/resume hooks that ship with ml-journal
 
 Next: [Worked Example: LLM Preambles](worked-example.md) — walk through a complete real-world investigation.

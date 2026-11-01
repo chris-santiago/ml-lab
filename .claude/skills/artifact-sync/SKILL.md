@@ -90,14 +90,12 @@ If a classification is uncertain, flag it and ask.
 
 ## Step 2 — Orient via Ground Truth
 
-Run all four queries. Use the results to understand what changed — do not start editing.
+Run all four queries. Use the results to understand what changed — do not start editing. Query the journal through the ml-journal skills: its scripts live only in the plugin, and nothing in `.project-log/` is code.
 
-```bash
-python3 .project-log/journal_query.py --unresolved-issues
-python3 .project-log/journal_query.py --list experiment --since 7d
-python3 .project-log/journal_query.py --list discovery --since 7d
-git log --oneline -10
-```
+1. `/log-list issue`: unresolved issues
+2. `/log-list experiment` for the last 7 days
+3. `/log-list discovery` for the last 7 days
+4. `git log --oneline -10`
 
 State explicitly:
 - **What changed** in this work session (new results, revised claims, resolved issues)

@@ -4,49 +4,59 @@ Scripts used by ml-lab and ml-journal. All are stdlib-only Python (no external d
 
 ## journal_log.py
 
-**Location:** `.project-log/journal_log.py` (installed by `/log-init`)
+**Location:** `plugins/ml-journal/skills/log-init/scripts/journal_log.py`. The ml-journal scripts live only in the plugin and are never copied into a repo; a repo holds data only (`.project-log/journal.jsonl`). Skills run them as `python3 -I "${CLAUDE_PLUGIN_ROOT}/skills/log-init/scripts/<script>"`.
 
-Entry writer. Validates fields against the type schema, constructs the envelope (`id`, `timestamp`, `type`, `project`, `session_id`), and appends a single JSON line to `journal.jsonl`.
+Entry writer. Validates fields against the type schema (rejecting fields not valid for the type), constructs the envelope (`id`, `timestamp`, `type`, `project`, `session_id`), and appends a single JSON line to `journal.jsonl`. Refuses a symlinked `.project-log/` or `journal.jsonl`.
 
-**Usage:** Called by ml-journal skills internally. Can also be invoked via `uv run log_entry.py` for ml-lab's investigation log.
+**Usage:** Called by ml-journal skills internally.
 
 !!! warning
-    Always use `uv run log_entry.py` or `/log-entry` for journal writes. Manual JSONL appends break schema validation and sequence monotonicity.
+    Use `/log-entry` (or another journal skill) for journal writes. Manual JSONL appends bypass schema validation. ml-lab's investigation log is separate: it uses `uv run log_entry.py`.
 
 ---
 
 ## journal_query.py
 
-**Location:** `.project-log/journal_query.py` (installed by `/log-init`)
+**Location:** `plugins/ml-journal/skills/log-init/scripts/journal_query.py`
 
-Read-only query interface for the journal.
+Read-only query interface for the journal. From a shell, set `Q` to the plugin's copy (the `installPath` for `ml-journal` in `~/.claude/plugins/installed_plugins.json`) and run it from anywhere inside the repo.
 
 **Operations:**
 
 ```bash
+Q="<installPath>/skills/log-init/scripts/journal_query.py"
+
 # Journal health overview
-python3 .project-log/journal_query.py --status
+python3 "$Q" --status
 
 # List entries by type (with optional time filter)
-python3 .project-log/journal_query.py --list <type> [--since <duration>]
+python3 "$Q" --list <type> [--since <duration>]
 
 # Unresolved issues
-python3 .project-log/journal_query.py --unresolved-issues
+python3 "$Q" --unresolved-issues
 
 # Resolved issues with linked resolutions
-python3 .project-log/journal_query.py --resolved-issues
+python3 "$Q" --resolved-issues
 
 # Recent entries (with optional time filter)
-python3 .project-log/journal_query.py --recent <N> [--since <duration>]
+python3 "$Q" --recent <N> [--since <duration>]
 
 # Lookup by ID prefix
-python3 .project-log/journal_query.py --entry <id_prefix>
+python3 "$Q" --entry <id_prefix>
 
 # Latest checkpoint
-python3 .project-log/journal_query.py --latest-checkpoint
+python3 "$Q" --latest-checkpoint
 ```
 
 **Time durations:** `7d` (days), `4h` (hours), `30m` (minutes).
+
+---
+
+## journal_setup.py
+
+**Location:** `plugins/ml-journal/skills/log-init/scripts/journal_setup.py`
+
+Used by `/log-init`. Subcommands: `inspect` (JSON report of journal state, legacy script copies, and managed `CLAUDE.md` sections), `init` (creates `.project-log/journal.jsonl` if absent, never truncates), `upgrade [--dry-run]` (removes script copies left by older versions and rewrites stale managed `CLAUDE.md` sections; never touches the journal), `add-sections [--dry-run]` (appends absent managed sections from `skills/log-init/assets/claude-md-sections.md`).
 
 ---
 
@@ -143,15 +153,15 @@ uv run determinism-check.py <run_a> <run_b> --contract order_independent
 
 ### journal-precompact.sh
 
-**Location:** `plugins/ml-journal/journal-precompact.sh`
+**Location:** `plugins/ml-journal/hooks/journal-precompact.sh`
 
-Auto-writes a checkpoint before `/compact` runs. Configure as a `PreCompact` hook.
+Auto-writes a checkpoint before `/compact` runs. Registered as a `PreCompact` hook by the plugin's `hooks/hooks.json`. Changed paths come from `git status --porcelain -z`, so renames record the new name and paths with spaces are kept whole.
 
 ### journal-session-start.sh
 
-**Location:** `plugins/ml-journal/journal-session-start.sh`
+**Location:** `plugins/ml-journal/hooks/journal-session-start.sh`
 
-Injects the latest checkpoint as session context at session start. Configure as a `SessionStart` hook.
+Injects the latest checkpoint as session context at session start. Registered as a `SessionStart` hook by the plugin's `hooks/hooks.json`. Emits `hookSpecificOutput.additionalContext`.
 
 ### sync-plugin-cache.sh
 
