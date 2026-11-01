@@ -667,7 +667,7 @@ This was a known limitation in v2 (all roles including scorer used Claude). Both
 /plugin install ml-journal@ml-lab
 ```
 
-**Agents (1):** `report-drafter` — dispatched by `/research-report` to handle full journal + git history ingestion in an isolated subcontext. Two hooks, registered automatically when the plugin is installed, add auto-checkpoint before `/compact` and auto-resume on session start. Where an organization blocks hooks they don't run, and the same steps work through `/checkpoint` and `/resume`. See the [plugin README](plugins/ml-journal/README.md) for setup, entry types, and hook details.
+**Agents (1):** `report-drafter` — dispatched by `/research-report` to handle full journal + git history ingestion in an isolated subcontext. Two hooks, registered automatically when the plugin is installed, add auto-checkpoint before `/compact` and auto-resume on session start (only for journals `/log-init` has trusted on this machine). Where an organization blocks hooks they don't run, and the same steps work through `/checkpoint` and `/resume`. See the [plugin README](plugins/ml-journal/README.md) for setup, entry types, and hook details.
 
 ---
 

@@ -35,7 +35,7 @@ The ml-journal plugin registers its hooks itself in `plugins/ml-journal/hooks/ho
 | Hook | Script | Registered by | Behavior |
 |------|--------|---------------|----------|
 | `PreCompact` | `journal-precompact.sh` | ml-journal plugin | Auto-writes a checkpoint before `/compact` |
-| `SessionStart` | `journal-session-start.sh` | ml-journal plugin | Injects latest checkpoint as session context |
+| `SessionStart` | `journal-session-start.sh` | ml-journal plugin | Injects the latest checkpoint as session context, in repos this machine trusts |
 | `PostToolUse` | `sync-plugin-cache.sh` | repo settings | Mirrors plugin edits to the installed plugin cache (`rsync --delete`) |
 | `PostToolUse` | `sync-to-chris-code.sh` | repo settings | Mirrors plugin edits to the chris-code marketplace repo (`rsync --delete`) |
 

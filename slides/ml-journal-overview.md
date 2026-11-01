@@ -318,11 +318,11 @@ Two hooks enable automatic checkpoint/resume without manual invocation.
 | Hook | Script | Behavior |
 |------|--------|----------|
 | `PreCompact` | `journal-precompact.sh` | Auto-writes a checkpoint before `/compact` |
-| `SessionStart` | `journal-session-start.sh` | Injects latest checkpoint as session context |
+| `SessionStart` | `journal-session-start.sh` | Injects latest checkpoint, in repos this machine trusts |
 
 The plugin registers both on install via `hooks/hooks.json`. Nothing to configure.
 
-They exit silently in repos without a journal, so they only act after `/log-init`.
+They exit silently in repos without a journal, so they only act after `/log-init`. Checkpoint text is repo content, so SessionStart loads it only from journals `/log-init` has trusted on this machine.
 
 ---
 

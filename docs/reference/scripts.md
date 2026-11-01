@@ -46,6 +46,9 @@ python3 "$Q" --entry <id_prefix>
 
 # Latest checkpoint
 python3 "$Q" --latest-checkpoint
+
+# Latest checkpoint, only if this machine trusts the journal (exit 3 and a notice otherwise)
+python3 "$Q" --latest-checkpoint --trusted-only --data-dir <plugin-data-dir>
 ```
 
 **Time durations:** `7d` (days), `4h` (hours), `30m` (minutes).
@@ -56,7 +59,7 @@ python3 "$Q" --latest-checkpoint
 
 **Location:** `plugins/ml-journal/skills/log-init/scripts/journal_setup.py`
 
-Used by `/log-init`. Subcommands: `inspect` (JSON report of journal state, legacy script copies, and managed `CLAUDE.md` sections), `init` (creates `.project-log/journal.jsonl` if absent, never truncates), `upgrade [--dry-run]` (removes script copies left by older versions and rewrites stale managed `CLAUDE.md` sections; never touches the journal), `add-sections [--dry-run]` (appends absent managed sections from `skills/log-init/assets/claude-md-sections.md`).
+Used by `/log-init`, with `--data-dir` naming the plugin data directory that holds the trust list. Subcommands: `inspect` (JSON report of journal state, whether it is trusted, legacy script copies, and managed `CLAUDE.md` sections), `init` (creates `.project-log/journal.jsonl` if absent, never truncates, and trusts a journal it created), `trust` (trusts an existing journal on this machine), `upgrade [--dry-run]` (removes script copies left by older versions and rewrites stale managed `CLAUDE.md` sections; never touches the journal), `add-sections [--dry-run]` (appends absent managed sections from `skills/log-init/assets/claude-md-sections.md`).
 
 ---
 
@@ -161,7 +164,7 @@ Auto-writes a checkpoint before `/compact` runs. Registered as a `PreCompact` ho
 
 **Location:** `plugins/ml-journal/hooks/journal-session-start.sh`
 
-Injects the latest checkpoint as session context at session start. Registered as a `SessionStart` hook by the plugin's `hooks/hooks.json`. Emits `hookSpecificOutput.additionalContext`.
+Injects the latest checkpoint as session context at session start, only for a journal this machine trusts; otherwise it emits a fixed notice with no checkpoint text. Registered as a `SessionStart` hook by the plugin's `hooks/hooks.json`. Emits `hookSpecificOutput.additionalContext`.
 
 ### sync-plugin-cache.sh
 

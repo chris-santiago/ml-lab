@@ -71,7 +71,7 @@ You should see `/ml-lab` prompt for a hypothesis and `/log-status` show journal 
 
 ## Hooks
 
-ml-journal auto-checkpoints before context compaction and auto-resumes at session start. The plugin registers both hooks on install (`plugins/ml-journal/hooks/hooks.json`), so there is nothing to configure. They stay inactive in any repo until you run `/log-init` there. If your organization blocks hooks, they won't run, but every skill still works: use `/checkpoint` before `/compact` and `/resume` at session start.
+ml-journal auto-checkpoints before context compaction and auto-resumes at session start. The plugin registers both hooks on install (`plugins/ml-journal/hooks/hooks.json`), so there is nothing to configure. They stay inactive in any repo until you run `/log-init` there, and SessionStart loads a checkpoint only from a journal `/log-init` has trusted on this machine (it trusts the journals it creates, and asks about existing ones). If your organization blocks hooks, they won't run, but every skill still works: use `/checkpoint` before `/compact` and `/resume` at session start.
 
 !!! warning
     If you previously added ml-journal hooks to `.claude/settings.local.json` by hand, remove them. Plugin hooks run in addition to settings hooks, so keeping both writes duplicate checkpoints.
