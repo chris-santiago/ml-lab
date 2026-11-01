@@ -28,13 +28,14 @@ import difflib
 import json
 import os
 import re
+import subprocess
 import sys
 
 # `python3 -I` drops the script directory from sys.path; add it back so the
 # plugin's own sibling module resolves. Nothing from the repo is imported.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from journal_common import (  # noqa: E402
-    is_trusted, journal_path, legacy_copies, log_dir, repo_root, trust_repo,
+    JOURNAL_NAME, LOG_DIR_NAME, is_trusted, journal_path, legacy_copies, log_dir, repo_root, trust_repo,
 )
 
 LEGACY_REF = re.compile(r"\.project-log/journal_\w+\.py")
@@ -197,6 +198,19 @@ def upgraded_lines(lines, template):
 # --- Commands -------------------------------------------------------------------
 
 
+def journal_in_history(root):
+    """True if any ref has ever tracked the journal, or if that can't be determined.
+
+    Such a journal can arrive with a checkout, so creating an empty one here is
+    not grounds for trusting the repo automatically.
+    """
+    result = subprocess.run(
+        ["git", "rev-list", "--all", "-1", "--", f"{LOG_DIR_NAME}/{JOURNAL_NAME}"],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    return result.returncode != 0 or bool(result.stdout.strip())
+
+
 def cmd_inspect(root, args):
     print(json.dumps(inspect_repo(root, args.data_dir), indent=2, ensure_ascii=False))
 
@@ -210,7 +224,9 @@ def cmd_init(root, args):
     print(f"{'exists' if existed else 'created'} {os.path.relpath(journal, root)}")
     if existed:
         return  # an existing journal may be someone else's; trusting it is an explicit act
-    if args.data_dir:
+    if journal_in_history(root):
+        print("not trusted: this repo's git history already has a journal, so trusting it is a separate step")
+    elif args.data_dir:
         trust_repo(root, args.data_dir)
         print("trusted: this repo's journal is trusted on this machine; checkpoints load at session start")
     else:

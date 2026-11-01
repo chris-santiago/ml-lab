@@ -39,13 +39,13 @@ python3 -I "${CLAUDE_PLUGIN_ROOT}/skills/log-init/scripts/journal_query.py" --st
 
 If any command fails, show the error and stop.
 
-`SETUP init` also trusts the new journal on this machine, since the user just created it. Relay its output.
+`SETUP init` also trusts the new journal on this machine, since the user just created it, unless the repo's git history already has a journal (one could arrive with a checkout). Relay its output.
 
 ## Step 4: Trust an existing journal
 
-Skip if the journal was just created in Step 3, or if `trusted` is true.
+Skip if `trusted` is true, or if `SETUP init` printed `trusted:` in Step 3.
 
-The journal already existed (for example, a cloned repo, a new machine, or a repo set up before trust was added). Explain in one line that checkpoint text comes from the repo, so only trust journals written by the user or people they trust. Ask:
+The journal already existed, or exists in the repo's git history (for example, a cloned repo, a new machine, or a repo set up before trust was added). Explain in one line that checkpoint text comes from the repo, so only trust journals written by the user or people they trust. Ask:
 ```
 ► Trust this repo's journal on this machine? Its latest checkpoint will then load automatically at session start. (y/n)
 ```

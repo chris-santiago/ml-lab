@@ -429,9 +429,9 @@ The hooks fire in every repo the plugin is enabled for, so they treat the workin
 
 ### Trust
 
-The trust list is `trusted-repos.json` in the plugin's data directory (`${CLAUDE_PLUGIN_DATA}`, i.e. `~/.claude/plugins/data/<plugin>-<marketplace>/`): outside every repo, kept across plugin updates, deleted on uninstall. Hooks receive the directory as `$CLAUDE_PLUGIN_DATA`; skills pass it as `--data-dir "${CLAUDE_PLUGIN_DATA}"`, because it is substituted into skill text but not exported to the Bash tool. Entries are keyed by the realpath of `git rev-parse --git-common-dir`, so worktrees of a trusted repo share its trust.
+The trust list is `trusted-repos.json` in the plugin's data directory (`${CLAUDE_PLUGIN_DATA}`, i.e. `~/.claude/plugins/data/<plugin>-<marketplace>/`): outside every repo, kept across plugin updates, deleted on uninstall. Hooks receive the directory as `$CLAUDE_PLUGIN_DATA`; skills pass it as `--data-dir "${CLAUDE_PLUGIN_DATA}"`, because it is substituted into skill text but not exported to the Bash tool. Entries are keyed by the realpath of `git rev-parse --git-common-dir`, so worktrees of a trusted repo share its trust. A directory counts as trusted only if it is also one of that common dir's registered worktrees (`git worktree list`), so a tree whose `.git` file points at a trusted repo's git dir does not inherit its trust.
 
-- Granted only by `/log-init`: automatically when `init` creates the journal, after a confirmation for a journal that already existed.
+- Granted only by `/log-init`: automatically when `init` creates the journal and no ref has ever tracked one, after a confirmation otherwise (an existing journal, or one in git history that a checkout would bring in).
 - Fails closed: no data directory, a missing or malformed store, or an uninstall all mean untrusted. `trust` refuses to overwrite a malformed store.
 - `journal_query.py --latest-checkpoint --trusted-only` prints a fixed notice instead of the checkpoint and exits 3 when the repo is untrusted (and prints the usual "No checkpoint found" line, exit 0, when there is no checkpoint). Other queries are explicit user reads and are not gated.
 - A second install identity of the plugin (e.g. a `--plugin-dir` load) has its own data directory and so its own list.

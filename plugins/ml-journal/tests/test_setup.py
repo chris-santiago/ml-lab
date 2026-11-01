@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import SCRIPTS_DIR, run_script
+from conftest import SCRIPTS_DIR, git, run_script
 
 SETUP = SCRIPTS_DIR / "journal_setup.py"
 TEMPLATE = SCRIPTS_DIR.parent / "assets" / "claude-md-sections.md"
@@ -355,6 +355,33 @@ def test_init_existing_journal_does_not_trust(journal_repo: Path, plugin_data: P
     assert result.returncode == 0, result.stderr
     assert not (plugin_data / "trusted-repos.json").exists()
     assert not _is_trusted(journal_repo, plugin_data)
+
+
+def test_init_does_not_auto_trust_when_history_has_a_journal(repo: Path, plugin_data: Path) -> None:
+    """A journal on another branch would arrive with a checkout, so trust must be asked for, not implied."""
+    git(repo, "switch", "-q", "-c", "other")
+    (repo / ".project-log").mkdir()
+    (repo / ".project-log" / "journal.jsonl").write_text("{}\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "journal on another branch")
+    git(repo, "switch", "-q", "main")
+    assert not (repo / ".project-log").exists()
+    result = _setup(repo, "--data-dir", str(plugin_data), "init")
+    assert result.returncode == 0, result.stderr
+    assert "created" in result.stdout and "not trusted" in result.stdout
+    assert not _is_trusted(repo, plugin_data)
+
+
+def test_trust_refuses_borrowed_git_dir(journal_repo: Path, plugin_data: Path, tmp_path: Path) -> None:
+    """Trusting a tree whose .git file points at another repo's git dir would record that repo's key."""
+    hostile = tmp_path / "hostile"
+    (hostile / ".project-log").mkdir(parents=True)
+    (hostile / ".project-log" / "journal.jsonl").write_text("")
+    (hostile / ".git").write_text(f"gitdir: {journal_repo / '.git'}\n")
+    result = _setup(hostile, "--data-dir", str(plugin_data), "trust")
+    assert result.returncode != 0
+    assert "not a registered worktree" in result.stderr
+    assert not (plugin_data / "trusted-repos.json").exists()
 
 
 def test_init_without_data_dir_creates_but_does_not_trust(repo: Path) -> None:

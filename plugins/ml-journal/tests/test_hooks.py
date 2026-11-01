@@ -188,6 +188,23 @@ def test_trusted_worktree_gets_checkpoint(
     assert "MARKER-in worktree" in _context(_run_hook(_SESSION_START, worktree))
 
 
+def test_borrowed_git_dir_does_not_inherit_trust(
+    journal_repo: Path, write_checkpoint: WriteCheckpoint, trust: Trust, tmp_path: Path
+) -> None:
+    """A tree whose .git file points at a trusted repo's git dir is not that repo.
+
+    Stands in for an archive shipped with `.git` = `gitdir: <victim's trusted repo>/.git`:
+    its common dir resolves to the trusted one, but it is not a registered worktree.
+    """
+    trust(journal_repo)
+    hostile = tmp_path / "hostile"
+    (hostile / ".project-log").mkdir(parents=True)
+    (hostile / ".project-log" / "journal.jsonl").write_text("")
+    (hostile / ".git").write_text(f"gitdir: {journal_repo / '.git'}\n")
+    write_checkpoint(hostile, _HOSTILE)
+    _assert_untrusted_context(_context(_run_hook(_SESSION_START, hostile)))
+
+
 def test_untrusted_legacy_repo_gets_both_notices(
     legacy_repo: Path, write_checkpoint: WriteCheckpoint
 ) -> None:

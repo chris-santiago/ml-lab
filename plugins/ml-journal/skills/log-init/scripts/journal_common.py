@@ -92,6 +92,27 @@ def trust_key(root):
     return os.path.realpath(os.path.join(root, common))
 
 
+def registered_worktrees(common_dir):
+    """Real paths of the worktrees git has registered for common_dir; empty on any error.
+
+    A directory whose .git file points at another repo's git dir resolves to that
+    repo's common dir but is not one of its worktrees, so it must not share its trust.
+    """
+    try:
+        out = subprocess.check_output(
+            ["git", "--git-dir", common_dir, "worktree", "list", "--porcelain", "-z"],
+            stderr=subprocess.DEVNULL,
+        ).decode()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return set()
+    prefix = "worktree "
+    return {os.path.realpath(f[len(prefix):]) for f in out.split("\0") if f.startswith(prefix)}
+
+
+def _is_own_worktree(root, key):
+    return os.path.realpath(root) in registered_worktrees(key)
+
+
 def trust_store_path(data_dir):
     return os.path.join(data_dir, TRUST_STORE_NAME)
 
@@ -112,11 +133,15 @@ def _load_store(data_dir):
 
 
 def is_trusted(root, data_dir):
-    """True only if data_dir holds a well-formed store listing this repo. Never raises for a bad store."""
+    """True only if data_dir holds a well-formed store listing this repo, and root is
+    a registered worktree of it. Never raises for a bad store."""
     if not data_dir:
         return False
     repos = _load_store(data_dir)
-    return bool(repos) and trust_key(root) in repos
+    if not repos:
+        return False
+    key = trust_key(root)
+    return key in repos and _is_own_worktree(root, key)
 
 
 def trust_repo(root, data_dir):
@@ -130,6 +155,8 @@ def trust_repo(root, data_dir):
             "Refusing to overwrite it."
         )
     key = trust_key(root)
+    if not _is_own_worktree(root, key):
+        sys.exit(f"ERROR: {root} is not a registered worktree of its git dir {key}; refusing to trust it.")
     if key in repos:
         return False
     repos[key] = {"trusted_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "worktree": root}
