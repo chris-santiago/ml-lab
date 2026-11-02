@@ -29,19 +29,19 @@ This loads the most recent checkpoint into context. Claude picks up where you le
 
 ## Automate with hooks
 
-The ml-journal plugin registers two hooks automatically when it is installed (`plugins/ml-journal/hooks/hooks.json`). No settings changes are needed:
+The ml-journal plugin registers two hooks automatically when it is installed (`plugins/ml-journal/hooks/hooks.json`), so no settings changes are needed. A skills-only install registers them in `~/.claude/settings.json` from `journal_setup.py hook-config`, as `/log-init` offers:
 
 - **PreCompact** auto-writes a checkpoint before `/compact` runs
 - **SessionStart** auto-injects the latest checkpoint at session start, in repos whose journal this machine trusts
 
 Both hooks exit silently in repos without `.project-log/journal.jsonl`, so they only act once you have run `/log-init`.
 
-Checkpoint text comes from the repo, so SessionStart only loads it from a journal this machine trusts. `/log-init` trusts a journal it creates and asks before trusting an existing one (a cloned repo, a new machine, or a repo set up before version 0.5). In an untrusted repo the hook shows a short notice instead, and `/resume` asks before showing the checkpoint. Run `/log-init` once in such a repo to trust it.
+Checkpoint text comes from the repo, so SessionStart only loads it from a journal this machine trusts. `/log-init` trusts a journal it creates and asks before trusting an existing one (a cloned repo, a new machine, a repo set up before version 0.5, or one trusted under 0.5, which kept trust in the plugin data directory). In an untrusted repo the hook shows a short notice instead, and `/resume` asks before showing the checkpoint. Run `/log-init` once in such a repo to trust it.
 
 If your organization blocks hooks (`disableAllHooks`, or the managed `allowManagedHooksOnly`), the hooks don't run. Checkpoint and resume still work through the skills: run `/checkpoint` before `/compact` and `/resume` at session start.
 
 !!! warning
-    If you previously added ml-journal hooks to `.claude/settings.local.json` by hand, remove them. Plugin hooks run in addition to settings hooks, so keeping both writes duplicate checkpoints.
+    If you added ml-journal hooks to a settings file by hand (in an older setup, or from `hook-config` for a skills-only install), remove them when you install the plugin. Plugin hooks run in addition to settings hooks, so keeping both writes duplicate checkpoints. `/log-init` warns when it finds both.
 
 ## Tips
 

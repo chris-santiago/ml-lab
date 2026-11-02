@@ -4,7 +4,7 @@ Scripts used by ml-lab and ml-journal. All are stdlib-only Python (no external d
 
 ## journal_log.py
 
-**Location:** `plugins/ml-journal/skills/log-init/scripts/journal_log.py`. The ml-journal scripts live only in the plugin and are never copied into a repo; a repo holds data only (`.project-log/journal.jsonl`). Skills run them as `python3 -I "${CLAUDE_PLUGIN_ROOT}/skills/log-init/scripts/<script>"`.
+**Location:** `plugins/ml-journal/skills/log-init/scripts/journal_log.py`. The ml-journal scripts live only in the installed skills and are never copied into a repo; a repo holds data only (`.project-log/journal.jsonl`). Skills run them as `python3 -I "${CLAUDE_SKILL_DIR}/../log-init/scripts/<script>"` (`${CLAUDE_SKILL_DIR}/scripts/` from `/log-init`), which works for plugin and skills-only installs.
 
 Entry writer. Validates fields against the type schema (rejecting fields not valid for the type), constructs the envelope (`id`, `timestamp`, `type`, `project`, `session_id`), and appends a single JSON line to `journal.jsonl`. Refuses a symlinked `.project-log/` or `journal.jsonl`.
 
@@ -19,7 +19,7 @@ Entry writer. Validates fields against the type schema (rejecting fields not val
 
 **Location:** `plugins/ml-journal/skills/log-init/scripts/journal_query.py`
 
-Read-only query interface for the journal. From a shell, set `Q` to the plugin's copy (the `installPath` for `ml-journal` in `~/.claude/plugins/installed_plugins.json`) and run it from anywhere inside the repo.
+Read-only query interface for the journal. From a shell, set `Q` to the installed copy (for a plugin, under the `installPath` for `ml-journal` in `~/.claude/plugins/installed_plugins.json`; for a skills-only install, `~/.claude/skills/log-init/scripts/journal_query.py`) and run it from anywhere inside the repo.
 
 **Operations:**
 
@@ -48,7 +48,7 @@ python3 "$Q" --entry <id_prefix>
 python3 "$Q" --latest-checkpoint
 
 # Latest checkpoint, only if this machine trusts the journal (exit 3 and a notice otherwise)
-python3 "$Q" --latest-checkpoint --trusted-only --data-dir <plugin-data-dir>
+python3 "$Q" --latest-checkpoint --trusted-only
 ```
 
 **Time durations:** `7d` (days), `4h` (hours), `30m` (minutes).
@@ -59,7 +59,7 @@ python3 "$Q" --latest-checkpoint --trusted-only --data-dir <plugin-data-dir>
 
 **Location:** `plugins/ml-journal/skills/log-init/scripts/journal_setup.py`
 
-Used by `/log-init`, with `--data-dir` naming the plugin data directory that holds the trust list. Subcommands: `inspect` (JSON report of journal state, whether it is trusted, legacy script copies, and managed `CLAUDE.md` sections), `init` (creates `.project-log/journal.jsonl` if absent, never truncates, and trusts a journal it created), `trust` (trusts an existing journal on this machine), `upgrade [--dry-run]` (removes script copies left by older versions and rewrites stale managed `CLAUDE.md` sections; never touches the journal), `add-sections [--dry-run]` (appends absent managed sections from `skills/log-init/assets/claude-md-sections.md`).
+Used by `/log-init`. The trust list is `~/.local/share/ml-journal/trusted-repos.json` (`$XDG_DATA_HOME/ml-journal/` instead when `XDG_DATA_HOME` is an absolute path), shared by plugin and skills-only installs; `--data-dir` overrides it. Subcommands: `inspect [--plugin-root R]` (JSON report of journal state, whether it is trusted, legacy script copies, managed `CLAUDE.md` sections, and how the hooks are registered: `hooks.plugin` from a non-empty plugin root, `hooks.settings` listing settings files that name the hook), `init` (creates `.project-log/journal.jsonl` if absent, never truncates, and trusts a journal it created), `trust` (trusts an existing journal on this machine), `upgrade [--dry-run]` (removes script copies left by older versions and rewrites stale managed `CLAUDE.md` sections; never touches the journal), `add-sections [--dry-run]` (appends absent managed sections from `skills/log-init/assets/claude-md-sections.md`), `hook-config` (prints the `settings.json` hooks block for a skills-only install, with absolute paths to this copy's hook scripts; needs no repo).
 
 ---
 
@@ -156,15 +156,15 @@ uv run determinism-check.py <run_a> <run_b> --contract order_independent
 
 ### journal-precompact.sh
 
-**Location:** `plugins/ml-journal/hooks/journal-precompact.sh`
+**Location:** `plugins/ml-journal/skills/log-init/hooks/journal-precompact.sh`
 
-Auto-writes a checkpoint before `/compact` runs. Registered as a `PreCompact` hook by the plugin's `hooks/hooks.json`. Changed paths come from `git status --porcelain -z`, so renames record the new name and paths with spaces are kept whole.
+Auto-writes a checkpoint before `/compact` runs. Registered as a `PreCompact` hook by the plugin's `hooks/hooks.json`, or by hand from `journal_setup.py hook-config` in a skills-only install. Changed paths come from `git status --porcelain -z`, so renames record the new name and paths with spaces are kept whole.
 
 ### journal-session-start.sh
 
-**Location:** `plugins/ml-journal/hooks/journal-session-start.sh`
+**Location:** `plugins/ml-journal/skills/log-init/hooks/journal-session-start.sh`
 
-Injects the latest checkpoint as session context at session start, only for a journal this machine trusts; otherwise it emits a fixed notice with no checkpoint text. Registered as a `SessionStart` hook by the plugin's `hooks/hooks.json`. Emits `hookSpecificOutput.additionalContext`.
+Injects the latest checkpoint as session context at session start, only for a journal this machine trusts; otherwise it emits a fixed notice with no checkpoint text. Registered as a `SessionStart` hook the same way. Emits `hookSpecificOutput.additionalContext`.
 
 ### sync-plugin-cache.sh
 

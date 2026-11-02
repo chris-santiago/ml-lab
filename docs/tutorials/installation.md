@@ -32,7 +32,9 @@ Then initialize the journal in your repo:
 /log-init
 ```
 
-This creates `.project-log/` at the repo root with `journal.jsonl`, `journal_log.py`, and `journal_query.py`.
+This creates `.project-log/journal.jsonl` at the repo root. The repo holds data only; the journal scripts run from the installed skills.
+
+If your organization blocks plugin installs but allows skills, copy the skill folders instead: see "Without the plugin system" in `plugins/ml-journal/README.md`.
 
 ## Set up environment variables
 
@@ -67,14 +69,14 @@ Run each of these to confirm everything is wired up:
 uv run --help
 ```
 
-You should see `/ml-lab` prompt for a hypothesis and `/log-status` show journal state (it runs the plugin's query script, so this also confirms the scripts work).
+You should see `/ml-lab` prompt for a hypothesis and `/log-status` show journal state (it runs the installed query script, so this also confirms the scripts work).
 
 ## Hooks
 
-ml-journal auto-checkpoints before context compaction and auto-resumes at session start. The plugin registers both hooks on install (`plugins/ml-journal/hooks/hooks.json`), so there is nothing to configure. They stay inactive in any repo until you run `/log-init` there, and SessionStart loads a checkpoint only from a journal `/log-init` has trusted on this machine (it trusts the journals it creates, and asks about existing ones). If your organization blocks hooks, they won't run, but every skill still works: use `/checkpoint` before `/compact` and `/resume` at session start.
+ml-journal auto-checkpoints before context compaction and auto-resumes at session start. The plugin registers both hooks on install (`plugins/ml-journal/hooks/hooks.json`), so there is nothing to configure. A skills-only install registers them by hand from `journal_setup.py hook-config`. They stay inactive in any repo until you run `/log-init` there, and SessionStart loads a checkpoint only from a journal `/log-init` has trusted on this machine (it trusts the journals it creates, and asks about existing ones). If your organization blocks hooks, they won't run, but every skill still works: use `/checkpoint` before `/compact` and `/resume` at session start.
 
 !!! warning
-    If you previously added ml-journal hooks to `.claude/settings.local.json` by hand, remove them. Plugin hooks run in addition to settings hooks, so keeping both writes duplicate checkpoints.
+    If you added ml-journal hooks to a settings file by hand (in an older setup, or from `hook-config` for a skills-only install), remove them when you install the plugin. Plugin hooks run in addition to settings hooks, so keeping both writes duplicate checkpoints. `/log-init` warns when it finds both.
 
 ## You have now...
 

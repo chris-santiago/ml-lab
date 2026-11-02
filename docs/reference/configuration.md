@@ -30,17 +30,17 @@ Per-machine settings, gitignored. Use for:
 
 ## Hooks
 
-The ml-journal plugin registers its hooks itself in `plugins/ml-journal/hooks/hooks.json`, using `${CLAUDE_PLUGIN_ROOT}` so the paths resolve wherever the plugin is installed. This repo's development hooks (`sync-plugin-cache.sh` and `sync-to-chris-code.sh`) are machine-local: they are registered in the gitignored `.claude/settings.local.json`, and the scripts themselves are not tracked in git.
+The ml-journal plugin registers its hooks itself in `plugins/ml-journal/hooks/hooks.json`, using `${CLAUDE_PLUGIN_ROOT}` so the paths resolve wherever the plugin is installed. The scripts live in `skills/log-init/hooks/`; a skills-only install (no plugin system) registers them in `~/.claude/settings.json` from `journal_setup.py hook-config` instead. This repo's development hooks (`sync-plugin-cache.sh` and `sync-to-chris-code.sh`) are machine-local: they are registered in the gitignored `.claude/settings.local.json`, and the scripts themselves are not tracked in git.
 
 | Hook | Script | Registered by | Behavior |
 |------|--------|---------------|----------|
-| `PreCompact` | `journal-precompact.sh` | ml-journal plugin | Auto-writes a checkpoint before `/compact` |
-| `SessionStart` | `journal-session-start.sh` | ml-journal plugin | Injects the latest checkpoint as session context, in repos this machine trusts |
+| `PreCompact` | `journal-precompact.sh` | ml-journal plugin (skills-only: `~/.claude/settings.json`) | Auto-writes a checkpoint before `/compact` |
+| `SessionStart` | `journal-session-start.sh` | ml-journal plugin (skills-only: `~/.claude/settings.json`) | Injects the latest checkpoint as session context, in repos this machine trusts |
 | `PostToolUse` | `sync-plugin-cache.sh` | repo settings | Mirrors plugin edits to the installed plugin cache (`rsync --delete`) |
 | `PostToolUse` | `sync-to-chris-code.sh` | repo settings | Mirrors plugin edits to the chris-code marketplace repo (`rsync --delete`) |
 
 !!! warning
-    Do not also add the ml-journal hooks to `.claude/settings.local.json`. Plugin hooks run in addition to settings hooks, so a manual copy writes duplicate checkpoints.
+    With the plugin installed, do not also add the ml-journal hooks to a settings file. Plugin hooks run in addition to settings hooks, so a manual copy writes duplicate checkpoints. `/log-init` warns when it finds both.
 
 ## Plugin registration
 
@@ -67,11 +67,11 @@ plugins/
     │   └── plugin.json
     ├── agents/
     ├── hooks/
-    │   ├── hooks.json      # auto-registered on install
-    │   ├── journal-hook-lib.sh
-    │   ├── journal-precompact.sh
-    │   └── journal-session-start.sh
+    │   └── hooks.json      # auto-registered on install
     └── skills/
+        └── log-init/
+            ├── hooks/      # journal-hook-lib.sh, journal-precompact.sh, journal-session-start.sh
+            └── scripts/    # journal_*.py, run by every skill and hook
 
 UV.env                      # uv runtime env vars (gitignored)
 ```

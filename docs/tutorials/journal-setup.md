@@ -19,10 +19,10 @@ This creates:
 
 ```
 .project-log/
-├── journal.jsonl       # append-only log (starts with a verification entry)
-├── journal_log.py      # write script (used by skills internally)
-└── journal_query.py    # query script (usable from the command line)
+└── journal.jsonl       # append-only log (starts with a verification entry)
 ```
+
+The repo holds data only. The scripts that read and write the journal run from the installed ml-journal skills, never from the repo.
 
 Verify it worked:
 
@@ -97,7 +97,7 @@ This stages your changes, creates a commit, and writes a `git` journal entry wit
 
 ## You have now...
 
-- Initialized `.project-log/` with the journal and query scripts
+- Initialized `.project-log/journal.jsonl`
 - Logged a decision entry with `/log-entry`
 - Saved session state with `/checkpoint`
 - Learned the `/resume` and `/log-commit` workflow

@@ -16,7 +16,7 @@ To list entries by type:
 
 ## Using the CLI directly
 
-The query script lives only in the installed plugin; repos hold journal data, not code. Set `Q` to the plugin's copy, using the `installPath` for `ml-journal` in `~/.claude/plugins/installed_plugins.json`, then run it from anywhere inside the repo:
+The query script lives only in the installed skills; repos hold journal data, not code. Set `Q` to the installed copy: for a plugin, use the `installPath` for `ml-journal` in `~/.claude/plugins/installed_plugins.json`; for a skills-only install, use `~/.claude/skills/log-init/scripts/journal_query.py`. Then run it from anywhere inside the repo:
 
 ```bash
 Q="<installPath>/skills/log-init/scripts/journal_query.py"

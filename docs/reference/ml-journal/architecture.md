@@ -26,7 +26,7 @@ Two stdlib-only Python scripts handle validation and serialization:
 - **`journal_log.py`** — validates fields, constructs the envelope (`id`, `timestamp`, `type`, `project`, `session_id`), appends to `journal.jsonl`
 - **`journal_query.py`** — read operations: status, list, filter, search
 
-The scripts are installed into `.project-log/` by `/log-init` and can be invoked directly from the command line.
+The scripts live in the installed skills (`skills/log-init/scripts/`), never in the repo, and can be invoked directly from the command line (see [Scripts](../scripts.md)).
 
 ## Storage
 
